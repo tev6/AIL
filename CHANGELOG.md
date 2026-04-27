@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.7 — 2026-04-27 (인라인 fenced placeholder 누출 fix)
+
+hyun06000 field test: 채팅 메시지에 "�FENCED0�" 같은 텍스트가
+보임 (코드블록 자리). LLM이 ```...``` 블록 앞뒤에 빈 줄 없이 산문
+중간에 끼워 넣을 때, renderMarkdown의 fenced placeholder
+(`\\x00FENCED0\\x00`)가 paragraph 블록 안에 갇혀 그대로 inlineRender로
+전달 → 브라우저가 null 바이트를 U+FFFD로 표시.
+
+수정: rendered 블록 합친 뒤 final pass로 남은 placeholder를 fenced
+HTML로 일괄 복원. 인라인 위치라도 `<pre>` 블록이 paragraph를 자동
+닫으며 정상 노출.
+
+---
+
 ## v1.64.6 — 2026-04-27 (이미지 드롭 시 채팅창 쪼그라짐 fix)
 
 hyun06000 field test: 이미지를 채팅창에 드래그-드롭하면 채팅창이
