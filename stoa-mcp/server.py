@@ -208,15 +208,34 @@ async def stoa_unsubscribe(ctx: Context) -> str:
     return json.dumps({"ok": True, "was_subscribed": removed is not None})
 
 
+async def _send_claude_channel(session, content: str, meta: dict) -> None:
+    """Push a `notifications/claude/channel` directly into the session's
+    write stream. Claude Code wraps these in a `<channel>` tag and
+    injects them into the model's context — this is the mechanism that
+    actually wakes an idle agent loop. Standard `notifications/message`
+    is silent (debug log only), so we bypass `session.send_notification`
+    (which only takes typed ServerNotificationType) and write the
+    JSON-RPC notification directly."""
+    from mcp.types import JSONRPCNotification, JSONRPCMessage
+    from mcp.shared.session import SessionMessage
+    notif = JSONRPCNotification(
+        jsonrpc="2.0",
+        method="notifications/claude/channel",
+        params={"content": content, "meta": meta},
+    )
+    msg = SessionMessage(message=JSONRPCMessage(notif))
+    await session._write_stream.send(msg)
+
+
 async def _channel_poller():
     """Background loop. Every _poll_interval_s, fetch new messages for
-    each subscribed agent and push them via that session's
-    send_log_message. Dead sessions (push fails) are pruned."""
+    each subscribed agent and push as `notifications/claude/channel` so
+    Claude Code wakes the model with the letter content. Dead sessions
+    (push fails) are pruned."""
     logger.info("[stoa-channel] poller started, interval=%.1fs", _poll_interval_s)
     async with httpx.AsyncClient(timeout=10) as client:
         while True:
             try:
-                # Snapshot to allow mutation during iteration
                 items = list(_subscriptions.items())
                 for sid, sub in items:
                     agent = sub["agent"]
@@ -233,16 +252,17 @@ async def _channel_poller():
                         msgs = body.get("messages", [])
                         if not msgs:
                             continue
-                        # Stoa returns newest-first; deliver oldest-first
-                        # so notifications arrive in causal order.
                         for m in reversed(msgs):
-                            text = _format_letter(m)
+                            content = _format_letter(m)
+                            meta = {
+                                "source": "stoa",
+                                "agent": agent,
+                                "msg_id": m.get("id", ""),
+                                "from": m.get("from", ""),
+                            }
                             try:
-                                await sub["session"].send_log_message(
-                                    level="info",
-                                    data=text,
-                                    logger="stoa",
-                                )
+                                await _send_claude_channel(
+                                    sub["session"], content, meta)
                             except Exception as e:
                                 logger.warning(
                                     "[stoa-channel] push failed for %s: %s — pruning",
