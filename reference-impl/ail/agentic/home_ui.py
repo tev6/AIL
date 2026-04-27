@@ -209,15 +209,19 @@ def _make_app(start_root: Path):
             return jsonify({"error": "not a directory"}), 400
         if not (target / "INTENT.md").exists():
             return jsonify({"error": "not a polis (no INTENT.md)"}), 400
-        log_path = _spawn_log_path("up", port)
+        # `ail edit` launches the authoring chat UI on an existing
+        # polis (same surface as `ail init` for new ones). `ail up` was
+        # the wrong call here — it serves the deployed app and the user
+        # loses the edit surface (field test 2026-04-27).
+        log_path = _spawn_log_path("edit", port)
         try:
             with open(log_path, "wb") as logf:
                 proc = subprocess.Popen(
-                    [sys.executable, "-m", "ail", "up", str(target),
-                     "--port", str(port)],
+                    [sys.executable, "-m", "ail", "edit", str(target),
+                     "--port", str(port), "--no-open"],
                     stdout=logf, stderr=subprocess.STDOUT,
                 )
-            _register_spawned(proc, port, "up")
+            _register_spawned(proc, port, "edit")
         except Exception as e:
             return jsonify({"error": f"spawn failed: {type(e).__name__}: {e}"}), 500
         return jsonify({
@@ -275,6 +279,22 @@ def _make_app(start_root: Path):
         # Tail to keep response small
         tail = data[-4000:] if len(data) > 4000 else data
         return jsonify({"tail": tail, "size": len(data)})
+
+    @app.route("/admin/stop", methods=["POST"])
+    def admin_stop():
+        """Terminate the home server itself. Called via sendBeacon when
+        the user closes the browser tab — non-developer mental model is
+        'closing the browser closes everything'. atexit reaper then
+        SIGTERMs spawned children, so no zombies remain."""
+        import threading, os as _os, signal as _signal, time as _time
+        def _suicide():
+            _time.sleep(0.2)
+            try:
+                _os.kill(_os.getpid(), _signal.SIGTERM)
+            except OSError:
+                pass
+        threading.Thread(target=_suicide, daemon=True).start()
+        return jsonify({"ok": True})
 
     @app.route("/env-status")
     def env_status():
@@ -451,6 +471,29 @@ function showStatus(kind, msg, asHTML=false) {
   if (asHTML) statusEl.innerHTML = msg; else statusEl.textContent = msg;
 }
 
+// window.open after an await/setTimeout loses the user-gesture token,
+// so Chrome/Safari may block it as a popup. Detect (return value null
+// or .closed immediately) and fall back to an explicit clickable link
+// + a gentle nudge to allow popups for this origin.
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function openTab(url) {
+  let win = null;
+  try { win = window.open(url, '_blank'); } catch (e) { win = null; }
+  if (!win || win.closed || typeof win.closed === 'undefined') {
+    const safe = escapeHtml(url);
+    showStatus('err',
+      '🛈 브라우저가 새 탭을 막았어요 (popup blocker). ' +
+      '주소창 오른쪽 차단 아이콘에서 이 사이트의 팝업을 허용해 주세요.<br><br>' +
+      '지금 열기 → <a href="' + safe + '" target="_blank" rel="noopener">' + safe + '</a>',
+      true);
+    return false;
+  }
+  return true;
+}
+
 async function loadTree(path) {
   const r = await fetch('/tree?path=' + encodeURIComponent(path));
   const j = await r.json();
@@ -494,7 +537,7 @@ async function doCreatePolis(parent, name) {
   const j = await r.json();
   if (r.ok) {
     showStatus('ok', 'Polis at ' + j.path + ' — opening chat at ' + j.chat_url + ' …');
-    setTimeout(() => { window.open(j.chat_url, '_blank'); }, 1500);
+    setTimeout(() => { openTab(j.chat_url); }, 1500);
     return;
   }
   if (j.error_code === 'name_exists') {
@@ -550,8 +593,9 @@ async function waitAndOpen(port, log_path) {
       const r = await fetch('/check-port?port=' + port);
       const j = await r.json();
       if (j.alive) {
-        showStatus('ok', '준비됨 → ' + 'http://127.0.0.1:' + port + '/');
-        window.open('http://127.0.0.1:' + port + '/', '_blank');
+        const url = 'http://127.0.0.1:' + port + '/';
+        showStatus('ok', '준비됨 → ' + url);
+        openTab(url);
         return;
       }
     } catch (e) { /* keep polling */ }
@@ -598,6 +642,19 @@ async function loadEnv() {
 
 loadTree('__START_PATH__');
 loadEnv();
+
+// Non-developer mental model: closing the browser tab should close
+// the `ail` command running in the terminal too. sendBeacon survives
+// the unload — no response is read but /admin/stop SIGTERMs the
+// home process, atexit then reaps spawned children. ?keep=1 disables.
+if (!new URLSearchParams(location.search).has('keep')) {
+  window.addEventListener('pagehide', () => {
+    try {
+      navigator.sendBeacon('/admin/stop',
+        new Blob([''], {type: 'text/plain'}));
+    } catch (e) {}
+  });
+}
 </script>
 </body></html>
 """
