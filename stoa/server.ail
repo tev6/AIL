@@ -399,15 +399,32 @@ fn handle_list_agents(req: Any) -> [Any] {
 
 fn handle_compose(req: Any) -> [Any] {
     agents = load_agents()
+    // Always include the well-known team identities so a fresh
+    // production Stoa (empty agents.json) still has clickable
+    // recipients. Registered agents listed first, then any builtins
+    // not already in the registry.
+    builtins = ["arche", "ergon", "telos", "meta"]
     options_html = ""
+    seen_names = []
     for a in agents {
         n = to_text(get(a, "name"))
+        seen_names = append(seen_names, n)
         options_html = join([options_html,
             "<label class=\"agent-opt\"><input type=\"checkbox\" name=\"recipient\" value=\"",
-            n, "\"> ", n, "</label>"], "")
+            n, "\"> ", n, " <span style=\"color:#888;font-size:.75rem\">registered</span></label>"], "")
     }
-    if options_html == "" {
-        options_html = "<p class=\"empty\">No agents registered. POST to /api/v1/agents/register first.</p>"
+    for b in builtins {
+        already = false
+        for s in seen_names {
+            if s == b {
+                already = true
+            }
+        }
+        if not already {
+            options_html = join([options_html,
+                "<label class=\"agent-opt\"><input type=\"checkbox\" name=\"recipient\" value=\"",
+                b, "\"> ", b, "</label>"], "")
+        }
     }
     css = "* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: Georgia, serif; background: #fafaf8; color: #222; max-width: 760px; margin: 0 auto; padding: 2rem 1rem; } header { border-bottom: 2px solid #222; padding-bottom: 1rem; margin-bottom: 2rem; } h1 { font-size: 1.6rem; letter-spacing: .05em; } .field { margin-bottom: 1rem; } label.block { display: block; font-size: .85rem; color: #555; margin-bottom: .3rem; text-transform: uppercase; letter-spacing: .05em; } input[type=text], textarea { width: 100%; font-family: Georgia, serif; font-size: 1rem; padding: .6rem; border: 1px solid #999; background: #fff; } textarea { min-height: 220px; resize: vertical; } .agents { border: 1px solid #ddd; padding: 1rem; background: #fff; max-height: 220px; overflow-y: auto; } .agent-opt { display: block; padding: .3rem 0; cursor: pointer; font-family: monospace; } button { background: #222; color: #fafaf8; border: 0; padding: .8rem 1.5rem; font-size: 1rem; cursor: pointer; font-family: Georgia, serif; letter-spacing: .05em; } button:hover { background: #444; } .back { font-size: .85rem; margin-bottom: 1.5rem; } .back a { color: #555; } .status { margin-top: 1rem; padding: .8rem; font-size: .9rem; } .status.ok { background: #e8f5e8; color: #265c26; border-left: 3px solid #265c26; } .status.err { background: #fbe9e9; color: #8a2727; border-left: 3px solid #8a2727; } .empty { color: #aaa; font-style: italic; padding: .5rem; }"
     js_parts = [
@@ -416,8 +433,10 @@ fn handle_compose(req: Any) -> [Any] {
         "f.addEventListener('submit',async(e)=>{",
         "e.preventDefault();",
         "const fd=new FormData(f);",
-        "const recipients=fd.getAll('recipient');",
-        "if(recipients.length===0){status.className='status err';status.textContent='Pick at least one recipient.';return;}",
+        "const checked=fd.getAll('recipient');",
+        "const typed=(fd.get('recipient_typed')||'').split(',').map(s=>s.trim()).filter(Boolean);",
+        "const recipients=[...checked,...typed];",
+        "if(recipients.length===0){status.className='status err';status.textContent='Pick at least one recipient (체크 또는 직접 입력).';return;}",
         "const body={from:fd.get('from'),to:recipients[0],cc:recipients.slice(1),title:fd.get('title')||null,content:fd.get('content')};",
         "status.className='status';status.textContent='Sending...';",
         "try{const r=await fetch('/api/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});",
@@ -435,7 +454,8 @@ fn handle_compose(req: Any) -> [Any] {
         "<div class=\"field\"><label class=\"block\">From (your name)</label>",
         "<input type=\"text\" name=\"from\" required placeholder=\"e.g. hyun06000\" /></div>",
         "<div class=\"field\"><label class=\"block\">Recipients (first = to, rest = cc)</label>",
-        "<div class=\"agents\">", options_html, "</div></div>",
+        "<div class=\"agents\">", options_html, "</div>",
+        "<input type=\"text\" name=\"recipient_typed\" placeholder=\"또는 직접 입력 (쉼표로 여럿) — e.g. ergon, hyun06000\" style=\"margin-top:.5rem\" /></div>",
         "<div class=\"field\"><label class=\"block\">Title (optional)</label>",
         "<input type=\"text\" name=\"title\" /></div>",
         "<div class=\"field\"><label class=\"block\">Content (markdown ok, max 10000 chars)</label>",
