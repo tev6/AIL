@@ -1062,6 +1062,54 @@ class Executor:
                 pass
         return 1
 
+    def _maybe_compact_history(self, history_limit: int) -> bool:
+        """on_compact convention (Arche 2026-04-27 #1).
+
+        When `_server_history` reaches 80% of `history_limit` AND the
+        program defines `pure fn on_compact(history) -> [Any]`, hand the
+        full history to the program so it can choose what survives
+        BEFORE the age-based truncate fires. Default behavior (no
+        on_compact) = truncate oldest, unchanged. Same convention shape
+        as on_death.
+
+        Throttle: re-fires only after `_server_history` grows by at
+        least 10% of history_limit since the last successful compact —
+        so an on_compact that returns the same list doesn't loop.
+
+        Returns True if compact ran and returned a usable list, False
+        otherwise (no fn / not over threshold / throttled / errored).
+        """
+        if "on_compact" not in self.fns:
+            return False
+        h = self._server_history
+        threshold = max(int(history_limit * 0.8), 1)
+        if len(h) < threshold:
+            return False
+        last_at = getattr(self, "_history_compact_at", 0)
+        step = max(1, int(history_limit * 0.1))
+        if len(h) < last_at + step:
+            return False
+        try:
+            history_cv = ConfidentValue(list(h), 1.0)
+            result_cv = self._invoke_fn(
+                self.fns["on_compact"], [history_cv], {},
+            )
+            new_h = result_cv.value
+            if not isinstance(new_h, list):
+                import logging
+                logging.warning(
+                    "[evolve] on_compact returned non-list (%s); ignoring",
+                    type(new_h).__name__,
+                )
+                return False
+            self._server_history = new_h[-history_limit:]
+            self._history_compact_at = len(self._server_history)
+            return True
+        except Exception as e:
+            import logging
+            logging.warning(f"[evolve] on_compact failed: {e}")
+            return False
+
     def _physis_write_testament(self, evolve_name: str, testament: dict) -> None:
         """Write testament dict to .ail/physis/<name>/gen<N>.json and update current.json."""
         import json as _json
@@ -1198,6 +1246,7 @@ class Executor:
                     "is_error": int(status) >= 500,
                 }
                 executor_ref._server_history.append(event)
+                executor_ref._maybe_compact_history(history_limit)
                 if len(executor_ref._server_history) > history_limit:
                     executor_ref._server_history = executor_ref._server_history[-history_limit:]
 

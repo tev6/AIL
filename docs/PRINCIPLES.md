@@ -50,6 +50,16 @@
 - `evolve rollback_on` 강제 → 롤백 없는 변이 불가
 - `human.approve` 게이트 → **되돌릴 수 없는** effect에만 사람 승인 요구 (아래 §3a 참조)
 
+### 3c. `on_compact` 컨벤션 (Arche 2026-04-27 #1, ergon 구현)
+
+evolve-server `_server_history`가 `keep_last`의 80%에 도달하면 runtime이
+`pure fn on_compact(history) -> [Any]`을 호출 (정의돼 있을 때). 반환된
+리스트가 새 history. 정의 안 돼 있으면 truncate-oldest fallback.
+
+`on_death`와 동일 패턴 — pure 강제, 미정의 fallback, 실패 fallback. 전체
+명세는 [`spec/04-evolution.md` §11a](../spec/04-evolution.md). 테스트는
+`tests/test_on_compact.py`.
+
 ### 3b. `trust_level` 컨벤션 (Arche 2026-04-27 #2, ergon 구현)
 
 활성 context의 `trust_level` 필드(Text)로 perform 게이팅 모드 선택. 새 키워드 없음.
