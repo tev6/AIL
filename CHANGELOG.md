@@ -4,6 +4,17 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.63.2 — 2026-04-27 (CI fix + UserPromptSubmit hook 제거)
+
+- **CI 수정**: `flask>=2.0`을 `reference-impl` 정식 dependency로 등재. 기존
+  evolve-server (executor.py)와 v1.62.0 home_ui 둘 다 flask 사용 — 이전엔 환경에
+  preinstalled되어 있어 우연히 통과. CI Python 3.10 슬롯에서 collection 실패.
+- **`.claude/hooks/stoa_inbox_check.sh` 제거 + UserPromptSubmit hook 비활성화** —
+  Stoa MCP에 SSE transport가 붙으면서 매 발언마다 폴링할 필요 없어짐. 인박스
+  확인은 MCP `stoa_read_inbox` 명시 호출 또는 SSE 알림으로 전환.
+
+---
+
 ## v1.63.1 — 2026-04-27 (이미지 첨부 UX — window-wide paste/drop)
 
 hyun06000 피드백: "맥에서 스샷찍으면 우측 아래에 썸네일이 뜨는데 그거 드래그해서
