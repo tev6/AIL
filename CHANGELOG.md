@@ -4,6 +4,22 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.8 — 2026-04-27 (비개발자 친화 톤 가이드라인 추가)
+
+hyun06000 요청: 비개발자 친화적으로 안내하도록 톤앤매너 추가.
+
+수정: `_build_goal_prompt`에 `=== TONE — NON-DEVELOPER FRIENDLY ===`
+섹션 추가. 핵심 규칙:
+- 사용자 언어 미러링 (한국어/영어)
+- 다단계 명령은 번호 매기기, 각 단계 ≤ 2 lines
+- 전문 용어 금지 (AIL/intent/perform/JSON 등 사용자가 먼저 안 쓴 단어)
+- 원시 에러 dump 금지 — 한 줄 요약 + 다음 행동 1개
+- 명령 fenced block은 반드시 자체 단락 (앞뒤 빈 줄) — v1.64.7
+  placeholder 버그가 인라인 fence에서 났던 것과 같은 패턴 차단
+- 성공은 평이한 말로 자축 ("✅ 캘린더 일정이 매일 아침 8시에…")
+
+---
+
 ## v1.64.7 — 2026-04-27 (인라인 fenced placeholder 누출 fix)
 
 hyun06000 field test: 채팅 메시지에 "�FENCED0�" 같은 텍스트가
