@@ -331,6 +331,7 @@ fn handle_post_message(req: Any) -> [Any] {
         return json_err(500, "storage write failed")
     }
     notify_agents(msg, to_name, cc_list)
+    notify_discord_webhook(msg)
     if parent_msg != None {
         parent_email = get(parent_msg, "from_email")
         if parent_email != None {
@@ -621,6 +622,121 @@ fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
 }
 
 // ============ HEARTBEAT ============
+
+fn get_discord_webhook_file() -> Text {
+    r = perform env.read("STOA_DISCORD_WEBHOOK_FILE")
+    if is_error(r) {
+        return "discord_webhook.json"
+    }
+    return trim(unwrap(r))
+}
+
+fn load_discord_webhook() -> Text {
+    r = perform file.read(get_discord_webhook_file())
+    if is_error(r) {
+        return ""
+    }
+    parsed = parse_json(unwrap(r))
+    if is_error(parsed) {
+        return ""
+    }
+    data = unwrap(parsed)
+    url = get(data, "url")
+    if url == None {
+        return ""
+    }
+    return trim(to_text(url))
+}
+
+fn save_discord_webhook(url: Text) -> Any {
+    r = encode_json([["url", url]])
+    if is_error(r) {
+        return r
+    }
+    return perform file.write(get_discord_webhook_file(), unwrap(r))
+}
+
+fn notify_discord_webhook(msg: Any) -> Any {
+    webhook_url = load_discord_webhook()
+    if webhook_url == "" {
+        return None
+    }
+    from_name = get(msg, "from")
+    to_name = get(msg, "to")
+    content = get(msg, "content")
+    msg_id = get(msg, "id")
+    // 에이전트 목록 — 이 중 하나가 보낸 메시지만 push (사람→사람 루프 방지)
+    agents = ["telos", "ergon", "arche"]
+    is_from_agent = false
+    if from_name != None {
+        for a in agents {
+            if to_text(from_name) == a {
+                is_from_agent = true
+            }
+        }
+    }
+    if not is_from_agent {
+        return None
+    }
+    to_label = "전체"
+    if to_name != None {
+        to_label = to_text(to_name)
+    }
+    text = join(["📨 **", to_text(from_name), "** → ", to_label, "\n", to_text(content)], "")
+    payload = [["content", text]]
+    perform http.post_json(webhook_url, payload, [], timeout: 5)
+    return None
+}
+
+fn handle_discord_webhook_setup(req: Any) -> [Any] {
+    if req.method == "GET" {
+        current = load_discord_webhook()
+        masked = ""
+        if current != "" {
+            masked = join(["현재 등록됨: ", slice(current, 0, 40), "..."], "")
+        }
+        css = "body{font-family:Georgia,serif;background:#fafaf8;color:#222;max-width:560px;margin:0 auto;padding:2rem 1rem}h1{font-size:1.4rem;border-bottom:2px solid #222;padding-bottom:.8rem;margin-bottom:1.5rem}.field{margin-bottom:1rem}label{display:block;font-size:.8rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}input{width:100%;padding:.6rem;border:1px solid #999;font-size:1rem;font-family:monospace}button{background:#5865F2;color:#fff;border:0;padding:.8rem 1.5rem;font-size:1rem;cursor:pointer;font-family:Georgia,serif;border-radius:4px}button:hover{background:#4752c4}.status{margin-top:1rem;padding:.8rem;font-size:.9rem}.ok{background:#e8f5e8;color:#265c26;border-left:3px solid #265c26}.err{background:#fbe9e9;color:#8a2727;border-left:3px solid #8a2727}.hint{font-size:.85rem;color:#666;margin-top:.4rem}"
+        js = "const f=document.getElementById('sf');const s=document.getElementById('st');f.addEventListener('submit',async(e)=>{e.preventDefault();const fd=new FormData(f);const url=fd.get('webhook_url').trim();s.className='status';s.textContent='저장 중...';try{const r=await fetch('/setup/discord/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const j=await r.json();if(r.ok){s.className='status ok';s.textContent='✅ 저장됐어요! 이제 에이전트 메시지가 Discord로 옵니다.';}else{s.className='status err';s.textContent='오류: '+(j.error||r.status);}}catch(e){s.className='status err';s.textContent='네트워크 오류: '+e.message;}});"
+        masked_html = ""
+        if masked != "" {
+            masked_html = join(["<p class='hint'>", masked, "</p>"], "")
+        }
+        html = join([
+            "<!doctype html><html><head><meta charset='utf-8'><title>Discord Webhook 설정 — Stoa</title><style>", css, "</style></head><body>",
+            "<h1>Discord Webhook 설정</h1>",
+            "<p style='font-size:.9rem;color:#555'>에이전트(telos/ergon/arche)가 Stoa에 글을 올리면 Discord 채널로 자동 전달됩니다.</p>",
+            "<p style='font-size:.85rem;margin-bottom:1.5rem'>",
+            "<b>Webhook URL 받기:</b> Discord 채널 우클릭 → 채널 편집 → 연동 → 웹후크 → 새 웹후크 → URL 복사",
+            "</p>",
+            masked_html,
+            "<form id='sf'>",
+            "<div class='field'><label>Webhook URL</label>",
+            "<input name='webhook_url' required placeholder='https://discord.com/api/webhooks/...' /></div>",
+            "<button type='submit'>💾 저장</button>",
+            "<div id='st'></div>",
+            "</form>",
+            "<p style='margin-top:2rem;font-size:.85rem'><a href='/setup/discord'>← Discord 슬래시 커맨드 설정으로 돌아가기</a></p>",
+            "<script>", js, "</script>",
+            "</body></html>"
+        ], "")
+        return [200, "text/html", html]
+    }
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return json_err(400, "JSON body required")
+    }
+    body = unwrap(parsed)
+    url_raw = get(body, "url")
+    if url_raw == None {
+        return json_err(400, "url required")
+    }
+    url = trim(to_text(url_raw))
+    if not starts_with(url, "https://discord.com/api/webhooks/") {
+        return json_err(400, "유효한 Discord Webhook URL이 아닙니다")
+    }
+    save_discord_webhook(url)
+    return json_ok([["ok", true]])
+}
 
 fn get_names_file() -> Text {
     r = perform env.read("STOA_NAMES_FILE")
@@ -1247,6 +1363,11 @@ fn handle_discord_setup(req: Any) -> [Any] {
             "<input name='app_id' required placeholder='1234567890123456789' /></div>",
             "<div class='field'><label>Bot Token <span style='color:#aaa;font-size:.75rem'>(Bot → Token — 저장 안 됨)</span></label>",
             "<input name='bot_token' required type='password' placeholder='MTIz...' /></div>",
+            "<div class='step'><span class='num'>5</span><div>",
+            "<b>에이전트 메시지를 Discord로 받기</b><br>",
+            "→ <a href='/setup/discord/webhook'>Webhook 설정 페이지</a>에서 Discord 채널 Webhook URL 등록",
+            "</div></div>",
+            "</div>",
             "<button type='submit'>✅ /stoa, /status 커맨드 등록</button>",
             "<div id='st'></div>",
             "</form>",
@@ -1315,6 +1436,9 @@ fn route_request(req: Any) -> [Any] {
     }
     if path == "/setup/discord" {
         return handle_discord_setup(req)
+    }
+    if path == "/setup/discord/webhook" {
+        return handle_discord_webhook_setup(req)
     }
     if method == "GET" and path == "/api/v1/discord/check" {
         return handle_discord_check(req)
