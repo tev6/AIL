@@ -1535,6 +1535,7 @@ class Executor:
                 "body": flask_request.get_data(as_text=True),
                 "query": flask_request.query_string.decode("utf-8"),
                 "args": dict(flask_request.args),
+                "headers": dict(flask_request.headers),
             }
             with executor_ref._server_lock:
                 executor_ref._server_response_store.value = (500, "text/plain", "no response")
@@ -3128,6 +3129,25 @@ class Executor:
                         out[str(pair[0])] = pair[1]
                 return ConfidentValue(out, conf)
             return ConfidentValue({}, conf)
+
+        # --- Crypto ---
+        if name == "crypto_verify_ed25519":
+            # crypto_verify_ed25519(public_key_hex, signature_hex, message_bytes) -> Bool
+            if len(raw) >= 3:
+                try:
+                    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+                    pub_hex = str(raw[0])
+                    sig_hex = str(raw[1])
+                    msg = str(raw[2]).encode("utf-8") if isinstance(raw[2], str) else bytes(raw[2])
+                    pub_bytes = bytes.fromhex(pub_hex)
+                    sig_bytes = bytes.fromhex(sig_hex)
+                    pub_key = Ed25519PublicKey.from_public_bytes(pub_bytes)
+                    pub_key.verify(sig_bytes, msg)
+                    return ConfidentValue(True, conf)
+                except Exception:
+                    return ConfidentValue(False, conf)
+            return ConfidentValue(False, conf)
 
         return None  # not a builtin
 

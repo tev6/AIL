@@ -179,6 +179,8 @@ evolve SERVER_NAME {
 ```
 
 `when request_received(req)` is an event arm — fires on each HTTP request.
+`req` fields: `req.method`, `req.path`, `req.body` (Text), `req.args` (Record of query params),
+`req.query` (raw query string), `req.headers` (Record of HTTP headers).
 `rollback_on` triggers self-termination (§9). `metric` and `when` fields
 are still present; `rollback_on` + `history` remain required.
 
@@ -364,6 +366,8 @@ parse_json(source: Text) -> Result[Any]         // ok(value) on success, error(m
 encode_json(value: Any) -> Result[Text]         // ok(text) on success, error(msg) on non-encodable input
 base64_encode(value: Text) -> Text              // base64-encode UTF-8 text; returns encoded Text directly (never fails)
 base64_decode(value: Text) -> Result[Text]      // ok(text) on success, error(msg) if invalid base64 or non-UTF-8
+crypto_verify_ed25519(public_key_hex: Text, signature_hex: Text, message: Text) -> Boolean
+                                                // Ed25519 signature verification (requires cryptography>=41 package)
 ```
 All four are pure — no I/O, no LLM. `parse_json` returns a Record for JSON objects,
 a List for arrays, Text / Number / Boolean primitives; use `get(value, key)`
