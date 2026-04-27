@@ -237,20 +237,36 @@ def test_essentials_check_calls_out_daily_alarm_field_test():
     assert "Discord / Slack / 이메일 등" in p
 
 
-def test_format_b_clarifier_uses_answer_only_action():
+def test_clarifier_shape_uses_answer_only_action():
     """When essentials are missing, the action MUST be answer_only,
     NOT spec_pending — the agent is gathering info, not proposing a
     plan. Mixing these hides the question behind an approval card."""
     p = _get_prompt()
-    # The clarifier format block must specify answer_only
-    clarifier_section = p[p.find("FORMAT B — clarifying turn"):]
+    # The clarifier shape block must specify answer_only
+    clarifier_section = p[p.find("CLARIFIER shape"):]
     clarifier_section = clarifier_section[:1500]
     assert "answer_only" in clarifier_section
     # And in the broader essentials section the prompt must explicitly
     # say spec_pending is NOT used for the clarifier.
-    essentials = p[p.find("ESSENTIALS CHECK"):p.find("FORMAT B — clarifying turn") + 200]
+    essentials = p[p.find("ESSENTIALS CHECK"):p.find("CLARIFIER shape") + 200]
     assert "spec_pending" in essentials
     assert "**NOT**" in essentials
+
+
+def test_clarifier_label_does_not_collide_with_closing_format_b():
+    """The closing template's "FORMAT B — BUILD" must remain the only
+    use of the "FORMAT B" label. The essentials clarifier (called
+    "CLARIFIER shape") used to be labeled "FORMAT B — clarifying
+    turn", which collided with the closing template's FORMAT B and
+    confused the test that scans the closing tail. Keep them distinct.
+    """
+    p = _get_prompt()
+    assert "FORMAT B — clarifying" not in p, (
+        "Don't reintroduce the FORMAT B label for the clarifier — it "
+        "collides with the closing FORMAT B (BUILD).")
+    # And the closing FORMAT B is still there as a peer to A and C.
+    tail = p[-3000:]
+    assert "FORMAT A" in tail and "FORMAT B" in tail and "FORMAT C" in tail
 
 
 def test_decision_tree_runs_essentials_check_before_format_a():

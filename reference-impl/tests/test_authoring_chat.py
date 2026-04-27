@@ -1932,11 +1932,16 @@ def test_closing_template_offers_three_formats(tmp_path):
     Without C, meta-questions ("what is X?") wrongly emit
     ready_to_run and a Run widget for nothing — false affordance.
     Without A or B, the spec-first / build flows break (v1.58.0/.1
-    field test regression)."""
+    field test regression).
+
+    The tail window is 4000 chars (was 3000) — the ESSENTIALS CHECK
+    branch added to the decision tree (2026-04-27, daily-alarm field
+    test) pushed the DECISION header slightly past 3000. Expanding
+    is safer than removing the branch."""
     from ail.agentic.authoring_chat import AuthoringChat
     proj = Project.init(tmp_path / "p")
     prompt = AuthoringChat(proj, _ScriptedChatAdapter([]))._build_goal_prompt({}, [], "hi")
-    tail = prompt[-3000:]
+    tail = prompt[-4000:]
     assert "FORMAT A" in tail and "FORMAT B" in tail and "FORMAT C" in tail
     assert "DECISION" in tail
     # All three action values must be visible near the end.
