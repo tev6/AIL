@@ -116,21 +116,26 @@ def _make_app(start_root: Path):
                 "existing_path": str(new_dir),
             }), 409
         # Spawn `ail init <name>` from inside parent dir, --no-open so we
-        # control the browser hand-off ourselves.
+        # control the browser hand-off ourselves. Capture output to a
+        # log file so we can surface failures (auth missing, port race).
+        log_path = _spawn_log_path("init", port)
         try:
-            subprocess.Popen(
-                [sys.executable, "-m", "ail", "init", name,
-                 "--port", str(port), "--no-open"],
-                cwd=str(target_parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            with open(log_path, "wb") as logf:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "ail", "init", name,
+                     "--port", str(port), "--no-open"],
+                    cwd=str(target_parent),
+                    stdout=logf, stderr=subprocess.STDOUT,
+                )
+            _register_spawned(proc, port, "init")
         except Exception as e:
             return jsonify({"error": f"spawn failed: {type(e).__name__}: {e}"}), 500
         return jsonify({
             "ok": True,
             "path": str(new_dir),
             "chat_url": f"http://127.0.0.1:{port}/",
+            "port": port,
+            "log_path": str(log_path),
         })
 
     @app.route("/trash-polis", methods=["POST"])
@@ -204,16 +209,72 @@ def _make_app(start_root: Path):
             return jsonify({"error": "not a directory"}), 400
         if not (target / "INTENT.md").exists():
             return jsonify({"error": "not a polis (no INTENT.md)"}), 400
+        log_path = _spawn_log_path("up", port)
         try:
-            subprocess.Popen(
-                [sys.executable, "-m", "ail", "up", str(target),
-                 "--port", str(port)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            with open(log_path, "wb") as logf:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "ail", "up", str(target),
+                     "--port", str(port)],
+                    stdout=logf, stderr=subprocess.STDOUT,
+                )
+            _register_spawned(proc, port, "up")
         except Exception as e:
             return jsonify({"error": f"spawn failed: {type(e).__name__}: {e}"}), 500
-        return jsonify({"ok": True, "chat_url": f"http://127.0.0.1:{port}/"})
+        return jsonify({
+            "ok": True,
+            "chat_url": f"http://127.0.0.1:{port}/",
+            "port": port,
+            "log_path": str(log_path),
+        })
+
+    @app.route("/check-port")
+    def check_port():
+        """Probe a localhost port — used by the frontend to wait for a
+        spawned `ail up` / `ail init` to become reachable before opening
+        the browser tab. Returns {alive: bool}."""
+        try:
+            probe_port = int(request.args.get("port", "0"))
+        except ValueError:
+            return jsonify({"error": "bad port"}), 400
+        if not (1 <= probe_port <= 65535):
+            return jsonify({"error": "port out of range"}), 400
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        alive = False
+        try:
+            s.connect(("127.0.0.1", probe_port))
+            alive = True
+        except OSError:
+            alive = False
+        finally:
+            s.close()
+        return jsonify({"alive": alive, "port": probe_port})
+
+    @app.route("/spawn-log")
+    def spawn_log():
+        """Tail the most recent spawn log so the frontend can surface
+        a clear failure message when `ail up` couldn't bind / authenticate."""
+        path = request.args.get("path", "").strip()
+        try:
+            p = Path(path).expanduser().resolve()
+        except Exception:
+            return jsonify({"error": "bad path"}), 400
+        # Defense: only allow paths under our log dir
+        log_root = (Path.home() / ".ail" / "logs").resolve()
+        try:
+            p.relative_to(log_root)
+        except ValueError:
+            return jsonify({"error": "log path outside ~/.ail/logs"}), 400
+        if not p.is_file():
+            return jsonify({"tail": "(log not found yet)"}), 200
+        try:
+            data = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
+        # Tail to keep response small
+        tail = data[-4000:] if len(data) > 4000 else data
+        return jsonify({"tail": tail, "size": len(data)})
 
     @app.route("/env-status")
     def env_status():
@@ -225,6 +286,58 @@ def _make_app(start_root: Path):
         })
 
     return app
+
+
+# Layer B: track spawned children so home shutdown reaps them.
+# Non-developer model: closing `ail home` should leave nothing
+# orphaned. Each entry: (pid, port, kind). On atexit we send SIGTERM,
+# wait briefly, then SIGKILL stragglers.
+_SPAWNED: list[dict] = []
+
+
+def _register_spawned(proc, port: int, kind: str) -> None:
+    _SPAWNED.append({"pid": proc.pid, "port": port, "kind": kind})
+
+
+def _reap_spawned() -> None:
+    import os as _os
+    import signal as _signal
+    import time as _time
+    for entry in list(_SPAWNED):
+        pid = entry.get("pid")
+        if not pid:
+            continue
+        try:
+            _os.kill(pid, _signal.SIGTERM)
+        except OSError:
+            continue
+    # Brief grace, then SIGKILL anything that's still around.
+    _time.sleep(0.3)
+    for entry in list(_SPAWNED):
+        pid = entry.get("pid")
+        if not pid:
+            continue
+        try:
+            _os.kill(pid, _signal.SIGKILL)
+        except OSError:
+            pass
+
+
+# Install once. Catches both clean exit (Ctrl+C → atexit) and abrupt
+# (SIGTERM via shell). Idempotent — atexit hooks run once.
+import atexit as _atexit
+_atexit.register(_reap_spawned)
+
+
+def _spawn_log_path(kind: str, port: int) -> Path:
+    """Return a fresh log file path for a child `ail up` / `ail init`.
+    Lives under ~/.ail/logs/<kind>-<port>-<YYYYMMDD-HHMMSS>.log so the
+    frontend can fetch the tail when the child fails silently."""
+    import time
+    log_dir = Path.home() / ".ail" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return log_dir / f"{kind}-{port}-{stamp}.log"
 
 
 def _next_chat_port() -> int:
@@ -420,16 +533,55 @@ document.getElementById('confirm-btn').onclick = async () => {
   document.getElementById('modal-bg').classList.remove('show');
   await doCreatePolis(cwdEl.textContent, name);
 };
+// Poll the spawned chat server until it accepts a connection, then
+// open the tab. Pre-fix opened the tab after a blind 1.5s timer — if
+// `ail up` took longer (typical first-run with adapter init), the new
+// tab landed on connection-refused. If startup never completes, fetch
+// the tail of the spawn log and surface it.
+async function waitAndOpen(port, log_path) {
+  const start = Date.now();
+  const max_ms = 30000;
+  let attempt = 0;
+  while (Date.now() - start < max_ms) {
+    attempt++;
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    showStatus('ok', '폴리스 부팅 중… (' + elapsed + 's, 시도 ' + attempt + ')');
+    try {
+      const r = await fetch('/check-port?port=' + port);
+      const j = await r.json();
+      if (j.alive) {
+        showStatus('ok', '준비됨 → ' + 'http://127.0.0.1:' + port + '/');
+        window.open('http://127.0.0.1:' + port + '/', '_blank');
+        return;
+      }
+    } catch (e) { /* keep polling */ }
+    await new Promise(res => setTimeout(res, 700));
+  }
+  // Timeout — fetch and show the log tail
+  let tail = '(no log)';
+  if (log_path) {
+    try {
+      const lr = await fetch('/spawn-log?path=' + encodeURIComponent(log_path));
+      const lj = await lr.json();
+      tail = lj.tail || lj.error || '(empty)';
+    } catch (e) { tail = '(log fetch failed: ' + e.message + ')'; }
+  }
+  showStatus('err',
+    '30초 안에 폴리스가 안 떴어요. 로그 마지막 부분:\n\n' +
+    tail.slice(-2000) +
+    '\n\n전체 로그: ' + (log_path || '(없음)'),
+    true);
+}
+
 openBtn.onclick = async () => {
-  showStatus('ok', 'Starting `ail up` for ' + cwdEl.textContent + ' …');
+  showStatus('ok', '`ail up` 띄우는 중 — ' + cwdEl.textContent);
   const r = await fetch('/open-polis', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({path: cwdEl.textContent})
   });
   const j = await r.json();
   if (!r.ok) { showStatus('err', j.error || 'open failed'); return; }
-  showStatus('ok', 'Opening chat at ' + j.chat_url + ' …');
-  setTimeout(() => { window.open(j.chat_url, '_blank'); }, 1500);
+  await waitAndOpen(j.port, j.log_path);
 };
 
 async function loadEnv() {

@@ -4,6 +4,37 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.3 — 2026-04-27 (Open polis here UX + 탭 닫기 → 서버 stop)
+
+hyun06000 field test 두 가지 보고:
+
+1. **Open polis here 에러** — 1.5초 blind 타임아웃이 `ail up` 실제 부팅
+   시간보다 짧음 + spawn 출력 DEVNULL이라 실패 silent. 새 탭이
+   connection-refused로 떨어짐.
+2. **비개발자 mental model**: "브라우저 닫으면 다 꺼진 거" — 현재는
+   spawn된 서버가 백그라운드에 살아있음. zombie 프로세스 누적.
+
+수정 (home_ui):
+- spawn 출력 → `~/.ail/logs/<kind>-<port>-<ts>.log` 캡쳐 (DEVNULL 제거)
+- `/check-port?port=N` 엔드포인트: 프론트엔드가 부팅 완료까지 폴링
+- `/spawn-log?path=...` 엔드포인트: 30초 타임아웃 시 로그 tail 표시
+- 프론트엔드 `waitAndOpen()`: 700ms 간격으로 `/check-port` 폴링 → alive
+  하면 즉시 window.open. 30초 안에 안 뜨면 로그 tail을 status에 표시.
+  사용자가 "왜 안 떠?"를 직접 진단 가능 (어댑터 미설정 / INTENT.md 깨짐 등).
+- spawn 추적 + atexit reaper: home 종료 시 모든 자식 프로세스 SIGTERM →
+  300ms 후 SIGKILL straggler. zombie 방지.
+
+수정 (authoring_ui):
+- 탭 close (`pagehide`) → `navigator.sendBeacon('/admin/stop')` 자동.
+  /admin/stop은 이미 존재하던 엔드포인트 (self_terminate). 따라서 탭 닫으면
+  그 폴리스 서버가 깔끔히 종료됨. 의도치 않은 close에 대비해
+  `?keep=1` 쿼리 파라미터로 disable 가능.
+
+테스트 3종 신규: /check-port, /spawn-log path defense, 탭-close 핸들러
+존재. 기존 749 + 3 = 752 passing 예상.
+
+---
+
 ## v1.64.2 — 2026-04-27 (휴지통 dialog 줄바꿈 fix)
 
 hyun06000 즉시 보고: 휴지통 confirm dialog가 literal `\n` 텍스트로 표시됨.
