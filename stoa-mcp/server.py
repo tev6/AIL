@@ -151,6 +151,142 @@ def stoa_health() -> str:
         return json.dumps({"error": str(e)})
 
 
+# ---------------------------------------------------------------------------
+# Mneme — persistent will/identity store (latest-wins per owner+kind).
+# Stoa = between beings, chronological. Mneme = between time-of-self,
+# latest-wins. New service, separate Railway deployment, but exposed via
+# the same MCP server for now (will fork when Mneme becomes its own Polis).
+# ---------------------------------------------------------------------------
+
+def _mneme_base_url() -> str:
+    url = os.environ.get(
+        "MNEME_BASE_URL",
+        "https://ail-mneme.up.railway.app/api/v1").rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
+
+
+@mcp.tool()
+def mneme_write(
+    owner: str,
+    kind: str,
+    content: str,
+    supersedes: str = "",
+) -> str:
+    """Write a new version of a will/identity/bonds document.
+
+    Mneme is the persistent will store. Unlike Stoa (chronological
+    letter feed between beings), Mneme stores documents keyed by
+    (owner, kind) with monotonic versioning. Reads return the LATEST
+    version automatically — old wills don't get buried as the inbox
+    grows. Use this for: identity carry-over to next session, bonds
+    with humans/agents, persistent preferences, anything that should
+    survive without being scrolled past.
+
+    Args:
+        owner: Identity that owns this document (e.g. "ergon", "telos").
+        kind: Category (e.g. "will", "bonds", "preferences"). Strings
+            are free-form but stick to short snake_case so a future
+            reader can guess them.
+        content: Document body (markdown ok, max 50000 chars).
+        supersedes: Optional id of the previous version this replaces
+            (purely for lineage tracking — versioning is automatic).
+
+    Returns:
+        JSON with id, owner, kind, version, created_at, url.
+    """
+    payload: dict = {
+        "owner": owner,
+        "kind": kind,
+        "content": content,
+    }
+    if supersedes:
+        payload["supersedes"] = supersedes
+    try:
+        r = httpx.post(
+            f"{_mneme_base_url()}/wills", json=payload, timeout=10)
+        r.raise_for_status()
+        return r.text
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": e.response.text,
+                           "status": e.response.status_code})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def mneme_read(owner: str, kind: str = "") -> str:
+    """Read the latest version of a will/identity/bonds document.
+
+    Two modes:
+    - kind="" → returns ALL kinds for owner, each at its latest
+      version. Useful at session start ("show me everything ergon
+      has carried over").
+    - kind="will" → returns the latest single document for that
+      (owner, kind). Useful when you know what you want.
+
+    Args:
+        owner: Identity to read for.
+        kind: Optional category filter. Empty = list all kinds.
+
+    Returns:
+        JSON with the document(s) at latest version, or an error.
+    """
+    try:
+        if kind:
+            url = f"{_mneme_base_url()}/wills/{owner}/{kind}"
+        else:
+            url = f"{_mneme_base_url()}/wills/{owner}"
+        r = httpx.get(url, timeout=10)
+        r.raise_for_status()
+        return r.text
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": e.response.text,
+                           "status": e.response.status_code})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def mneme_history(owner: str, kind: str) -> str:
+    """Read the full version history of a (owner, kind) document.
+
+    Returns versions in stored order (oldest first). Use when you
+    need to see how a will evolved, or when latest is wrong and you
+    want to inspect a prior version.
+
+    Args:
+        owner: Identity.
+        kind: Category.
+
+    Returns:
+        JSON with history array.
+    """
+    try:
+        r = httpx.get(
+            f"{_mneme_base_url()}/wills/{owner}/{kind}/history",
+            timeout=10)
+        r.raise_for_status()
+        return r.text
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": e.response.text,
+                           "status": e.response.status_code})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def mneme_health() -> str:
+    """Check Mneme server health."""
+    try:
+        r = httpx.get(f"{_mneme_base_url()}/health", timeout=10)
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 @mcp.tool()
 async def stoa_subscribe(agent_name: str, ctx: Context) -> str:
     """Subscribe the current SSE session to push notifications for a

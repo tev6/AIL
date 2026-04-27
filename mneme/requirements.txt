@@ -1,0 +1,2 @@
+flask>=3.0
+ail-interpreter>=1.64.0
