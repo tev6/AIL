@@ -2165,7 +2165,7 @@ def render_authoring_page(
       addImageFiles(Array.from(e.target.files || []));
       e.target.value = '';
     }});
-    msgEl.addEventListener('paste', (e) => {{
+    function handlePasteImages(e) {{
       const items = (e.clipboardData || {{}}).items || [];
       const files = [];
       for (const it of items) {{
@@ -2177,10 +2177,53 @@ def render_authoring_page(
       if (files.length) {{
         e.preventDefault();
         addImageFiles(files);
+        return true;
       }}
+      return false;
+    }}
+    msgEl.addEventListener('paste', handlePasteImages);
+    // Window-level paste — works even when focus isn't in the textarea.
+    // Skip if focus is in another text input so we don't hijack regular paste.
+    window.addEventListener('paste', (e) => {{
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return; // textarea handler runs
+      handlePasteImages(e);
     }});
-    msgEl.addEventListener('dragover', (e) => {{ e.preventDefault(); }});
-    msgEl.addEventListener('drop', (e) => {{
+    // Window-wide drop zone — macOS screenshot thumbnails (Cmd+Shift+4
+     // bottom-right preview) often miss a small textarea. Accept drops
+     // anywhere; show a full-page overlay while dragging.
+    let dragDepth = 0;
+    const dropOverlay = document.createElement('div');
+    dropOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(34,34,34,.55);color:#fff;font-size:1.4rem;display:none;align-items:center;justify-content:center;z-index:9999;pointer-events:none;border:4px dashed #fff;';
+    dropOverlay.textContent = '🖼  여기에 놓으면 첨부됩니다';
+    document.body.appendChild(dropOverlay);
+
+    function hasImageData(e) {{
+      const dt = e.dataTransfer;
+      if (!dt) return false;
+      // dataTransfer.items isn't always populated for files until drop;
+      // check types as a more reliable hint while still dragging.
+      if (dt.types && Array.from(dt.types).includes('Files')) return true;
+      return false;
+    }}
+
+    window.addEventListener('dragenter', (e) => {{
+      if (!hasImageData(e)) return;
+      dragDepth++;
+      dropOverlay.style.display = 'flex';
+    }});
+    window.addEventListener('dragover', (e) => {{
+      if (!hasImageData(e)) return;
+      e.preventDefault();
+    }});
+    window.addEventListener('dragleave', (e) => {{
+      if (!hasImageData(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) dropOverlay.style.display = 'none';
+    }});
+    window.addEventListener('drop', (e) => {{
+      dragDepth = 0;
+      dropOverlay.style.display = 'none';
       const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
       if (files.length) {{
         e.preventDefault();
