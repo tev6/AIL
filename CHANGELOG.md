@@ -4,6 +4,34 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.1 — 2026-04-27 (field test fix — ESSENTIALS CHECK + 휴지통)
+
+hyun06000 daily-alarm-bot field test 후속 즉시 fix:
+
+**ESSENTIALS CHECK (authoring_chat.py prompt):**
+- 새 에이전트 turn 1에서 essentials (input provider / output channel /
+  schedule / format / auth) 미상이면 placeholder 박힌 spec 던지지 말 것.
+- ONE bundled clarifying turn (action: `answer_only`)으로 모든 unknowns
+  한 번에 묶어 묻기 + concrete 옵션 리스트 + "default-OK" 명시.
+- 사용자 답 받으면 다음 턴에 spec, 그 다음 build.
+
+**휴지통 (`/trash-polis` + UI):**
+- 같은 이름 폴리스 충돌 시 새로 만들 수 없던 흐름을 휴지통 이동 + 강력
+  consent로 해소.
+- AIL은 destructive 삭제 primitive 없음 (Arche 원칙). UI 레벨에서
+  `~/.ail/.Trashcan/<YYYYMMDD-HHMMSS>-<name>/`로 이동만.
+- 정상 폴리스(INTENT.md 보유) 또는 빈 디렉토리만 허용. $HOME/루트 거부.
+- 충돌 시 frontend가 `window.confirm`으로 한국어 강력 경고 ("삭제 아님 *이동*",
+  "AIL은 영구 삭제 안 함") + 동의 시 자동 retry.
+
+**테스트:** 5종 신규 (essentials 4 + clarifier rename 1) + 4종 신규 (trash).
+기존 closing-template 테스트의 tail 윈도우 3000→4000 확장 (ESSENTIALS 분기
+때문에 DECISION 헤더가 윈도우 밖으로 밀림).
+
+745 passing.
+
+---
+
 ## v1.64.0 — 2026-04-27 (Polis 마일스톤 #1~#6 일괄 + idle wake 검증)
 
 **Arche 2026-04-27 letter (`msg_1777273204_0`)에서 제안된 Polis 5개

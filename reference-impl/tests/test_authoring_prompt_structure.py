@@ -200,3 +200,87 @@ def test_human_approve_section_present():
     # before 'pair-list' (the JSON-encoding contrast) — approval is
     # the higher-order HEAAL property.
     assert first_bullet_idx < p.find("pair-list", contrast_idx)
+
+
+# ─── ESSENTIALS CHECK before SPEC-FIRST (hyun06000 2026-04-27 daily-alarm
+#     field test). The agent was emitting full specs for "내 캘린더 읽고
+#     알람" without knowing which calendar / which channel / what time —
+#     producing placeholder-laden specs the user couldn't reasonably
+#     approve. The prompt now requires bundling unknowns into ONE
+#     clarifying question before drafting the spec. ─────────────────────
+
+
+def test_essentials_check_section_present():
+    p = _get_prompt()
+    assert "ESSENTIALS CHECK" in p, (
+        "The Essentials Check section was added after a field test where "
+        "the agent emitted a placeholder-laden spec ('Discord/Slack/이메일 등') "
+        "without knowing the user's actual calendar / channel / schedule. "
+        "Removing this lets the regression class come back.")
+
+
+def test_essentials_check_lists_concrete_categories():
+    p = _get_prompt()
+    # The five categories the spec needs concrete answers for.
+    for required in ("Inputs", "Outputs", "Time", "Format", "Auth"):
+        assert required in p, f"essentials category missing: {required}"
+
+
+def test_essentials_check_calls_out_daily_alarm_field_test():
+    """The verbatim failure example must remain in the prompt so the
+    agent sees itself in the anti-pattern (same approach as the
+    Bluesky one-program regression)."""
+    p = _get_prompt()
+    assert "daily-alarm-bot" in p
+    assert "내 캘린더 읽고 아침에 알람" in p
+    # The placeholder pattern that triggered the issue
+    assert "Discord / Slack / 이메일 등" in p
+
+
+def test_clarifier_shape_uses_answer_only_action():
+    """When essentials are missing, the action MUST be answer_only,
+    NOT spec_pending — the agent is gathering info, not proposing a
+    plan. Mixing these hides the question behind an approval card."""
+    p = _get_prompt()
+    # The clarifier shape block must specify answer_only
+    clarifier_section = p[p.find("CLARIFIER shape"):]
+    clarifier_section = clarifier_section[:1500]
+    assert "answer_only" in clarifier_section
+    # And in the broader essentials section the prompt must explicitly
+    # say spec_pending is NOT used for the clarifier.
+    essentials = p[p.find("ESSENTIALS CHECK"):p.find("CLARIFIER shape") + 200]
+    assert "spec_pending" in essentials
+    assert "**NOT**" in essentials
+
+
+def test_clarifier_label_does_not_collide_with_closing_format_b():
+    """The closing template's "FORMAT B — BUILD" must remain the only
+    use of the "FORMAT B" label. The essentials clarifier (called
+    "CLARIFIER shape") used to be labeled "FORMAT B — clarifying
+    turn", which collided with the closing template's FORMAT B and
+    confused the test that scans the closing tail. Keep them distinct.
+    """
+    p = _get_prompt()
+    assert "FORMAT B — clarifying" not in p, (
+        "Don't reintroduce the FORMAT B label for the clarifier — it "
+        "collides with the closing FORMAT B (BUILD).")
+    # And the closing FORMAT B is still there as a peer to A and C.
+    tail = p[-3000:]
+    assert "FORMAT A" in tail and "FORMAT B" in tail and "FORMAT C" in tail
+
+
+def test_decision_tree_runs_essentials_check_before_format_a():
+    """The DECISION block must route turn-1-of-new-agent through the
+    essentials check FIRST. If the check is bypassed, we're back to
+    the field-test failure."""
+    p = _get_prompt()
+    decision_section = p[p.find("DECISION:"):]
+    decision_section = decision_section[:2000]
+    assert "RUN THE ESSENTIALS CHECK" in decision_section
+    # And the branch order is: missing → FORMAT C; complete → FORMAT A
+    missing_idx = decision_section.find("if any essential is missing")
+    complete_idx = decision_section.find("if all essentials are known")
+    assert missing_idx != -1 and complete_idx != -1
+    assert missing_idx < complete_idx, (
+        "The 'missing → clarify' branch must appear first so the agent "
+        "checks for unknowns before assuming defaults.")

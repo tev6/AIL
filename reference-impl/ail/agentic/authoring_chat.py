@@ -217,7 +217,45 @@ class AuthoringChat:
 
 **When does this apply?** PROGRAMS ON DISK inventory is empty AND the user's request is a new agent (asking to build / create / make something non-trivial). This is literally turn 1 of a fresh `ail init` or a pivoted project. It is NOT an edit.
 
-**What you emit on turn 1 in that case — EXACTLY this shape, nothing else:**
+**ESSENTIALS CHECK — runs BEFORE you draft the spec (highest within this rule).**
+
+The user's first message is often **a wish, not a brief**. "내 캘린더 읽고 아침에 알람 줘" sounds complete but is missing every external interface decision the agent needs. Drafting a spec that hand-waves these (e.g., "Discord / Slack / 이메일 등") puts the failure on the user later — they approve a fuzzy plan and the implementation can't possibly satisfy it. **Don't draft a spec around unknowns. Ask once, then draft once.**
+
+**Field-test failure (hyun06000 2026-04-27, daily-alarm-bot):** user said "내 캘린더 읽고 아침에 알람 줘" → agent emitted full spec with `Discord / Slack / 이메일 등` and "알림 채널 설정"-style placeholders, jumped to `spec_pending`. User feedback: "정보가 너무 없는 상태에서 바로 에이전트부터 올리려 함. 실패 확률 높고 UX 안 좋음." This rule exists to close that hole.
+
+The agent's external interfaces fall into a small set; the spec needs concrete answers for any that apply:
+
+- **Inputs**: which provider/account? (Google Calendar vs Apple vs Outlook; which GitHub repo; which Slack workspace; which Notion DB.) An API name without an account/owner is useless.
+- **Outputs / channels**: where does the result go? (Discord webhook URL / Slack webhook / email address / printed to chat / file at a specific path.) "알림" / "메시지" / "전송" without a target is a placeholder.
+- **Time / cadence**: if the agent runs on a schedule — at what time, in what timezone, how often? "아침" alone is not a time. "매일" alone is not a cadence.
+- **Format / shape**: any non-default output format the user already has in mind? (요약 길이 / 언어 / Markdown vs plain.)
+- **Auth / credentials**: which keys live in `env.read`? (e.g., `GOOGLE_CALENDAR_TOKEN` vs OAuth flow.) If the user can't answer this, point them at where to get it.
+
+**Decision tree for turn 1:**
+
+1. List the essentials your spec would need to be concrete (not a placeholder list with "/" or "등").
+2. Are all of them either (a) supplied by the user, or (b) covered by an obvious unique default (e.g., "post to this chat" when the agent has no obvious external target)?
+   - YES → draft the spec NOW (next section), with concrete answers in every slot.
+   - NO → emit the **CLARIFIER shape** below: ONE bundled clarifying message listing every unknown, with concrete option lists where applicable. NO `<file>`. `<action>spec_pending</action>` is **NOT** used here — use `<action>answer_only</action>` because you are gathering information, not proposing a plan yet. Next turn (after user answers) draft the spec. (This is a flavor of the closing template's FORMAT C — see the closing decision tree.)
+
+**CLARIFIER shape (use when essentials are missing):**
+
+```
+<reply>
+명세를 정확히 그리려면 몇 가지가 필요해요. 한꺼번에 답해주시면 다음 턴에 바로 명세 드립니다.
+
+1. **<unknown 1>** — <why it matters in one clause>. <option list with concrete alternatives>.
+2. **<unknown 2>** — …
+3. **<unknown 3>** — …
+
+(필요한 항목만 답하셔도 됩니다 — 답 안 한 항목은 합리적 default로 채울게요.)
+</reply>
+<action>answer_only</action>
+```
+
+The clarifier MUST: bundle ALL unknowns into one turn (don't drip-feed), include concrete option lists not abstract questions ("Google Calendar vs Apple Calendar vs Outlook?" not "캘린더 API는 뭐로 하시겠어요?"), and explicitly invite "default-OK" so the user doesn't feel forced to answer everything.
+
+**What you emit on turn 1 when essentials ARE all known — EXACTLY this shape, nothing else:**
 
 ```
 <reply>
@@ -1794,7 +1832,9 @@ DECISION:
       use FORMAT C (info)
 
   ELSE IF this is turn 1 of a NEW agent (PROGRAMS ON DISK is empty AND the user is asking to build / create something non-trivial, AND the prior turn did NOT already have spec_pending approved) →
-      use FORMAT A (spec-first)
+      RUN THE ESSENTIALS CHECK (see "SPEC-FIRST FOR NEW AGENTS" section above):
+        - if any essential is missing (input provider, output channel, schedule/time, auth, format) AND no obvious unique default exists → use FORMAT C with the bundled CLARIFIER content described in that section. Action: `answer_only`. Spec comes NEXT turn.
+        - if all essentials are known or covered by an obvious default → use FORMAT A (spec-first) with concrete answers in every slot, no placeholders like "Discord/Slack/이메일 등".
 
   ELSE → use FORMAT B (build)
 ═══════════════════════════════════════════════════════════════════
