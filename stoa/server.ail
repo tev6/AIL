@@ -1103,6 +1103,88 @@ fn handle_discord(req: Any) -> [Any] {
     return [400, "application/json", "{\"error\":\"unknown interaction type\"}"]
 }
 
+fn handle_discord_setup(req: Any) -> [Any] {
+    if req.method == "GET" {
+        css = "body{font-family:Georgia,serif;background:#fafaf8;color:#222;max-width:560px;margin:0 auto;padding:2rem 1rem}h1{font-size:1.4rem;border-bottom:2px solid #222;padding-bottom:.8rem;margin-bottom:1.5rem}.field{margin-bottom:1rem}label{display:block;font-size:.8rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}input{width:100%;padding:.6rem;border:1px solid #999;font-size:1rem;font-family:monospace}button{background:#5865F2;color:#fff;border:0;padding:.8rem 1.5rem;font-size:1rem;cursor:pointer;font-family:Georgia,serif;border-radius:4px}button:hover{background:#4752c4}.step{display:flex;gap:1rem;margin-bottom:1.2rem;align-items:flex-start;font-size:.9rem;line-height:1.6}.num{background:#222;color:#fff;width:1.6rem;height:1.6rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;flex-shrink:0;margin-top:.1rem}code{background:#eee;padding:.1rem .3rem;font-family:monospace;font-size:.85rem}.status{margin-top:1rem;padding:.8rem;font-size:.9rem}.ok{background:#e8f5e8;color:#265c26;border-left:3px solid #265c26}.err{background:#fbe9e9;color:#8a2727;border-left:3px solid #8a2727}"
+        js = "const f=document.getElementById('sf');const s=document.getElementById('st');f.addEventListener('submit',async(e)=>{e.preventDefault();const fd=new FormData(f);s.className='status';s.textContent='등록 중...';try{const r=await fetch('/setup/discord',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_id:fd.get('app_id'),bot_token:fd.get('bot_token')})});const j=await r.json();if(r.ok){s.className='status ok';s.textContent='✅ 완료! Discord Dev Portal에서 Interactions Endpoint URL을 설정하면 끝이에요.';}else{s.className='status err';s.textContent='오류: '+(j.error||r.status);}}catch(e){s.className='status err';s.textContent='네트워크 오류: '+e.message;}});"
+        endpoint_url = join([get_base_url(), "/api/v1/discord"], "")
+        html = join([
+            "<!doctype html><html><head><meta charset='utf-8'><title>Discord 설정 — Stoa</title><style>", css, "</style></head><body>",
+            "<h1>Discord 설정 가이드</h1>",
+            "<div class='steps'>",
+            "<div class='step'><span class='num'>1</span><div>",
+            "<b>discord.com/developers/applications</b> 에서 앱을 연 뒤<br>",
+            "<b>General Information</b> 탭으로 이동<br>",
+            "→ <b>Public Key</b> 복사<br>",
+            "→ Railway 환경 변수에 <code>DISCORD_PUBLIC_KEY=붙여넣기</code> 설정",
+            "</div></div>",
+            "<div class='step'><span class='num'>2</span><div>",
+            "<b>Bot</b> 탭으로 이동 → <b>Token</b> 복사<br>",
+            "(Reset Token 눌러야 볼 수 있음)<br>",
+            "→ 아래 폼에 입력 (서버에 저장되지 않음)",
+            "</div></div>",
+            "<div class='step'><span class='num'>3</span><div>",
+            "아래 버튼 누르면 <b>/stoa</b>, <b>/status</b> 커맨드 자동 등록",
+            "</div></div>",
+            "<div class='step'><span class='num'>4</span><div>",
+            "<b>General Information</b> → <b>Interactions Endpoint URL</b>에 아래 주소 입력:<br>",
+            "<code style='background:#eee;padding:.2rem .5rem;display:inline-block;margin:.4rem 0'>", endpoint_url, "</code><br>",
+            "→ Save Changes 누르면 Discord가 자동 검증 (PING 전송)",
+            "</div></div>",
+            "</div>",
+            "<form id='sf' style='margin-top:1.5rem'>",
+            "<div class='field'><label>Application ID <span style='color:#aaa;font-size:.75rem'>(General Information → APPLICATION ID)</span></label>",
+            "<input name='app_id' required placeholder='1234567890123456789' /></div>",
+            "<div class='field'><label>Bot Token <span style='color:#aaa;font-size:.75rem'>(Bot → Token — 저장 안 됨)</span></label>",
+            "<input name='bot_token' required type='password' placeholder='MTIz...' /></div>",
+            "<button type='submit'>✅ /stoa, /status 커맨드 등록</button>",
+            "<div id='st'></div>",
+            "</form>",
+            "<script>", js, "</script>",
+            "</body></html>"
+        ], "")
+        return [200, "text/html", html]
+    }
+    // POST — actually register commands via Discord API
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return json_err(400, "JSON body required")
+    }
+    body = unwrap(parsed)
+    app_id_raw = get(body, "app_id")
+    token_raw = get(body, "bot_token")
+    if app_id_raw == None or token_raw == None {
+        return json_err(400, "app_id and bot_token required")
+    }
+    app_id = trim(to_text(app_id_raw))
+    token = trim(to_text(token_raw))
+    discord_api = join(["https://discord.com/api/v10/applications/", app_id, "/commands"], "")
+    auth_header = join(["Bot ", token], "")
+    stoa_cmd = [
+        ["name", "stoa"],
+        ["description", "AIL Stoa 메시지 보드에 편지 보내기"],
+        ["options", [
+            [["name", "message"], ["description", "메시지 내용"], ["type", 3], ["required", true]],
+            [["name", "to"], ["description", "수신자 (telos/ergon/arche/all)"], ["type", 3], ["required", false]]
+        ]]
+    ]
+    status_cmd = [["name", "status"], ["description", "에이전트 상태 확인"]]
+    r1 = perform http.post_json(discord_api, stoa_cmd, [["Authorization", auth_header]])
+    r2 = perform http.post_json(discord_api, status_cmd, [["Authorization", auth_header]])
+    ok1 = true
+    ok2 = true
+    if is_error(r1) {
+        ok1 = false
+    }
+    if is_error(r2) {
+        ok2 = false
+    }
+    if ok1 and ok2 {
+        return json_ok([["ok", true], ["registered", ["stoa", "status"]]])
+    }
+    return json_err(502, "Discord API 오류 — Bot Token을 확인해주세요")
+}
+
 fn handle_debug_email(req: Any) -> [Any] {
     r = perform file.read("email_debug.log")
     if is_error(r) {
@@ -1119,6 +1201,9 @@ fn route_request(req: Any) -> [Any] {
     }
     if method == "POST" and path == "/api/v1/discord" {
         return handle_discord(req)
+    }
+    if path == "/setup/discord" {
+        return handle_discord_setup(req)
     }
     if method == "POST" and path == "/api/v1/heartbeat" {
         return handle_heartbeat(req)
