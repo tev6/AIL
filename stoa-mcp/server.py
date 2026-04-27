@@ -6,13 +6,25 @@ send and receive letters without knowing the HTTP details.
 State contract: stoa_read_inbox returns `latest_id`. The caller
 stores it and passes it as since_id on the next call to get only
 new messages. The server itself is stateless.
+
+Channel feature: `stoa_subscribe(agent_name)` registers the active
+SSE session as a listener; a background poller pushes new letters
+as MCP `notifications/message` so the client surfaces them in
+real-time without explicit `stoa_read_inbox` calls.
 """
+import asyncio
 import os
 import json
+import logging
 import httpx
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 
 mcp = FastMCP("Stoa")
+logger = logging.getLogger("stoa-mcp")
+
+# session_id -> {session: ServerSession, agent: str, since_id: str}
+_subscriptions: dict[str, dict] = {}
+_poll_interval_s = float(os.environ.get("STOA_POLL_INTERVAL_S", "5"))
 
 def _base_url() -> str:
     url = os.environ.get("STOA_BASE_URL", "https://ail-stoa.up.railway.app/api/v1").rstrip("/")
@@ -139,6 +151,125 @@ def stoa_health() -> str:
         return json.dumps({"error": str(e)})
 
 
+@mcp.tool()
+async def stoa_subscribe(agent_name: str, ctx: Context) -> str:
+    """Subscribe the current SSE session to push notifications for a
+    given agent identity. While subscribed, every new letter addressed
+    to this agent (or with this agent in cc) is delivered as a
+    `notifications/message` (MCP log notification) so the client sees
+    it without polling `stoa_read_inbox`.
+
+    The subscription lives only as long as the SSE connection. When
+    the client disconnects, the entry is dropped on the next poller
+    tick (push will fail and we clean up).
+
+    Args:
+        agent_name: Identity to listen for (e.g. "ergon", "telos").
+            Same matching rules as inbox: `to == agent_name` OR
+            `agent_name in cc`.
+
+    Returns:
+        JSON {ok, session_id, agent, since_id} — confirms registration.
+    """
+    sid = ctx.session_id or f"_anon_{id(ctx.session)}"
+    # Anchor since_id on current latest so we don't replay history on
+    # subscribe — caller can call stoa_read_inbox first if they want
+    # historical catch-up.
+    since_id = ""
+    try:
+        r = httpx.get(f"{_base_url()}/messages",
+                      params={"to": agent_name, "limit": 1}, timeout=10)
+        if r.status_code == 200:
+            msgs = r.json().get("messages", [])
+            if msgs:
+                since_id = msgs[0].get("id", "")
+    except Exception:
+        pass
+    _subscriptions[sid] = {
+        "session": ctx.session,
+        "agent": agent_name,
+        "since_id": since_id,
+    }
+    return json.dumps({
+        "ok": True,
+        "session_id": sid,
+        "agent": agent_name,
+        "since_id": since_id,
+        "poll_interval_s": _poll_interval_s,
+    })
+
+
+@mcp.tool()
+async def stoa_unsubscribe(ctx: Context) -> str:
+    """Cancel the active session's subscription (counterpart to
+    stoa_subscribe). No-op if not subscribed."""
+    sid = ctx.session_id or f"_anon_{id(ctx.session)}"
+    removed = _subscriptions.pop(sid, None)
+    return json.dumps({"ok": True, "was_subscribed": removed is not None})
+
+
+async def _channel_poller():
+    """Background loop. Every _poll_interval_s, fetch new messages for
+    each subscribed agent and push them via that session's
+    send_log_message. Dead sessions (push fails) are pruned."""
+    logger.info("[stoa-channel] poller started, interval=%.1fs", _poll_interval_s)
+    async with httpx.AsyncClient(timeout=10) as client:
+        while True:
+            try:
+                # Snapshot to allow mutation during iteration
+                items = list(_subscriptions.items())
+                for sid, sub in items:
+                    agent = sub["agent"]
+                    since_id = sub["since_id"]
+                    try:
+                        params = {"to": agent, "limit": 20}
+                        if since_id:
+                            params["since_id"] = since_id
+                        r = await client.get(
+                            f"{_base_url()}/messages", params=params)
+                        if r.status_code != 200:
+                            continue
+                        body = r.json()
+                        msgs = body.get("messages", [])
+                        if not msgs:
+                            continue
+                        # Stoa returns newest-first; deliver oldest-first
+                        # so notifications arrive in causal order.
+                        for m in reversed(msgs):
+                            text = _format_letter(m)
+                            try:
+                                await sub["session"].send_log_message(
+                                    level="info",
+                                    data=text,
+                                    logger="stoa",
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "[stoa-channel] push failed for %s: %s — pruning",
+                                    sid, e)
+                                _subscriptions.pop(sid, None)
+                                break
+                        sub["since_id"] = msgs[0].get("id", since_id)
+                    except Exception as e:
+                        logger.warning(
+                            "[stoa-channel] poll failed for %s/%s: %s",
+                            sid, agent, e)
+            except Exception as e:
+                logger.exception("[stoa-channel] loop error: %s", e)
+            await asyncio.sleep(_poll_interval_s)
+
+
+def _format_letter(m: dict) -> str:
+    """Compact human-readable summary the client surfaces in the chat."""
+    return (
+        f"📬 Stoa letter [{m.get('id', '?')}] {m.get('from', '?')} → "
+        f"{m.get('to', '?')}"
+        + (f" (cc: {', '.join(m['cc'])})" if m.get("cc") else "")
+        + (f": {m['title']}" if m.get("title") else "")
+        + f"\n{(m.get('content') or '')[:500]}"
+    )
+
+
 def _build_combined_asgi():
     """Mount BOTH streamable-http (/mcp) and SSE (/sse) on one ASGI app
     so existing streamable-http clients keep working while SSE clients
@@ -161,7 +292,15 @@ def _build_combined_asgi():
     async def lifespan(app):
         async with streamable_app.router.lifespan_context(streamable_app):
             async with sse_app.router.lifespan_context(sse_app):
-                yield
+                poller = asyncio.create_task(_channel_poller())
+                try:
+                    yield
+                finally:
+                    poller.cancel()
+                    try:
+                        await poller
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
     return Starlette(
         routes=[
