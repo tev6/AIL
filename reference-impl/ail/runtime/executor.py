@@ -418,37 +418,81 @@ class Executor:
         #   in-program `human.approve` calls are honored — that's harness
         #   work for a future PR).
         trust_level = self.ctx_stack.get("trust_level", "default")
-        if trust_level == "plan" and stmt.effect != "human.approve":
+        if trust_level in ("plan", "auto") and stmt.effect != "human.approve":
             preview_args = ", ".join(
                 repr(a.value)[:60] for a in args
             )
             plan_text = (
-                f"[trust_level=plan] About to call: perform "
+                f"[trust_level={trust_level}] About to call: perform "
                 f"{stmt.effect}({preview_args})"
             )
-            try:
-                approval = self._human_approve(
-                    [ConfidentValue(plan_text, 1.0)], {},
-                    Origin(kind="effect", name="trust_gate", parents=[]),
-                )
-            except Exception as e:
+
+            # auto mode (Arche #3): consult `intent is_safe` first if
+            # the program defines one. The intent returns a Text verdict:
+            # "allow" / "safe" → run perform with no further gate.
+            # "deny" / "unsafe" → return Result-error immediately.
+            # "ask" / "review" → fall through to human.approve gate.
+            # If is_safe is undefined, auto behaves like default (no gate).
+            decision = "ask" if trust_level == "plan" else "allow"
+            if trust_level == "auto":
+                if "is_safe" in self.intents:
+                    try:
+                        verdict_cv = self._invoke_intent(
+                            self.intents["is_safe"],
+                            [ConfidentValue(plan_text, 1.0)], {},
+                        )
+                        v = str(verdict_cv.value).strip().lower()
+                        if v in ("allow", "safe", "true", "yes"):
+                            decision = "allow"
+                        elif v in ("deny", "unsafe", "false", "no"):
+                            decision = "deny"
+                        elif v in ("ask", "review", "approve"):
+                            decision = "ask"
+                        else:
+                            # Conservative default for unknown verdict
+                            decision = "ask"
+                    except Exception as e:
+                        self.trace.record("is_safe_error",
+                                          effect=stmt.effect, error=str(e))
+                        decision = "ask"
+                else:
+                    decision = "allow"
+
+            if decision == "deny":
                 self.trace.record("perform_denied",
-                                  effect=stmt.effect, reason=f"approve_error:{e}")
+                                  effect=stmt.effect, reason="is_safe_deny")
                 return ConfidentValue(
                     {"_result": True, "ok": False,
-                     "error": f"trust_gate: approval failed: {e}"},
+                     "error": f"trust_gate: is_safe denied "
+                              f"perform {stmt.effect}"},
                     0.0,
                 )
-            ar = approval.value
-            if isinstance(ar, dict) and ar.get("ok") is False:
-                self.trace.record("perform_denied",
-                                  effect=stmt.effect, reason="user_declined")
-                return ConfidentValue(
-                    {"_result": True, "ok": False,
-                     "error": f"trust_gate: user declined "
-                              f"{stmt.effect}: {ar.get('error', '')}"},
-                    0.0,
-                )
+
+            if decision == "ask":
+                try:
+                    approval = self._human_approve(
+                        [ConfidentValue(plan_text, 1.0)], {},
+                        Origin(kind="effect", name="trust_gate", parents=[]),
+                    )
+                except Exception as e:
+                    self.trace.record("perform_denied",
+                                      effect=stmt.effect,
+                                      reason=f"approve_error:{e}")
+                    return ConfidentValue(
+                        {"_result": True, "ok": False,
+                         "error": f"trust_gate: approval failed: {e}"},
+                        0.0,
+                    )
+                ar = approval.value
+                if isinstance(ar, dict) and ar.get("ok") is False:
+                    self.trace.record("perform_denied",
+                                      effect=stmt.effect, reason="user_declined")
+                    return ConfidentValue(
+                        {"_result": True, "ok": False,
+                         "error": f"trust_gate: user declined "
+                                  f"{stmt.effect}: {ar.get('error', '')}"},
+                        0.0,
+                    )
 
         effect = self.effects.get(stmt.effect)
         if effect is None:
