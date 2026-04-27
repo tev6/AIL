@@ -139,16 +139,56 @@ def stoa_health() -> str:
         return json.dumps({"error": str(e)})
 
 
+def _build_combined_asgi():
+    """Mount BOTH streamable-http (/mcp) and SSE (/sse) on one ASGI app
+    so existing streamable-http clients keep working while SSE clients
+    (e.g. `claude mcp add --transport sse stoa <url>/sse`) connect via
+    the same Railway service. Each transport has its own session state,
+    but they share the tool registry."""
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    streamable_app = mcp.http_app(transport="streamable-http", path="/")
+    sse_app = mcp.http_app(transport="sse", path="/")
+
+    # Lifespans of mounted apps must run during the parent's lifespan
+    # so transport-internal task groups (StreamableHTTP session manager)
+    # are initialized. Without this, requests raise
+    # "Task group is not initialized. Make sure to use run().".
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app):
+        async with streamable_app.router.lifespan_context(streamable_app):
+            async with sse_app.router.lifespan_context(sse_app):
+                yield
+
+    return Starlette(
+        routes=[
+            Mount("/mcp", app=streamable_app),
+            Mount("/sse", app=sse_app),
+        ],
+        lifespan=lifespan,
+    )
+
+
 if __name__ == "__main__":
-    # Transport: stdio for local Claude Code MCP (claude mcp add ...
-    # python server.py); streamable-http for Railway / remote deploy.
-    # Railway sets PORT automatically — its presence selects http.
-    # Override with MCP_TRANSPORT={stdio|http} if needed.
+    # Transport selection:
+    # - stdio: local Claude Code (`claude mcp add ... python server.py`)
+    # - combined HTTP: Railway / remote — serves /mcp (streamable-http)
+    #   AND /sse (SSE) on one port. Railway sets PORT.
+    # - Override with MCP_TRANSPORT={stdio|http|sse|streamable-http|combined}.
     transport = os.environ.get("MCP_TRANSPORT")
     if transport is None:
-        transport = "http" if os.environ.get("PORT") else "stdio"
+        transport = "combined" if os.environ.get("PORT") else "stdio"
     if transport == "stdio":
         mcp.run()
-    else:
+    elif transport in ("sse", "http", "streamable-http"):
         port = int(os.environ.get("PORT", 8080))
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+        mcp.run(transport=transport, host="0.0.0.0", port=port)
+    else:
+        # combined: streamable-http at /mcp + SSE at /sse on one port
+        import uvicorn
+        port = int(os.environ.get("PORT", 8080))
+        uvicorn.run(_build_combined_asgi(), host="0.0.0.0", port=port,
+                    log_level="info")
