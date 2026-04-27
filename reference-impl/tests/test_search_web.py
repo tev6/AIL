@@ -191,7 +191,16 @@ def test_search_web_count_capped_at_20(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_browser_fetch_removed():
-    """browser.fetch was intentionally removed — must raise RuntimeError."""
+    """browser.fetch was intentionally removed.
+
+    Post-#4 (deny-first, 2026-04-27): unknown effects return a
+    Result-error instead of raising RuntimeError, so programs can
+    `attempt` / `is_error` around them. The harness still rejects;
+    only the failure mode changed (graceful, not crash)."""
     ex = _make_exec()
-    with pytest.raises(RuntimeError, match="unknown effect"):
-        ex._builtin_effect("browser.fetch", [_cv("https://example.com")], {})
+    cv = ex._builtin_effect("browser.fetch", [_cv("https://example.com")], {})
+    raw = cv.value
+    assert isinstance(raw, dict)
+    assert raw.get("ok") is False
+    assert "deny-first" in (raw.get("error") or "")
+    assert "browser.fetch" in (raw.get("error") or "")
