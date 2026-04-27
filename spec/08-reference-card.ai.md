@@ -702,6 +702,15 @@ Built-in effects:
   - `http.respond(status: Number, content_type: Text, body: Text)` —
     server response from inside an `evolve` server arm. Used with
     `evolve ... when request_received(req) { ... }` blocks.
+  - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
+    image string (`![alt](url)`) the chat / run UI renders inline.
+    For local file paths the bytes are base64-encoded into a
+    `data:image/...` URL so the UI does not need filesystem access;
+    `http(s)://` and `data:` URLs pass through. Use it to surface
+    plots, screenshots, or any rendered output to the user — the
+    return value is plain Text, so feed it to `perform log(...)` or
+    return it from an entry, anywhere markdown rendering applies.
+    Returns Result-error if a local file is missing or unreadable.
   - `log(message: Any)` — stderr, returns nothing
   - `human_ask(question: Text) -> Text`
 

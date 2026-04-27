@@ -4,6 +4,48 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.63.0 — 2026-04-27 (이미지 in/out — vision input + image.embed)
+
+**feat: 비개발자가 막힌 화면을 캡쳐해서 붙여넣으면 모델이 보고 다음 지침을 줌.**
+
+hyun06000 요청: "예를 들면 키 발급같은 비개발자에게 어려운 작업을 하다가 막혔어.
+지금 화면을 캡쳐해서 어떤 상황인지 LLM이 판단하고 다음 지침을 인간에게 줄 수 있어야해."
+
+**INPUT — 화면을 모델에게 보여주기 (vision):**
+- chat composer에 📎 버튼 + 텍스트박스 paste/drop 핸들러 추가. 클립보드에서
+  이미지 붙여넣기, 파일 끌어 놓기, 파일 선택 모두 지원. 첨부된 이미지는 전송 전
+  썸네일 strip으로 미리보기 + × 버튼으로 제거.
+- `/authoring-chat` POST가 JSON body 지원 (`{message, attachments: [...]}`).
+- `AuthoringChat.turn(message, attachments)`이 attachment 목록을 adapter의
+  `inputs["_attachments"]`로 forward.
+- `AnthropicAdapter`가 authoring-chat 분기에서 `_attachments`를 `image` content
+  block으로 변환해 multi-modal user message 구성. Sonnet/Opus의 vision으로
+  화면 그대로 봄.
+- 다른 어댑터(OpenAI/Ollama)는 attachment를 silent 무시 — 추후 GPT-4V 분기 추가.
+- 한 이미지 최대 3MB (base64 후 ~4MB, Anthropic API 5MB 제한 안전 마진).
+
+**OUTPUT — 모델이 만든/가져온 이미지를 사용자에게 보여주기:**
+- 새 effect `image.embed(src, alt?)` — 로컬 파일 경로면 바이트를 base64
+  data URL로 인라인, http(s) URL이면 그대로 통과. 결과는 markdown
+  `![alt](url)` Text. `perform log(...)`나 entry return으로 흘리면 chat /
+  run UI가 inline `<img>`로 렌더링.
+- `inlineRender`에 `![alt](url)` 패턴 추가. data: URL도 정상 표시.
+- 저자 prompt에 image input vs output 사용 패턴 명시 (헷갈리지 않도록).
+
+**스펙 정합 (Rule 5):**
+- `reference_card.md` + `spec/08-reference-card.ai.md` — `image.embed` 시그니처 추가.
+- `authoring_chat.py` prompt — vision input 안내 + image.embed 사용 예제 + WRONG/CORRECT.
+
+**테스트:** 8개 신규 (test_image_embed.py 5 + test_vision_attachments.py 3).
+총 706 passing.
+
+**한계:**
+- vision은 Anthropic adapter만. OpenAI gpt-4o 추가는 별도 PR.
+- chat history에 attachment 저장 안 함 — 새로고침하면 이미지 사라짐 (텍스트만 남음).
+- per-image 3MB 한도. 더 큰 스크린샷은 압축/리사이즈 필요 (브라우저 측 helper 미구현).
+
+---
+
 ## v1.62.0 — 2026-04-27 (Phase C — `ail` browser launcher + env wizard)
 
 **feat: 터미널에 경로를 손으로 치지 않고도 새 폴리스를 만들 수 있게 됨.**
