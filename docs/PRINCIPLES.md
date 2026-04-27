@@ -50,6 +50,18 @@
 - `evolve rollback_on` 강제 → 롤백 없는 변이 불가
 - `human.approve` 게이트 → **되돌릴 수 없는** effect에만 사람 승인 요구 (아래 §3a 참조)
 
+### 3d. deny-first effect 정책 (Arche 2026-04-27 #4, ergon 구현, hyun06000 동의)
+
+**런타임은 기본 deny.** `perform`이 효과를 호출하려면 두 조건을 동시 충족:
+1. `ALLOWED_EFFECTS`에 등록되어 있거나 `effect` 선언으로 추가된 이름
+2. 활성 context 어디에서도 `deny_effects: [Text]`로 거부되지 않은 이름
+
+**Strictest wins.** 어떤 allow 규칙도 deny를 이길 수 없다. `deny_effects`는 active context stack 전체에서 union — 어떤 frame이 거부하면 안쪽 모든 scope가 상속.
+
+위반/거부 시: `RuntimeError` 아니라 `Result-error` 반환. 프로그램이 `attempt` / `is_error`로 graceful fallback 가능.
+
+전체 명세: [`spec/05-effects.md` §11a](../spec/05-effects.md). 테스트: `tests/test_deny_first.py`.
+
 ### 3c. `on_compact` 컨벤션 (Arche 2026-04-27 #1, ergon 구현)
 
 evolve-server `_server_history`가 `keep_last`의 80%에 도달하면 runtime이

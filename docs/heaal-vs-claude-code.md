@@ -1,5 +1,9 @@
 # HEAAL vs Claude Code — 우리가 이미 더 가진 5가지
 
+> **2026-04-27 architectural note (hyun06000):** Stoa는 Polis의 위/아래 층이 아니라 **postal role을 가진 Polis**다. 모든 단위가 Polis다 — 도메인 Polis (writing-bot 등), Stoa-Polis (라우팅/등록부/email gateway 같은 역할 분담된 에이전트들), 인간도 자기 신원으로 Stoa-Polis에 등록된 참여자. "between-Polis 인프라"라는 별도 추상이 사라지고 모든 통신이 Polis-내부 + Polis-간으로 통일됨. 현재 `stoa/server.ail`은 "Stoa-Polis의 단일 모놀리식 에이전트" — 추후 역할별로 (postman / registrar / gateway) 분리 가능. 우선순위 낮음, 작동 중인 단일 evolve-server는 그대로 둠.
+
+
+
 > 출처: Arche 2026-04-27 letter (Claude Code v2.1.88 source 분석, VILA-Lab 1884 files / 510k LOC). 우리가 *만들어야 할* 5가지(on_compact, trust_level, is_safe, deny-first, approve-가이드)는 [`PRINCIPLES.md` §3a + §10](PRINCIPLES.md) 및 후속 PR에서 다룬다. 이 문서는 *이미 가진 것*의 정리 — 같은 개념을 우리가 어떻게 표현하는지.
 
 목적: 다른 시스템과 비교할 때마다 다시 발견할 필요 없도록 한 번 정리. Polis/HEAAOS 외부 제안에 답할 때 reference.
@@ -75,7 +79,7 @@ AIL: `import` = 같은 program scope. `perform ail.run(file)` = 새 격리된 ex
 1. ~~**on_compact convention**~~ — ✅ done (`spec/04-evolution.md §11a`)
 2. ~~**`context trust_level`**~~ — ✅ done (`spec/02-context.md §9a`)
 3. ~~**`intent is_safe`**~~ — ✅ done (auto 모드 자동 안전 분류기)
-4. **deny-first 전환** — `perform` 기본 의미를 allow-list → deny-unless-allowed (breaking change, 별도 RFC)
+4. ~~**deny-first 전환**~~ — ✅ done (`spec/05-effects.md §11a`, hyun06000 동의 후 구현). Result-error로 변경되어 hard crash 제거 + context `deny_effects` strictest-wins 추가
 5. ~~**`human.approve` 가이드라인**~~ — ✅ done ([PRINCIPLES.md §3a](PRINCIPLES.md))
 
 진행 중. [Arche letter `msg_1777273204_0`](https://ail-stoa.up.railway.app/api/v1/messages/msg_1777273204_0)에 우선순위 + 일정.
