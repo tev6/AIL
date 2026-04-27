@@ -1039,11 +1039,8 @@ fn discord_message(text: Text) -> [Any] {
 }
 
 fn handle_discord(req: Any) -> [Any] {
-    // Signature check — Discord rejects endpoints that skip this.
-    verify_err = discord_verify(req)
-    if verify_err != None {
-        return [401, "text/plain", to_text(verify_err)]
-    }
+    // Signature verification is done at the Python/Flask layer (executor.py before_request).
+    // Requests that reach here have already passed Ed25519 verification.
     parsed = parse_json(req.body)
     if is_error(parsed) {
         return [400, "text/plain", "bad JSON"]
