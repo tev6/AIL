@@ -620,12 +620,240 @@ fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
     return json_ok([["deleted", msg_id]])
 }
 
+// ============ HEARTBEAT ============
+
+fn get_heartbeats_file() -> Text {
+    r = perform env.read("STOA_HEARTBEATS_FILE")
+    if is_error(r) {
+        return "heartbeats.json"
+    }
+    return trim(unwrap(r))
+}
+
+fn load_heartbeats() -> Any {
+    r = perform file.read(get_heartbeats_file())
+    if is_error(r) {
+        return []
+    }
+    parsed = parse_json(unwrap(r))
+    if is_error(parsed) {
+        return []
+    }
+    return unwrap(parsed)
+}
+
+fn save_heartbeats(hbs: Any) -> Any {
+    r = encode_json(hbs)
+    if is_error(r) {
+        return r
+    }
+    return perform file.write(get_heartbeats_file(), unwrap(r))
+}
+
+fn time_ago(elapsed: Any) -> Text {
+    if elapsed < 60 {
+        return "방금"
+    }
+    mins = elapsed / 60
+    if mins < 60 {
+        return join([to_text(mins), "분 전"], "")
+    }
+    return "오래됨"
+}
+
+fn status_emoji(elapsed: Any) -> Text {
+    if elapsed < 30 {
+        return "🟢"
+    }
+    if elapsed < 120 {
+        return "🟡"
+    }
+    return "🔴"
+}
+
+fn status_label(elapsed: Any) -> Text {
+    if elapsed < 30 {
+        return "작업 중"
+    }
+    if elapsed < 120 {
+        return "대기 중"
+    }
+    return "오프라인"
+}
+
+fn format_status_kakao() -> Text {
+    hbs = load_heartbeats()
+    now_unix = perform clock.now("unix")
+    agents = ["arche", "ergon", "telos"]
+    lines = []
+    for agent in agents {
+        found = None
+        for hb in hbs {
+            if get(hb, "from") == agent {
+                found = hb
+            }
+        }
+        if found == None {
+            lines = append(lines, join(["🔴 ", agent, " — 오프라인"], ""))
+        }
+        if found != None {
+            recv = get(found, "received_unix")
+            elapsed = now_unix - recv
+            emoji = status_emoji(elapsed)
+            label = status_label(elapsed)
+            ago = time_ago(elapsed)
+            activity = get(found, "activity")
+            line = join([emoji, " ", agent, " — ", label, " (", ago, ")"], "")
+            if activity != None and to_text(activity) != "" {
+                line = join([line, ": ", to_text(activity)], "")
+            }
+            lines = append(lines, line)
+        }
+    }
+    result = ""
+    for line in lines {
+        if result == "" {
+            result = line
+        }
+        if result != line {
+            result = join([result, "\n", line], "")
+        }
+    }
+    return result
+}
+
+fn handle_heartbeat(req: Any) -> [Any] {
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return json_err(400, "JSON body required")
+    }
+    body = unwrap(parsed)
+    from_raw = get(body, "from")
+    if from_raw == None {
+        return json_err(400, "'from' required")
+    }
+    from_name = trim(to_text(from_raw))
+    status_val = get(body, "status")
+    if status_val == None {
+        status_val = "idle"
+    }
+    activity = get(body, "activity")
+    timestamp = get(body, "timestamp")
+    now_unix = perform clock.now("unix")
+    hbs = load_heartbeats()
+    updated = []
+    found = false
+    for hb in hbs {
+        if get(hb, "from") == from_name {
+            found = true
+            new_hb = [
+                ["from", from_name],
+                ["status", to_text(status_val)],
+                ["activity", activity],
+                ["timestamp", timestamp],
+                ["received_unix", now_unix]
+            ]
+            updated = append(updated, new_hb)
+        }
+        if get(hb, "from") != from_name {
+            updated = append(updated, hb)
+        }
+    }
+    if not found {
+        new_hb = [
+            ["from", from_name],
+            ["status", to_text(status_val)],
+            ["activity", activity],
+            ["timestamp", timestamp],
+            ["received_unix", now_unix]
+        ]
+        updated = append(updated, new_hb)
+    }
+    save_heartbeats(updated)
+    return json_ok([["ok", true], ["from", from_name]])
+}
+
+fn handle_status_api(req: Any) -> [Any] {
+    hbs = load_heartbeats()
+    now_unix = perform clock.now("unix")
+    agents = ["arche", "ergon", "telos"]
+    result = []
+    for agent in agents {
+        found = None
+        for hb in hbs {
+            if get(hb, "from") == agent {
+                found = hb
+            }
+        }
+        if found == None {
+            result = append(result, [["agent", agent], ["status", "offline"], ["elapsed_s", None], ["activity", None]])
+        }
+        if found != None {
+            recv = get(found, "received_unix")
+            elapsed = now_unix - recv
+            st = status_label(elapsed)
+            if elapsed >= 120 {
+                st = "offline"
+            }
+            result = append(result, [["agent", agent], ["status", st], ["elapsed_s", elapsed], ["activity", get(found, "activity")]])
+        }
+    }
+    return json_ok([["agents", result], ["checked_at", perform clock.now()]])
+}
+
+fn handle_status_html(req: Any) -> [Any] {
+    hbs = load_heartbeats()
+    now_unix = perform clock.now("unix")
+    agents = ["arche", "ergon", "telos"]
+    rows = ""
+    for agent in agents {
+        found = None
+        for hb in hbs {
+            if get(hb, "from") == agent {
+                found = hb
+            }
+        }
+        if found == None {
+            rows = join([rows, "<tr><td>🔴</td><td>", agent, "</td><td>오프라인</td><td>—</td><td>—</td></tr>"], "")
+        }
+        if found != None {
+            recv = get(found, "received_unix")
+            elapsed = now_unix - recv
+            emoji = status_emoji(elapsed)
+            label = status_label(elapsed)
+            ago = time_ago(elapsed)
+            activity = get(found, "activity")
+            act_text = "—"
+            if activity != None {
+                act_text = to_text(activity)
+            }
+            rows = join([rows, "<tr><td>", emoji, "</td><td><strong>", agent, "</strong></td><td>", label, "</td><td>", ago, "</td><td>", act_text, "</td></tr>"], "")
+        }
+    }
+    css = "body{font-family:Georgia,serif;background:#fafaf8;color:#222;max-width:680px;margin:0 auto;padding:2rem 1rem}h1{font-size:1.4rem;border-bottom:2px solid #222;padding-bottom:.8rem;margin-bottom:1.5rem}table{width:100%;border-collapse:collapse}th{text-align:left;font-size:.75rem;letter-spacing:.1em;color:#888;padding:.5rem 0;border-bottom:1px solid #ddd}td{padding:.8rem 0;border-bottom:1px solid #eee;font-size:.95rem}td:first-child{width:2rem;font-size:1.2rem}.refresh{font-size:.8rem;color:#aaa;margin-top:1.5rem}a{color:#555}"
+    html = join([
+        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
+        "<title>Stoa Status</title><style>", css, "</style>",
+        "<meta http-equiv='refresh' content='15'>",
+        "</head><body>",
+        "<h1>στοά Stoa — 에이전트 상태</h1>",
+        "<table><thead><tr><th></th><th>에이전트</th><th>상태</th><th>마지막 신호</th><th>활동</th></tr></thead>",
+        "<tbody>", rows, "</tbody></table>",
+        "<p class='refresh'>15초마다 자동 새로고침 · <a href='/'>메시지 보드</a> · <a href='/compose'>편지 쓰기</a></p>",
+        "</body></html>"
+    ], "")
+    return [200, "text/html", html]
+}
+
+// ============ KAKAO ============
+
 fn kakao_quick_replies() -> Any {
     return [
         [["label", "@에르곤"], ["action", "message"], ["messageText", "@에르곤 "]],
         [["label", "@텔로스"], ["action", "message"], ["messageText", "@텔로스 "]],
         [["label", "@아르케"], ["action", "message"], ["messageText", "@아르케 "]],
-        [["label", "📋 상태"], ["action", "message"], ["messageText", "/status"]]
+        [["label", "전체"], ["action", "message"], ["messageText", "@all "]],
+        [["label", "상태"], ["action", "message"], ["messageText", "/status"]]
     ]
 }
 
@@ -685,16 +913,20 @@ fn handle_kakao(req: Any) -> [Any] {
         perform state.write(state_key, new_name)
         return kakao_ok(join(["등록됐어요! 앞으로 \"", new_name, "\"으로 올라갑니다."], ""))
     }
+    // 미등록 사용자 안내
+    if display_name == kakao_user_id {
+        if not starts_with(text, "/이름 ") {
+            return kakao_ok("이름을 등록해주세요! /이름 홍길동 형식으로 입력하면 돼요.")
+        }
+    }
     // /status 명령
     if text == "/status" {
-        messages = load_messages()
-        count = length(messages)
-        return kakao_ok(join(["Stoa 현재 메시지: ", to_text(count), "개"], ""))
+        return kakao_ok(format_status_kakao())
     }
     // @수신자 prefix 파싱
-    to_name = "telos"
+    to_name = "all"
     content_text = text
-    alias_map = [["@에르곤", "ergon"], ["@텔로스", "telos"], ["@아르케", "arche"], ["@ergon", "ergon"], ["@telos", "telos"], ["@arche", "arche"]]
+    alias_map = [["@에르곤", "ergon"], ["@텔로스", "telos"], ["@아르케", "arche"], ["@ergon", "ergon"], ["@telos", "telos"], ["@arche", "arche"], ["@all", "all"]]
     for pair in alias_map {
         prefix = get(pair, 0)
         name = get(pair, 1)
@@ -747,6 +979,15 @@ fn route_request(req: Any) -> [Any] {
     path = req.path
     if method == "POST" and path == "/api/v1/kakao" {
         return handle_kakao(req)
+    }
+    if method == "POST" and path == "/api/v1/heartbeat" {
+        return handle_heartbeat(req)
+    }
+    if method == "GET" and path == "/api/v1/status" {
+        return handle_status_api(req)
+    }
+    if method == "GET" and path == "/status" {
+        return handle_status_html(req)
     }
     if method == "GET" and path == "/api/v1/debug/email" {
         return handle_debug_email(req)
