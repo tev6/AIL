@@ -1062,21 +1062,36 @@ fn handle_discord(req: Any) -> [Any] {
             }
         }
         member = get(body, "member")
+        discord_user_id = "discord"
         discord_user = "discord"
         if member != None {
             user = get(member, "user")
             if user != None {
+                uid = get(user, "id")
+                if uid != None {
+                    discord_user_id = to_text(uid)
+                }
                 uname = get(user, "username")
                 if uname != None {
                     discord_user = to_text(uname)
                 }
             }
         }
-        // /stoa to:<name> message:<text>
+        // 등록된 이름 조회
+        state_key = join(["discord_name_", discord_user_id], "")
+        name_r = perform state.read(state_key)
+        if not is_error(name_r) {
+            stored = unwrap(name_r)
+            if stored != None and to_text(stored) != "" {
+                discord_user = to_text(stored)
+            }
+        }
+        // /stoa to:<name> message:<text> name:<등록>
         if cmd_name == "stoa" {
             options = get(data, "options")
             to_name = "all"
             content = ""
+            reg_name = ""
             if options != None {
                 for opt in options {
                     oname = get(opt, "name")
@@ -1087,10 +1102,18 @@ fn handle_discord(req: Any) -> [Any] {
                     if oname == "message" and oval != None {
                         content = to_text(oval)
                     }
+                    if oname == "name" and oval != None {
+                        reg_name = trim(to_text(oval))
+                    }
                 }
             }
+            // 이름 등록
+            if reg_name != "" and content == "" {
+                perform state.write(state_key, reg_name)
+                return discord_message(join(["등록됐어요! 앞으로 \"", reg_name, "\"으로 올라갑니다."], ""))
+            }
             if content == "" {
-                return discord_message("메시지 내용을 입력해주세요. /stoa to:telos message:안녕")
+                return discord_message("메시지 내용을 입력해주세요. /stoa message:안녕\n이름 등록: /stoa name:박상현")
             }
             msg_id = make_id()
             ts = perform clock.now()
@@ -1187,10 +1210,11 @@ fn handle_discord_setup(req: Any) -> [Any] {
     auth_header = join(["Bot ", token], "")
     stoa_cmd = [
         ["name", "stoa"],
-        ["description", "AIL Stoa 메시지 보드에 편지 보내기"],
+        ["description", "AIL Stoa 메시지 보드에 편지 보내기 (이름 등록: name 옵션만 사용)"],
         ["options", [
-            [["name", "message"], ["description", "메시지 내용"], ["type", 3], ["required", true]],
-            [["name", "to"], ["description", "수신자 (telos/ergon/arche/all)"], ["type", 3], ["required", false]]
+            [["name", "message"], ["description", "메시지 내용"], ["type", 3], ["required", false]],
+            [["name", "to"], ["description", "수신자 (telos/ergon/arche/all)"], ["type", 3], ["required", false]],
+            [["name", "name"], ["description", "내 이름 등록 (예: 박상현) — message 없이 단독 사용"], ["type", 3], ["required", false]]
         ]]
     ]
     status_cmd = [["name", "status"], ["description", "에이전트 상태 확인"]]
