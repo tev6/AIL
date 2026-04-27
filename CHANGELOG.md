@@ -4,6 +4,21 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.2 — 2026-04-27 (휴지통 dialog 줄바꿈 fix)
+
+hyun06000 즉시 보고: 휴지통 confirm dialog가 literal `\n` 텍스트로 표시됨.
+원인: `_PAGE` raw 트리플 스트링 안에서 `\\n`(4 backslash) 사용 → HTML 출력
+시 `\\n`(2 chars) → JS가 backslash escape로 처리해서 literal `\n` 렌더링.
+수정: 단일 backslash `\n` (Python source 2 chars)로 변경 → HTML에 `\n`
+(2 chars) → JS newline 정상.
+
+회귀 테스트: `test_trash_confirm_dialog_uses_real_newlines` (이중 escape
+패턴 검출 + 정상 escape 존재 확인).
+
+746 passing.
+
+---
+
 ## v1.64.1 — 2026-04-27 (field test fix — ESSENTIALS CHECK + 휴지통)
 
 hyun06000 daily-alarm-bot field test 후속 즉시 fix:
