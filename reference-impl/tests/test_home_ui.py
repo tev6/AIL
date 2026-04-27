@@ -114,6 +114,35 @@ def test_trash_polis_404_for_missing_path(client):
     assert r.status_code == 404
 
 
+def test_check_port_endpoint(client):
+    """`/check-port?port=N` returns {alive: bool} so the frontend can
+    wait for `ail up` to actually accept connections before opening
+    the browser tab. Used after the 30s blind-timeout regression."""
+    c, _ = client
+    # Port 1 is reserved (TCPMUX) — almost certainly closed
+    r = c.get("/check-port?port=1")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j["alive"] is False
+    assert j["port"] == 1
+
+
+def test_check_port_rejects_bad_input(client):
+    c, _ = client
+    r = c.get("/check-port?port=abc")
+    assert r.status_code == 400
+    r = c.get("/check-port?port=99999")
+    assert r.status_code == 400
+
+
+def test_spawn_log_endpoint_rejects_paths_outside_log_root(client, tmp_path):
+    """Defensive: /spawn-log must only serve files under
+    ~/.ail/logs/. Asking for /etc/passwd or anywhere else is denied."""
+    c, _ = client
+    r = c.get("/spawn-log?path=/etc/passwd")
+    assert r.status_code == 400
+
+
 def test_trash_confirm_dialog_uses_real_newlines(client):
     """The confirm() string in window.confirm must use a single JS
     escape `\\n` (2 chars in the HTML) so the dialog shows newlines.

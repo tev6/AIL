@@ -2599,6 +2599,26 @@ def render_authoring_page(
     }});
 
     msgEl.focus();
+
+    // Browser-tab-close → server-stop (hyun06000 2026-04-27 UX request).
+    // Non-developer mental model: "탭 닫으면 다 꺼진 거" — make that
+    // literal. pagehide fires reliably on close (more so than
+    // beforeunload, which modern browsers throttle). sendBeacon is
+    // fire-and-forget — the browser delivers it even after the tab
+    // has gone, no response handling needed. The /admin/stop endpoint
+    // already exists for manual shutdown.
+    //
+    // Caveat: this also kills the server on accidental close (e.g.
+    // user closes wrong tab). Acceptable trade-off — `ail home` can
+    // restart with one click. Not acceptable for long-running
+    // production, but `ail up` is local dev / authoring, not prod.
+    // Disable via ?keep=1 query param if the user wants to leave the
+    // server running across tab closes.
+    if (!new URLSearchParams(location.search).has('keep')) {{
+      window.addEventListener('pagehide', () => {{
+        try {{ navigator.sendBeacon('/admin/stop', new Blob([''], {{type: 'text/plain'}})); }} catch (e) {{}}
+      }});
+    }}
   </script>
 </body>
 </html>
