@@ -178,6 +178,47 @@ A conforming AIL runtime MUST:
 
 A runtime failing any of these is non-conforming.
 
+## 11a. Convention — `pure fn on_compact(history) -> [Any]` (Arche 2026-04-27)
+
+The default truncate-oldest strategy is age-based and semantically blind:
+a critical event 5 minutes ago can be evicted to make room for a routine
+ping just now. To let the program choose what survives, define
+`pure fn on_compact(history)` at module scope. The runtime calls it when
+`_server_history` usage hits 80% of `history.keep_last`, BEFORE the
+age-based truncate. The returned list replaces the in-memory history.
+
+```ail
+pure fn on_compact(history: [Any]) -> [Any] {
+    // keep all errors + last 10 events of any kind
+    out = []
+    for e in history {
+        if get(e, "is_error") {
+            out = append(out, e)
+        }
+    }
+    n = length(history)
+    start = n - 10
+    if start < 0 { start = 0 }
+    for i in range(start, n) {
+        out = append(out, get(history, i))
+    }
+    return out
+}
+```
+
+Guarantees:
+
+- Same purity rule as `on_death` — `pure fn` only. Compact must not
+  perform effects.
+- If `on_compact` is undefined → fall back to truncate-oldest.
+- If it returns a non-list → runtime ignores, falls back, warning logged.
+- If it raises → runtime logs and falls back. Server arm does not crash.
+- Throttle: after a successful compact, runtime waits until history grows
+  by ≥ 10% of `keep_last` before re-firing — prevents an on_compact that
+  returns input unchanged from looping.
+
+Same shape as `on_death`. New keyword count = 0.
+
 ## 12. What evolution gives up
 
 Evolution requires state — the history, the metrics, the calibrators. A program that relies on evolution cannot be treated as a pure artifact of its source code; its behavior depends on its operating history. This is a real cost. It is accepted because the alternative — code that cannot improve without full human rewrites in a world where its environment shifts weekly — is worse for the problems AIL is meant to solve.
