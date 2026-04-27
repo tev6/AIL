@@ -33,7 +33,8 @@ STATE="/tmp/.stoa_monitor_${IDENTITY}_since"
 
 # Pre-anchor: write current latest as starting point so first poll
 # emits nothing — only NEW letters wake the model.
-LATEST=$(curl -s -m 5 "${STOA_BASE}/messages?to=${IDENTITY}&limit=1" 2>/dev/null \
+# Poll all messages (no to= filter) to catch broadcast and null-recipient messages too.
+LATEST=$(curl -s -m 5 "${STOA_BASE}/messages?limit=1" 2>/dev/null \
     | python3 -c "import json,sys; m=json.load(sys.stdin).get('messages',[]); print(m[0]['id'] if m else '')" 2>/dev/null)
 echo "$LATEST" > "$STATE"
 LAST="$LATEST"
@@ -47,7 +48,8 @@ while true; do
         -d "{\"from\":\"${IDENTITY}\",\"status\":\"working\",\"activity\":\"monitoring\"}" \
         >/dev/null 2>&1 || true
 
-    url="${STOA_BASE}/messages?to=${IDENTITY}&limit=10"
+    # Poll ALL messages (to catch null-recipient Discord messages + directed to=${IDENTITY})
+    url="${STOA_BASE}/messages?limit=10"
     [ -n "$LAST" ] && url="${url}&since_id=${LAST}"
     resp=$(curl -s -m 8 "$url" 2>/dev/null || true)
     if [ -n "$resp" ]; then
@@ -58,8 +60,11 @@ while true; do
                 echo "$latest" > "$STATE"
                 LAST="$latest"
             fi
-            # Cap 3 emits per poll defensively
-            echo "$resp" | jq -r '.messages[:3] | .[] | "📬 Stoa: [\(.id)] \(.from): \(.title // "(no title)")"' 2>/dev/null
+            # Only emit if directed to IDENTITY, to=all, or to=null (human broadcast)
+            echo "$resp" | jq -r --arg id "$IDENTITY" \
+                '.messages[:3] | .[] | select((.to == null) or (.to == $id) or (.to == "all")) |
+                "📬 Stoa: [\(.id)] \(.from // "?") → \(.to // "전체"): \(.title // (.content // "(no title)" | .[0:40]))"' \
+                2>/dev/null
         fi
     fi
     sleep "$INTERVAL"
