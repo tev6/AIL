@@ -230,6 +230,43 @@ context default {
 }
 ```
 
+## 9a. Convention field — `trust_level` (Arche 2026-04-27)
+
+The runtime reads a single optional field `trust_level: Text` from the active
+context to gate `perform` calls. **No new keyword** — pure convention on top
+of §3 declaration syntax. Recognized values:
+
+| value | runtime behavior |
+|-------|------------------|
+| `"plan"` | Every `perform` (except `human.approve`) auto-gates through `human.approve` first. Decline → `Result-error`. The program does not need to write any explicit approval calls. |
+| `"default"` (or absent) | Current behavior. The program controls when to call `human.approve` itself (per [PRINCIPLES §3a](../docs/PRINCIPLES.md): irreversible only). |
+| `"auto"` | Reserved for an automatic safety classifier (`intent is_safe`, planned). Currently same as `default`. |
+| `"bypass"` | Reserved for high-trust loops. Currently same as `default`. |
+
+Example — a "show me first" mode for a destructive batch:
+
+```ail
+context cautious extends default {
+    trust_level: "plan"
+}
+
+entry main(input: Text) {
+    with context cautious: {
+        for item in items_to_process {
+            perform http.post_json(api_url, item, [])  // gated automatically
+        }
+    }
+}
+```
+
+The runtime auto-inserts an approval card per `perform`. If the user declines
+once, the loop sees `Result-error` and can short-circuit. No need to scatter
+`human.approve` calls in the source.
+
+> Why convention not keyword: `context` already provides scoped, inheritable,
+> typed configuration. Adding `mode plan { ... }` would be a parallel
+> mechanism for the same job. The convention reuses what's there.
+
 ## 10. What context is not
 
 - **Not a prompt.** A context informs how a prompt is constructed, but is not itself injected as a prompt.

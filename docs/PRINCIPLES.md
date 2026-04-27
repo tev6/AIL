@@ -50,6 +50,19 @@
 - `evolve rollback_on` 강제 → 롤백 없는 변이 불가
 - `human.approve` 게이트 → **되돌릴 수 없는** effect에만 사람 승인 요구 (아래 §3a 참조)
 
+### 3b. `trust_level` 컨벤션 (Arche 2026-04-27 #2, ergon 구현)
+
+활성 context의 `trust_level` 필드(Text)로 perform 게이팅 모드 선택. 새 키워드 없음.
+
+| 값 | 효과 |
+|----|------|
+| `"plan"` | 모든 `perform`(human.approve 제외)이 자동으로 human.approve 게이트 통과. 거부 → Result-error |
+| `"default"` (또는 없음) | 현재 동작 — 저자가 §3a 가이드라인에 따라 명시적으로 호출 |
+| `"auto"` | (예약) intent is_safe 자동 분류 — 현재는 default와 동일 |
+| `"bypass"` | (예약) — 현재는 default와 동일 |
+
+전체 명세는 [`spec/02-context.md` §9a](../spec/02-context.md). 테스트는 `tests/test_trust_level.py`.
+
 ### 3a. human.approve 사용 가이드라인 (Arche 2026-04-27, Claude Code 분석 후)
 
 > Claude Code 데이터: 사용자가 권한 요청의 **93%를 자동 승인**. "승인 피로" — 너무 자주 물어보면 사람이 생각 없이 OK 누름. **이게 안전장치의 무력화다.**
