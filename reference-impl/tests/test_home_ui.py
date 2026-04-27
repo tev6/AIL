@@ -176,6 +176,19 @@ def test_open_polis_rejects_non_polis(client):
     assert r.status_code == 400
 
 
+def test_admin_stop_endpoint_returns_ok(client, monkeypatch):
+    """Closing the browser tab triggers sendBeacon('/admin/stop') so
+    the terminal `ail` process exits too (non-developer UX). The
+    endpoint schedules SIGTERM in a daemon thread — we stub os.kill
+    so the test process doesn't actually die."""
+    import os
+    monkeypatch.setattr(os, "kill", lambda *a, **kw: None)
+    c, _ = client
+    r = c.post("/admin/stop")
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+
+
 def test_env_status_returns_known_vars(client):
     c, _ = client
     r = c.get("/env-status")

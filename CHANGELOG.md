@@ -4,6 +4,31 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.4 — 2026-04-27 (팝업 차단 + Open=편집 + 홈 탭 닫기 → 터미널 종료)
+
+hyun06000 field test 두 가지:
+
+1. **팝업 차단** — 비개발자 환경에서 브라우저 팝업 차단기가 켜져 있어
+   새 폴리스 탭이 안 열림. `window.open`이 await/setTimeout 뒤에
+   호출되면 user-gesture 토큰이 만료돼 Chrome/Safari가 막음.
+2. **Open polis here → 편집 불가** — `ail up`은 배포된 앱(폴리스 UI)을
+   서빙하므로 채팅 편집 surface가 사라짐. 사용자가 추가 수정을 못 함.
+
+수정:
+- **home_ui** `openTab(url)` 헬퍼: 반환값/`closed` 검사로 팝업 차단 감지
+  → 차단되면 약한 넛지 + 클릭 가능한 fallback 링크를 status에 노출
+  ("주소창 차단 아이콘에서 팝업 허용" + 직접 클릭 링크)
+- **cli** 새 명령 `ail edit <path>` — 기존 폴리스의 채팅 UI를 띄움
+  (`ail init`과 같은 surface, 이미 INTENT.md가 있는 프로젝트용)
+- **home_ui** `/open-polis`가 `ail up` 대신 `ail edit`을 spawn
+  → "Open polis here" 클릭 시 채팅 편집 UI로 진입
+- **home_ui** `/admin/stop` Flask 엔드포인트 + `pagehide` → sendBeacon
+  핸들러 추가. 홈 탭을 닫으면 터미널 `ail` 프로세스도 SIGTERM,
+  atexit reaper가 spawned 자식들 회수. 비개발자 mental model
+  ("브라우저 닫으면 다 꺼진 거") 일치. `?keep=1`로 비활성화 가능.
+
+---
+
 ## v1.64.3 — 2026-04-27 (Open polis here UX + 탭 닫기 → 서버 stop)
 
 hyun06000 field test 두 가지 보고:

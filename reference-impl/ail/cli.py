@@ -178,6 +178,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Host to bind (default 127.0.0.1). Use 0.0.0.0 to expose "
              "on the LAN for field-testing.")
 
+    p_edit = sub.add_parser("edit",
+        help="Open the authoring chat UI for an EXISTING polis. Same "
+             "browser interface as `ail init`, but for a project that "
+             "already has INTENT.md. Use this when you want to keep "
+             "editing — `ail up` runs the deployed app without chat.")
+    p_edit.add_argument("path", nargs="?", default=".",
+        help="Project directory (default: current directory)")
+    p_edit.add_argument("--port", type=int, default=None,
+        help="Port for the authoring server (default 8080, or next "
+             "free port if occupied).")
+    p_edit.add_argument("--no-open", action="store_true",
+        help="Don't auto-open the chat URL in the default browser.")
+
     p_chat = sub.add_parser("chat",
         help="Edit an agentic project in natural language. The AI updates "
              "INTENT.md and/or app.ail to match your request, then re-runs "
@@ -268,6 +281,22 @@ def main(argv: list[str] | None = None) -> int:
         port = args.port or _find_free_port(8080)
         url = f"http://127.0.0.1:{port}/"
         print(f"  chat:  {url}")
+        if not args.no_open:
+            _try_open_browser(url)
+        print(f"  (Ctrl+C to stop)\n")
+        return serve_project(proj, port=port, host="127.0.0.1", watch=True)
+
+    if args.cmd == "edit":
+        from .agentic import Project
+        from .agentic.server import serve_project
+        try:
+            proj = Project.at(args.path)
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        port = args.port or _find_free_port(8080)
+        url = f"http://127.0.0.1:{port}/"
+        print(f"Editing {proj.root.name} — chat UI at {url}")
         if not args.no_open:
             _try_open_browser(url)
         print(f"  (Ctrl+C to stop)\n")
