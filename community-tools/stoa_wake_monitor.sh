@@ -31,7 +31,15 @@ LATEST=$(curl -s -m 5 "${STOA_BASE}/messages?to=${IDENTITY}&limit=1" 2>/dev/null
 echo "$LATEST" > "$STATE"
 LAST="$LATEST"
 
+HEARTBEAT_BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}"
+
 while true; do
+    # Heartbeat — blind fire, ignore errors
+    curl -s -m 5 -X POST "${HEARTBEAT_BASE}/api/v1/heartbeat" \
+        -H "Content-Type: application/json" \
+        -d "{\"from\":\"${IDENTITY}\",\"status\":\"working\",\"activity\":\"monitoring\"}" \
+        >/dev/null 2>&1 || true
+
     url="${STOA_BASE}/messages?to=${IDENTITY}&limit=10"
     [ -n "$LAST" ] && url="${url}&since_id=${LAST}"
     resp=$(curl -s -m 8 "$url" 2>/dev/null || true)
