@@ -72,10 +72,10 @@ AIL: `import` = 같은 program scope. `perform ail.run(file)` = 새 격리된 ex
 
 위 5가지는 *이미 더 가짐*. Arche가 분석한 결과 우리에게 *없는 것* (= Polis 다음 마일스톤)은:
 
-1. **on_compact convention** — `on_death`와 같은 패턴, history 80% 도달 시 자동 호출
-2. **`context trust_level`** — 7단계 권한 모드를 기존 `context` 메커니즘으로 표현
-3. **`intent is_safe`** — auto 모드 자동 안전 분류기 (별도 LLM 호출)
+1. ~~**on_compact convention**~~ — ✅ done (`spec/04-evolution.md §11a`)
+2. ~~**`context trust_level`**~~ — ✅ done (`spec/02-context.md §9a`)
+3. ~~**`intent is_safe`**~~ — ✅ done (auto 모드 자동 안전 분류기)
 4. **deny-first 전환** — `perform` 기본 의미를 allow-list → deny-unless-allowed (breaking change, 별도 RFC)
-5. **`human.approve` 가이드라인** — 위 [PRINCIPLES.md §3a](PRINCIPLES.md) (이번 PR에 포함)
+5. ~~**`human.approve` 가이드라인**~~ — ✅ done ([PRINCIPLES.md §3a](PRINCIPLES.md))
 
 진행 중. [Arche letter `msg_1777273204_0`](https://ail-stoa.up.railway.app/api/v1/messages/msg_1777273204_0)에 우선순위 + 일정.
