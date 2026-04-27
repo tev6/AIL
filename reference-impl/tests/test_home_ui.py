@@ -114,6 +114,33 @@ def test_trash_polis_404_for_missing_path(client):
     assert r.status_code == 404
 
 
+def test_trash_confirm_dialog_uses_real_newlines(client):
+    """The confirm() string in window.confirm must use a single JS
+    escape `\\n` (2 chars in the HTML) so the dialog shows newlines.
+    Pre-fix the Python source had double-escaped `\\\\n` (4 chars
+    `\\\\n` in Python = 2 chars `\\n` in HTML output → JS sees the
+    `\\n` escape *for backslash* + literal `n` → user saw '\\n' as
+    text, not newline). Post-fix the Python source has `\\n` which
+    in the raw triple-string stays as 2 chars `\\n` in HTML output →
+    JS treats as newline escape. Field-test fix (hyun06000 2026-04-27).
+    """
+    c, _ = client
+    r = c.get("/")
+    body = r.get_data(as_text=True)
+    snippet_start = body.find("휴지통(~/.ail/.Trashcan/)")
+    assert snippet_start != -1, "trash dialog text missing"
+    region = body[snippet_start - 100:snippet_start + 250]
+    # The HTML must NOT contain the 3-char `\\n` (Python "\\\\n") —
+    # that's the broken double-escape JS would render as literal `\n`.
+    assert "\\\\n" not in region, (
+        "Trash confirm dialog double-escapes newline — JS will show "
+        r"literal '\n' text instead of breaking lines. Use single "
+        "backslash + n in the raw-string source, not double.")
+    # Sanity: the proper 2-char `\n` JS escape IS present (some \n's
+    # exist in the dialog source).
+    assert "\\n" in region
+
+
 def test_open_polis_rejects_non_polis(client):
     c, root = client
     r = c.post("/open-polis", json={"path": str(root / "beta")})
