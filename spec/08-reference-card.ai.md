@@ -654,21 +654,24 @@ Built-in effects:
     `state.write` so each tick stores a result and GET / reads it.
     Seconds in (0, 86400]. Outside `ail up` it returns an explanatory
     error. Latest call wins.
-  - `human.approve(plan: Text) -> Result[Record]` — **plan-validate-
-    execute gate**. The runtime writes `plan` to a pending-approval
+  - `human.approve(plan: Text, notify?: [Text]) -> Result[Record]` —
+    **plan-validate-execute gate** with two channels (Arche #6, ergon
+    2026-04-27). **Foreground**: writes `plan` to a pending-approval
     record that the agentic UI surfaces as an Approve / Decline card
-    with a free-form "의견 / comment" textarea. Blocks until the user
-    decides. On Approve: `ok({approved: true, comment: Text})` where
-    `comment` may be empty or carry user guidance ("승인, 브랜치
-    이름만 X로"). On Decline: `error("user declined: <reason>")` —
-    the textarea content goes into `<reason>`. 10-minute timeout and
-    "no UI context" return errors as before.
+    with a "의견 / comment" textarea. **Background** (when
+    `STOA_BASE_URL` is set and `notify` recipients are available):
+    also POSTs an approval letter to Stoa; the recipient(s) reply
+    with `approve` (optionally followed by a comment) or
+    `decline: <reason>`. The runtime polls both channels in parallel
+    — first decision wins. `notify` defaults to
+    `git config ail.identity` if unset. On Approve:
+    `ok({approved: true, comment: Text})`. On Decline:
+    `error("user declined: <reason>")`. Timeout via
+    `AIL_APPROVE_TIMEOUT_S` env (default 600s).
     Call this BEFORE any irreversible side effect (`http.post_json`
     to a public channel, sending mail, creating issues/PRs/
     discussions, etc.). Read `get(unwrap(r), "comment")` to adapt
-    to user feedback. The authoring prompt enforces use for the
-    irreversible-effect class; the effect itself is the grammatical
-    hook that makes the gate non-bypassable.
+    to user feedback.
   - `ail.run(code: Text, input?: Text) -> Result[Text]` — **meta-programming
     gate**. Compiles and executes an AIL source string and returns the
     entry's result as Text. The sub-program runs in the same executor

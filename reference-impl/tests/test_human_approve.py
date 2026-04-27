@@ -147,8 +147,10 @@ def test_decline_surfaces_as_error_result(approval_dir):
 
 
 def test_outside_ui_context_returns_clean_error(tmp_path, monkeypatch):
-    # Simulate running `ail run` (no agentic server, no AIL_APPROVAL_DIR).
+    # Simulate running `ail run` (no agentic server, no AIL_APPROVAL_DIR
+    # AND no STOA_BASE_URL — neither channel is available).
     monkeypatch.delenv("AIL_APPROVAL_DIR", raising=False)
+    monkeypatch.delenv("STOA_BASE_URL", raising=False)
     out = _run(
         'entry main(input: Text) {\n'
         '  r = perform human.approve("post now?")\n'
@@ -156,7 +158,7 @@ def test_outside_ui_context_returns_clean_error(tmp_path, monkeypatch):
         '  return "ok"\n'
         '}\n'
     )
-    assert "no UI context" in out
+    assert "no channel available" in out
 
 
 def test_empty_plan_rejected(approval_dir):

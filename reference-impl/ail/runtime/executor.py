@@ -883,7 +883,26 @@ class Executor:
     # it makes the pending approval visible to any external observer,
     # auditable in the ledger, and survives a refresh of the UI tab.
     def _human_approve(self, args, kwargs, origin):
-        """human.approve(plan: Text) -> Result[Boolean]"""
+        """human.approve(plan: Text, notify?: [Text]) -> Result[Record]
+
+        Two channels (Arche #6, ergon 2026-04-27):
+
+        1. **Chat UI** (foreground) — writes `pending.json` under
+           `AIL_APPROVAL_DIR`. The approval card is rendered in the
+           authoring UI; user clicks Approve / Decline.
+        2. **Stoa letter** (background) — when `STOA_BASE_URL` is set
+           and either `notify` kwarg is provided or `git config
+           ail.identity` resolves, also POST a Stoa letter
+           (title=`[approve] <first line>`, content=plan + reply
+           guide). Recipients reply with first line `approve` /
+           `approved` / `ok` (→ ok) or `decline: <reason>` (→ error).
+
+        Both channels poll in parallel; first decision wins. The other
+        channel is left as-is (UI card grays itself when the program
+        moves on; Stoa replies arriving late are harmless).
+
+        Timeout: env `AIL_APPROVE_TIMEOUT_S` (default 600s).
+        """
         import os
         import json as _json
         import pathlib
@@ -899,115 +918,260 @@ class Executor:
                 "human.approve: plan must be a non-empty string "
                 "describing what's about to happen", origin)
 
-        dir_str = os.environ.get("AIL_APPROVAL_DIR")
-        if not dir_str:
-            return self._result_err(
-                "human.approve: no UI context "
-                "(AIL_APPROVAL_DIR unset — run inside `ail up`)",
-                origin)
-        approval_dir = pathlib.Path(dir_str)
-        try:
-            approval_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            return self._result_err(
-                f"human.approve: could not create approval dir: {e}",
-                origin)
+        # Optional notify recipients for Stoa channel. Falls back to
+        # the agent's own identity (e.g., "ergon") so a session running
+        # under `git config ail.identity ergon` will mail itself —
+        # which the agent's next prompt + inbox-check hook surfaces.
+        notify_list: list[str] = []
+        notify_cv = kwargs.get("notify")
+        if notify_cv is not None:
+            v = notify_cv.value
+            if isinstance(v, list):
+                notify_list = [str(x) for x in v if str(x).strip()]
+            elif isinstance(v, str) and v.strip():
+                notify_list = [v.strip()]
+        if not notify_list:
+            notify_list = self._git_ail_identity_list()
 
+        # Foreground channel: AIL_APPROVAL_DIR
+        dir_str = os.environ.get("AIL_APPROVAL_DIR")
+        approval_dir = pathlib.Path(dir_str) if dir_str else None
         approval_id = uuid.uuid4().hex
-        pending_path = approval_dir / "pending.json"
-        record = {
-            "id": approval_id,
-            "plan": plan,
-            "created_at": _time.time(),
-            "status": "pending",
-        }
-        try:
-            tmp = pending_path.with_suffix(".tmp")
-            tmp.write_text(
-                _json.dumps(record, ensure_ascii=False),
-                encoding="utf-8")
-            os.replace(tmp, pending_path)
-        except OSError as e:
+        pending_path: pathlib.Path | None = None
+        if approval_dir is not None:
+            try:
+                approval_dir.mkdir(parents=True, exist_ok=True)
+                pending_path = approval_dir / "pending.json"
+                record = {
+                    "id": approval_id,
+                    "plan": plan,
+                    "created_at": _time.time(),
+                    "status": "pending",
+                }
+                tmp = pending_path.with_suffix(".tmp")
+                tmp.write_text(
+                    _json.dumps(record, ensure_ascii=False),
+                    encoding="utf-8")
+                os.replace(tmp, pending_path)
+            except OSError as e:
+                pending_path = None
+                self.trace.record(
+                    "human_approve_ui_unavailable", error=str(e))
+
+        # Background channel: Stoa letter
+        stoa_base = os.environ.get("STOA_BASE_URL", "").rstrip("/")
+        stoa_msg_id: str | None = None
+        if stoa_base and notify_list:
+            stoa_msg_id = self._stoa_post_approval(
+                stoa_base, notify_list, plan, approval_id)
+
+        # If neither channel is live, fail fast — a polling loop with
+        # nothing to listen to is the wrong silent default.
+        if pending_path is None and stoa_msg_id is None:
             return self._result_err(
-                f"human.approve: could not write approval record: {e}",
+                "human.approve: no channel available — set "
+                "AIL_APPROVAL_DIR (chat UI) or STOA_BASE_URL + "
+                "notify recipients (background)",
                 origin)
 
         self.trace.record(
             "human_approve_pending",
             id=approval_id,
             plan_preview=plan[:200],
+            ui=bool(pending_path),
+            stoa=bool(stoa_msg_id),
+            recipients=notify_list,
         )
 
-        # Poll for a decision. 10 minutes cap — a user who walks away
-        # gets a clean `error("timed out")` and the program returns
-        # instead of hanging the server forever. Polling interval is
-        # 250ms: fast enough to feel instant after the click, slow
-        # enough to be negligible overhead.
-        deadline = _time.monotonic() + 600.0
+        # Polling loop. UI channel is owner of the canonical record:
+        # if the file disappears, that's the run-end signal. Stoa
+        # replies are polled in the same loop.
+        timeout_s = float(os.environ.get("AIL_APPROVE_TIMEOUT_S", "600"))
+        deadline = _time.monotonic() + timeout_s
         while _time.monotonic() < deadline:
-            try:
-                raw = pending_path.read_text(encoding="utf-8")
-                current = _json.loads(raw)
-            except (OSError, ValueError):
-                current = None
-            # Defend against the file being replaced by a different
-            # approval (shouldn't happen in single-run flow, but a
-            # racing second run would stomp us and we'd rather bail
-            # than silently read someone else's decision).
-            if current is None or current.get("id") != approval_id:
-                return self._result_err(
-                    "human.approve: pending record lost or replaced",
-                    origin)
-            status = current.get("status")
-            if status == "approved":
-                comment = str(current.get("comment") or "")
+            # UI channel
+            if pending_path is not None:
                 try:
-                    pending_path.unlink()
-                except OSError:
-                    pass
-                self.trace.record(
-                    "human_approve_decided",
-                    id=approval_id, decision="approved",
-                    comment=comment[:200] if comment else "")
-                # hyun06000 2026-04-24 night: "y/n만 물어보는 것도
-                # 좋고 거기에 의견을 담아서 전달하는 것까지 있으면
-                # 좋겠어." Return a Record so the program can read
-                # the user's feedback on approval, not just a bare
-                # true. Record is truthy so existing `if unwrap(r) {}`
-                # patterns keep working.
-                return self._result_ok(
-                    {"approved": True, "comment": comment}, origin)
-            if status == "declined":
-                raw_reason = current.get("reason") or ""
-                try:
-                    pending_path.unlink()
-                except OSError:
-                    pass
-                self.trace.record(
-                    "human_approve_decided",
-                    id=approval_id, decision="declined",
-                    reason=raw_reason or "(no reason)")
-                # Field test 2026-04-24: when no reason was supplied,
-                # the old fallback ("user declined") got concatenated
-                # with the prefix producing "user declined: user
-                # declined". Fix: message is "user declined" alone if
-                # no reason; "user declined: <reason>" otherwise.
-                msg = (f"user declined: {raw_reason}"
-                       if raw_reason else "user declined")
-                return self._result_err(msg, origin)
-            _time.sleep(0.25)
+                    raw = pending_path.read_text(encoding="utf-8")
+                    current = _json.loads(raw)
+                except (OSError, ValueError):
+                    current = None
+                if current is None or current.get("id") != approval_id:
+                    if pending_path is not None:
+                        # Lost / overwritten — only fatal if UI was the
+                        # only channel; with Stoa active, fall through.
+                        if stoa_msg_id is None:
+                            return self._result_err(
+                                "human.approve: pending record lost or replaced",
+                                origin)
+                else:
+                    status = current.get("status")
+                    if status == "approved":
+                        comment = str(current.get("comment") or "")
+                        try:
+                            pending_path.unlink()
+                        except OSError:
+                            pass
+                        self.trace.record(
+                            "human_approve_decided",
+                            id=approval_id, channel="ui",
+                            decision="approved",
+                            comment=comment[:200] if comment else "")
+                        return self._result_ok(
+                            {"approved": True, "comment": comment}, origin)
+                    if status == "declined":
+                        raw_reason = current.get("reason") or ""
+                        try:
+                            pending_path.unlink()
+                        except OSError:
+                            pass
+                        self.trace.record(
+                            "human_approve_decided",
+                            id=approval_id, channel="ui",
+                            decision="declined",
+                            reason=raw_reason or "(no reason)")
+                        msg = (f"user declined: {raw_reason}"
+                               if raw_reason else "user declined")
+                        return self._result_err(msg, origin)
 
-        # Timed out — remove the record so the next run starts clean.
-        try:
-            pending_path.unlink()
-        except OSError:
-            pass
+            # Stoa channel
+            if stoa_msg_id:
+                stoa_decision = self._stoa_check_approval_reply(
+                    stoa_base, stoa_msg_id)
+                if stoa_decision is not None:
+                    kind, comment_or_reason = stoa_decision
+                    if pending_path is not None:
+                        try:
+                            pending_path.unlink()
+                        except OSError:
+                            pass
+                    if kind == "approved":
+                        self.trace.record(
+                            "human_approve_decided",
+                            id=approval_id, channel="stoa",
+                            decision="approved",
+                            comment=comment_or_reason[:200])
+                        return self._result_ok(
+                            {"approved": True,
+                             "comment": comment_or_reason},
+                            origin)
+                    else:
+                        self.trace.record(
+                            "human_approve_decided",
+                            id=approval_id, channel="stoa",
+                            decision="declined",
+                            reason=comment_or_reason or "(no reason)")
+                        msg = (f"user declined: {comment_or_reason}"
+                               if comment_or_reason else "user declined")
+                        return self._result_err(msg, origin)
+
+            _time.sleep(0.5 if stoa_msg_id else 0.25)
+
+        # Timed out
+        if pending_path is not None:
+            try:
+                pending_path.unlink()
+            except OSError:
+                pass
         self.trace.record(
             "human_approve_decided",
             id=approval_id, decision="timeout")
         return self._result_err(
-            "human.approve: timed out waiting for decision "
-            "(10 minutes)", origin)
+            f"human.approve: timed out waiting for decision "
+            f"({int(timeout_s)}s)", origin)
+
+    # --- helpers for Stoa-channel approval -------------------------------
+
+    def _git_ail_identity_list(self) -> list[str]:
+        """Return [identity] from `git config ail.identity` if set, else []."""
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["git", "config", "ail.identity"],
+                capture_output=True, text=True, timeout=2,
+            )
+            v = (r.stdout or "").strip()
+            return [v] if v else []
+        except Exception:
+            return []
+
+    def _stoa_post_approval(self, base: str, recipients: list[str],
+                            plan: str, approval_id: str) -> str | None:
+        """POST an approval letter to Stoa. Returns the new msg id or
+        None on failure (which leaves the UI channel as the sole
+        decider — quiet degradation)."""
+        import json as _json
+        import urllib.request
+        import urllib.error
+        from_name = (self._git_ail_identity_list() or ["ail"])[0]
+        first_line = plan.splitlines()[0][:80] if plan else "approve request"
+        title = f"[approve] {first_line}"
+        body_text = (
+            f"{plan}\n\n---\n"
+            f"Reply with one of:\n"
+            f"  - `approve` (or `approved` / `ok`) — optionally followed by a comment\n"
+            f"  - `decline: <reason>`\n\n"
+            f"approval_id: `{approval_id}`\n"
+        )
+        # First recipient = to, rest = cc
+        to = recipients[0]
+        cc = recipients[1:] if len(recipients) > 1 else []
+        payload = {
+            "from": from_name,
+            "to": to,
+            "title": title,
+            "content": body_text,
+            "tags": ["approve"],
+        }
+        if cc:
+            payload["cc"] = cc
+        try:
+            data = _json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{base.rstrip('/')}/messages",
+                method="POST",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = _json.loads(resp.read().decode("utf-8"))
+                return str(body.get("id") or "") or None
+        except (urllib.error.URLError, ValueError, OSError) as e:
+            self.trace.record("stoa_approve_post_failed", error=str(e))
+            return None
+
+    def _stoa_check_approval_reply(self, base: str, msg_id: str):
+        """Return (kind, body) where kind in {"approved","declined"} or
+        None if no actionable reply yet. Looks for replies whose first
+        non-empty line is `approve` / `approved` / `ok` / `decline:`."""
+        import json as _json
+        import urllib.request
+        import urllib.error
+        try:
+            url = (f"{base.rstrip('/')}/messages?reply_to={msg_id}&limit=20")
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = _json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, ValueError, OSError):
+            return None
+        for m in body.get("messages") or []:
+            content = (m.get("content") or "").strip()
+            if not content:
+                continue
+            first_line = content.splitlines()[0].strip()
+            lower = first_line.lower()
+            if lower.startswith("decline"):
+                # `decline` or `decline: reason`
+                _, _, rest = first_line.partition(":")
+                return ("declined", rest.strip())
+            if lower in ("approve", "approved", "ok", "yes", "y"):
+                # Optional comment = subsequent lines joined
+                comment = "\n".join(content.splitlines()[1:]).strip()
+                return ("approved", comment)
+            # Allow "approve: <comment>" form too
+            if lower.startswith("approve") or lower.startswith("ok:"):
+                _, _, rest = first_line.partition(":")
+                return ("approved", rest.strip())
+        return None
 
     # --- schedule effect (L2 v2 case study Gap #3 — recurring work).
     # The effect only *registers* the cadence; the actual re-invocation
