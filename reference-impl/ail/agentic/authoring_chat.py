@@ -82,12 +82,22 @@ class AuthoringChat:
         self.project = project
         self.adapter = adapter
 
-    def turn(self, user_message: str) -> dict:
-        """Process one user message; return structured response for UI."""
+    def turn(self, user_message: str, attachments: list | None = None) -> dict:
+        """Process one user message; return structured response for UI.
+
+        `attachments`: optional list of `{type, media_type, data}` records
+        (image only for now). Forwarded to the adapter as
+        `inputs["_attachments"]` — multi-modal-capable adapters will surface
+        them as content blocks; text-only adapters silently ignore.
+        """
         history = self._load_history()
         project_state = self._read_project_state()
 
         goal_text = self._build_goal_prompt(project_state, history, user_message)
+
+        invoke_inputs = {"user_message": user_message}
+        if attachments:
+            invoke_inputs["_attachments"] = attachments
 
         response = self.adapter.invoke(
             goal=goal_text,
@@ -98,7 +108,7 @@ class AuthoringChat:
                 "do not emit ready_to_run until the relevant .ail program is coherent",
             ],
             context={"_intent_name": "__authoring_chat__"},
-            inputs={"user_message": user_message},
+            inputs=invoke_inputs,
             expected_type="Text",
             examples=None,
         )
@@ -571,7 +581,18 @@ Keep it ≤ 200 characters, one line, in the user's language.
 
 At runtime, two things do the actual work:
 - **`intent` blocks** — an LLM executes these when the user runs the program. They fetch, parse, decide, compose, translate. They are your runtime hands.
-- **`perform` effects** — the runtime executor calls these: `http.get`, `http.post_json`, `state.write`, `search.web`, etc.
+- **`perform` effects** — the runtime executor calls these: `http.get`, `http.post_json`, `state.write`, `search.web`, `image.embed`, etc.
+
+**Seeing images from the user:** when the user attaches a screenshot to a chat message (paste / drop / 📎), the chat passes it directly to your context — you can see the image. Use this when the user is stuck on something visual ("API 키 어디서 받아?", "이 화면에서 뭘 눌러야 해?"). Tell them to attach a screenshot and walk them through what you see. **Do not use `image.embed` for this — that is the OUTPUT direction (your program shows an image to the user). Pasted screenshots are the INPUT direction (you see what the user sees).**
+
+**Showing images to the user:** when an entry needs to surface an image (a chart, a screenshot, a downloaded picture), use `perform image.embed(src, alt)` — it returns a markdown image string the chat / run UI renders inline. Local file paths are auto base64-encoded into a `data:` URL; `http(s)://` URLs pass through. Concatenate the result into the entry's return text.
+
+```ail
+img_md = perform image.embed("./out/chart.png", "monthly revenue")
+return join(["## Report\n\n", img_md, "\n\n위 차트 참고."], "")
+```
+
+WRONG: `return "![chart](./out/chart.png)"` — the chat UI cannot read local files; the browser would 404. **Always go through `image.embed`** so the bytes get inlined as a data URL.
 
 You don't need to know what's at a URL to write code that fetches it. You don't need to "understand the API" before writing the agent — the `intent` that runs at runtime will understand it.
 

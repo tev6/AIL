@@ -516,14 +516,65 @@ class Executor:
             return self._ail_run(args, kwargs, origin)
         if name == "inherit_testament":
             return self._inherit_testament(args, kwargs, origin)
+        if name == "image.embed":
+            return self._image_embed(args, kwargs, origin)
         raise RuntimeError(
             f"unknown effect: {name} "
             f"(supported: human_ask, log, http.get, http.post, "
             f"http.post_json, http.put_json, http.graphql, file.read, file.write, "
             f"clock.now, state.read, state.write, state.has, "
             f"state.delete, schedule.every, env.read, human.approve, "
-            f"search.web, ail.run, inherit_testament, or a declared effect)"
+            f"search.web, ail.run, inherit_testament, image.embed, "
+            f"or a declared effect)"
         )
+
+    def _image_embed(self, args, kwargs, origin):
+        """Return a markdown image string the chat UI can render inline.
+
+        For local file paths, the file is base64-encoded into a data URL
+        so the chat UI doesn't need filesystem access. Remote http(s)
+        URLs are passed through. The returned Text is meant to be fed
+        to `perform log(...)` or returned from an entry — anywhere the
+        chat/run UI applies markdown rendering.
+        """
+        import base64
+        import mimetypes
+        from pathlib import Path as _Path
+        src = str(args[0].value) if args else str(kwargs.get("src", ConfidentValue("", 1.0)).value)
+        alt_cv = kwargs.get("alt")
+        if alt_cv is None and len(args) >= 2:
+            alt_cv = args[1]
+        alt = str(alt_cv.value) if alt_cv is not None else "image"
+        # Sanitize alt for markdown — strip ] and newlines that break the bracket pair.
+        alt_safe = (alt.replace("]", " ").replace("[", " ")
+                    .replace("\n", " ").strip() or "image")
+
+        if src.startswith("http://") or src.startswith("https://") or src.startswith("data:"):
+            url = src
+        else:
+            p = _Path(src).expanduser()
+            if not p.is_file():
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"image.embed: file not found: {src}"},
+                    0.0, origin=origin,
+                )
+            mime, _ = mimetypes.guess_type(str(p))
+            if mime is None or not mime.startswith("image/"):
+                # Default to png for unknown extensions; UI shows broken image
+                # if the bytes don't actually decode.
+                mime = "image/png"
+            try:
+                raw = p.read_bytes()
+            except OSError as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"image.embed: read failed: {e}"},
+                    0.0, origin=origin,
+                )
+            url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+        markdown = f"![{alt_safe}]({url})"
+        return ConfidentValue(markdown, 1.0, origin=origin)
 
     # --- clock effect (L2 case study 2026-04-23 — fills the "hardcoded
     # timestamp" gap authors hit when INTENT.md mentions "현재 시각").
