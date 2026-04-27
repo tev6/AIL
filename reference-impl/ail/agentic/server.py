@@ -788,16 +788,37 @@ def _make_handler(project: Project, serve_only: bool = False):
                         "Author via `ail up` in a separate terminal.\n")
                     return
                 length = int(self.headers.get("Content-Length", "0") or "0")
-                user_msg = self.rfile.read(length).decode("utf-8") if length else ""
-                if not user_msg.strip():
+                raw_body = self.rfile.read(length) if length else b""
+                content_type = (self.headers.get("Content-Type") or "").lower()
+                attachments: list = []
+                if "application/json" in content_type:
+                    try:
+                        import json as _json
+                        body = _json.loads(raw_body.decode("utf-8") or "{}")
+                        user_msg = (body.get("message") or "").strip()
+                        for att in (body.get("attachments") or []):
+                            if isinstance(att, dict) and att.get("type") == "image" and att.get("data"):
+                                attachments.append({
+                                    "type": "image",
+                                    "media_type": att.get("media_type", "image/png"),
+                                    "data": att["data"],
+                                })
+                    except Exception as e:
+                        self._send_text(400, f"bad JSON body: {e}\n")
+                        return
+                else:
+                    user_msg = raw_body.decode("utf-8") if raw_body else ""
+                if not user_msg and not attachments:
                     self._send_text(400, "empty message\n")
                     return
+                if not user_msg:
+                    user_msg = "(이미지 첨부)"
                 try:
                     from .authoring_chat import AuthoringChat
                     from .. import _default_adapter
                     adapter = _default_adapter()
                     chat = AuthoringChat(project, adapter=adapter)
-                    result = chat.turn(user_msg)
+                    result = chat.turn(user_msg, attachments=attachments or None)
                 except Exception as e:
                     import traceback as _tb
                     _tb.print_exc(file=sys.stderr)

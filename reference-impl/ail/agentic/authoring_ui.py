@@ -408,9 +408,13 @@ def render_authoring_page(
     </div>
 
     <form class="composer" id="composer" onsubmit="return onSend(event);">
+      <div id="attach-strip" style="display:none;flex-wrap:wrap;gap:.4rem;width:100%;padding:.4rem 0"></div>
       <textarea id="msg" rows="1"
-                placeholder="메시지 입력 후 Enter로 전송 (Shift+Enter 줄바꿈)"
+                placeholder="메시지 입력 후 Enter로 전송 (Shift+Enter 줄바꿈, 이미지는 붙여넣기 또는 드래그)"
                 autocomplete="off" spellcheck="false"></textarea>
+      <input type="file" id="img-file" accept="image/*" multiple style="display:none">
+      <button type="button" class="send" id="img-btn" title="이미지 첨부 / Attach image"
+              style="background:#444;padding:0 .8rem">📎</button>
       <button type="submit" class="send" id="send">전송</button>
       <button type="button" class="send" id="cancel-chat"
               style="display:none;background:#b91c1c;">중단</button>
@@ -1063,12 +1067,25 @@ def render_authoring_page(
       }});
     }}
 
-    function addUser(text) {{
+    function addUser(text, attachments) {{
       const turn = document.createElement('div');
       turn.className = 'turn user';
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.textContent = text;
+      if (Array.isArray(attachments) && attachments.length > 0) {{
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem';
+        attachments.forEach(a => {{
+          const img = document.createElement('img');
+          img.src = 'data:' + a.media_type + ';base64,' + a.data;
+          img.style.cssText = 'max-height:140px;max-width:200px;border-radius:4px;border:1px solid rgba(255,255,255,.3)';
+          grid.appendChild(img);
+        }});
+        bubble.appendChild(grid);
+      }}
+      const textNode = document.createElement('div');
+      textNode.textContent = text;
+      bubble.appendChild(textNode);
       turn.appendChild(bubble);
       thread.appendChild(turn);
     }}
@@ -1985,6 +2002,10 @@ def render_authoring_page(
       // Bold
       s = s.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
       s = s.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
+      // Images: ![alt](url) — must come BEFORE link rule so the [alt](url)
+      // tail of the image syntax doesn't match as a plain link.
+      s = s.replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g,
+        (_, a, u) => `<img src="${{esc(u)}}" alt="${{esc(a)}}" loading="lazy" style="max-width:100%;height:auto;border-radius:4px;margin:.4rem 0">`);
       s = s.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,
         (_, t, u) => `<a href="${{esc(u)}}" target="_blank">${{esc(t)}}</a>`);
       // Bare URLs (http/https not already inside an href)
@@ -2075,9 +2096,104 @@ def render_authoring_page(
       thread.appendChild(d);
     }}
 
+    // --- Image attachments (paste / drop / pick) ---
+    // Max ~4MB per image after base64 (~3MB raw) — Anthropic API limit
+    // is 5MB per image; we leave headroom for prompt overhead.
+    const MAX_IMG_BYTES = 3 * 1024 * 1024;
+    let stagedAttachments = [];
+    const attachStrip = document.getElementById('attach-strip');
+    const imgFileInput = document.getElementById('img-file');
+    const imgBtn = document.getElementById('img-btn');
+
+    function refreshAttachStrip() {{
+      attachStrip.innerHTML = '';
+      if (stagedAttachments.length === 0) {{
+        attachStrip.style.display = 'none';
+        return;
+      }}
+      attachStrip.style.display = 'flex';
+      stagedAttachments.forEach((att, i) => {{
+        const chip = document.createElement('div');
+        chip.style.cssText = 'position:relative;border:1px solid #999;background:#fff;padding:.2rem;border-radius:4px';
+        chip.innerHTML = '<img src="data:' + att.media_type + ';base64,' + att.data +
+          '" style="max-height:60px;max-width:120px;display:block;border-radius:2px">' +
+          '<button type="button" data-i="' + i + '" style="position:absolute;top:-6px;right:-6px;border-radius:50%;border:0;background:#222;color:#fff;width:18px;height:18px;font-size:.7rem;line-height:18px;padding:0;cursor:pointer">×</button>';
+        chip.querySelector('button').onclick = () => {{
+          stagedAttachments.splice(i, 1);
+          refreshAttachStrip();
+        }};
+        attachStrip.appendChild(chip);
+      }});
+    }}
+
+    function fileToAttachment(file) {{
+      return new Promise((resolve, reject) => {{
+        if (!file.type || !file.type.startsWith('image/')) {{
+          reject(new Error('not an image: ' + file.type));
+          return;
+        }}
+        if (file.size > MAX_IMG_BYTES) {{
+          reject(new Error('이미지가 너무 큼 (최대 3MB): ' + Math.round(file.size / 1024) + 'KB'));
+          return;
+        }}
+        const fr = new FileReader();
+        fr.onload = () => {{
+          const dataUrl = fr.result;
+          const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+          if (!m) {{ reject(new Error('bad data url')); return; }}
+          resolve({{ type: 'image', media_type: m[1], data: m[2] }});
+        }};
+        fr.onerror = () => reject(new Error('read failed'));
+        fr.readAsDataURL(file);
+      }});
+    }}
+
+    async function addImageFiles(files) {{
+      for (const f of files) {{
+        try {{
+          const att = await fileToAttachment(f);
+          stagedAttachments.push(att);
+        }} catch (err) {{
+          addError('이미지 첨부 실패: ' + err.message);
+        }}
+      }}
+      refreshAttachStrip();
+    }}
+
+    imgBtn.addEventListener('click', () => imgFileInput.click());
+    imgFileInput.addEventListener('change', (e) => {{
+      addImageFiles(Array.from(e.target.files || []));
+      e.target.value = '';
+    }});
+    msgEl.addEventListener('paste', (e) => {{
+      const items = (e.clipboardData || {{}}).items || [];
+      const files = [];
+      for (const it of items) {{
+        if (it.kind === 'file' && it.type.startsWith('image/')) {{
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }}
+      }}
+      if (files.length) {{
+        e.preventDefault();
+        addImageFiles(files);
+      }}
+    }});
+    msgEl.addEventListener('dragover', (e) => {{ e.preventDefault(); }});
+    msgEl.addEventListener('drop', (e) => {{
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+      if (files.length) {{
+        e.preventDefault();
+        addImageFiles(files);
+      }}
+    }});
+
     async function send(userText) {{
       hint && hint.remove();
-      addUser(userText);
+      const sentAttachments = stagedAttachments.slice();
+      stagedAttachments = [];
+      refreshAttachStrip();
+      addUser(userText, sentAttachments);
       scrollBottom();
 
       sendBtn.disabled = true;
@@ -2105,12 +2221,23 @@ def render_authoring_page(
       }}, 250);
 
       try {{
-        const r = await fetch('/authoring-chat', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'text/plain; charset=utf-8' }},
-          body: userText,
-          signal: currentAbortController.signal,
-        }});
+        let fetchOpts;
+        if (sentAttachments.length > 0) {{
+          fetchOpts = {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json; charset=utf-8' }},
+            body: JSON.stringify({{ message: userText, attachments: sentAttachments }}),
+            signal: currentAbortController.signal,
+          }};
+        }} else {{
+          fetchOpts = {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'text/plain; charset=utf-8' }},
+            body: userText,
+            signal: currentAbortController.signal,
+          }};
+        }}
+        const r = await fetch('/authoring-chat', fetchOpts);
         clearInterval(pendingTimer);
         pendingTurn.remove();
         const text = await r.text();
@@ -2175,8 +2302,8 @@ def render_authoring_page(
     function onSend(e) {{
       e.preventDefault();
       const t = msgEl.value.trim();
-      if (!t) return false;
-      send(t);
+      if (!t && stagedAttachments.length === 0) return false;
+      send(t || '(이미지 첨부)');
       return false;
     }}
 

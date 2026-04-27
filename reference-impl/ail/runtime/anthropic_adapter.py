@@ -41,12 +41,29 @@ class AnthropicAdapter:
 
         if context.get("_intent_name") == "__authoring_chat__":
             user_msg = inputs.get("user_message", "(no input)")
+            attachments = inputs.get("_attachments") or []
+            if attachments:
+                content_blocks: list = []
+                for att in attachments:
+                    if att.get("type") == "image":
+                        content_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": att.get("media_type", "image/png"),
+                                "data": att["data"],
+                            },
+                        })
+                content_blocks.append({"type": "text", "text": user_msg})
+                user_content = content_blocks
+            else:
+                user_content = user_msg
             resp = client.messages.create(
                 model=self.model,
                 max_tokens=8192,
                 system=goal,
                 messages=[
-                    {"role": "user", "content": user_msg},
+                    {"role": "user", "content": user_content},
                     {"role": "assistant", "content": "<reply>"},
                 ],
             )
