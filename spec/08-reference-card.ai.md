@@ -705,6 +705,11 @@ Built-in effects:
   - `http.respond(status: Number, content_type: Text, body: Text)` —
     server response from inside an `evolve` server arm. Used with
     `evolve ... when request_received(req) { ... }` blocks.
+  - `email.send(to: Text, subject: Text, body: Text) -> Result[Text]` —
+    send an email via Gmail SMTP. Reads `GMAIL_USER` and
+    `GMAIL_APP_PASSWORD` from environment. Returns `ok("sent")` on
+    success, `error(...)` on failure. Use for outbound notifications to
+    humans (e.g., replying to a Stoa message that carries `from_email`).
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a

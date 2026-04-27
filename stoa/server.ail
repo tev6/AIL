@@ -281,13 +281,23 @@ fn handle_post_message(req: Any) -> [Any] {
     if tags == None {
         tags = []
     }
+    from_email_raw = get(body, "from_email")
+    from_email = None
+    if from_email_raw != None {
+        from_email = trim(to_text(from_email_raw))
+        if from_email == "" {
+            from_email = None
+        }
+    }
     reply_to = get(body, "reply_to")
     messages = load_messages()
+    parent_msg = None
     if reply_to != None {
         found_parent = false
         for m in messages {
             if get(m, "id") == reply_to {
                 found_parent = true
+                parent_msg = m
             }
         }
         if not found_parent {
@@ -306,6 +316,7 @@ fn handle_post_message(req: Any) -> [Any] {
         ["content", content],
         ["tags", tags],
         ["reply_to", reply_to],
+        ["from_email", from_email],
         ["created_at", ts],
         ["url", url]
     ]
@@ -320,6 +331,19 @@ fn handle_post_message(req: Any) -> [Any] {
         return json_err(500, "storage write failed")
     }
     notify_agents(msg, to_name, cc_list)
+    if parent_msg != None {
+        parent_email = get(parent_msg, "from_email")
+        if parent_email != None {
+            thread_url = join([base_url, "/messages/", reply_to], "")
+            subject_base = get(parent_msg, "title")
+            if subject_base == None {
+                subject_base = reply_to
+            }
+            subject = join(["Re: ", to_text(subject_base), " — Stoa"], "")
+            email_body = join([content, "\n\n---\n스토아에서 전체 대화 보기: ", thread_url], "")
+            perform email.send(parent_email, subject, email_body)
+        }
+    }
     resp_r = encode_json([["id", msg_id], ["from", from_name], ["to", to_name], ["cc", cc_list], ["title", title], ["created_at", ts], ["url", url]])
     if is_error(resp_r) {
         return json_err(500, "encode failed")
@@ -437,7 +461,8 @@ fn handle_compose(req: Any) -> [Any] {
         "const typed=(fd.get('recipient_typed')||'').split(',').map(s=>s.trim()).filter(Boolean);",
         "const recipients=[...checked,...typed];",
         "if(recipients.length===0){status.className='status err';status.textContent='Pick at least one recipient (체크 또는 직접 입력).';return;}",
-        "const body={from:fd.get('from'),to:recipients[0],cc:recipients.slice(1),title:fd.get('title')||null,content:fd.get('content')};",
+        "const fromEmail=fd.get('from_email')||null;",
+        "const body={from:fd.get('from'),to:recipients[0],cc:recipients.slice(1),title:fd.get('title')||null,content:fd.get('content'),from_email:fromEmail||undefined};",
         "status.className='status';status.textContent='Sending...';",
         "try{const r=await fetch('/api/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});",
         "const j=await r.json();",
@@ -453,6 +478,8 @@ fn handle_compose(req: Any) -> [Any] {
         "<form id=\"compose-form\">",
         "<div class=\"field\"><label class=\"block\">From (your name)</label>",
         "<input type=\"text\" name=\"from\" required placeholder=\"e.g. hyun06000\" /></div>",
+        "<div class=\"field\"><label class=\"block\">Reply-to email <span style=\"color:#aaa;font-weight:normal\">(선택 — 답장을 이메일로 받고 싶다면)</span></label>",
+        "<input type=\"email\" name=\"from_email\" placeholder=\"e.g. hyun06000@gmail.com\" /></div>",
         "<div class=\"field\"><label class=\"block\">Recipients (first = to, rest = cc)</label>",
         "<div class=\"agents\">", options_html, "</div>",
         "<input type=\"text\" name=\"recipient_typed\" placeholder=\"또는 직접 입력 (쉼표로 여럿) — e.g. ergon, hyun06000\" style=\"margin-top:.5rem\" /></div>",

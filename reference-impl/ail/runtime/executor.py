@@ -62,6 +62,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "ail.run",
     "inherit_testament",
     "image.embed",
+    "email.send",
 })
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
@@ -677,6 +678,8 @@ class Executor:
             return self._inherit_testament(args, kwargs, origin)
         if name == "image.embed":
             return self._image_embed(args, kwargs, origin)
+        if name == "email.send":
+            return self._email_send(args, kwargs, origin)
         # Defense in depth: _exec_perform's deny-first check should
         # already have caught this. If we reached here, an internal
         # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
@@ -688,6 +691,43 @@ class Executor:
                       f"set: {sorted(ALLOWED_EFFECTS)})"},
             0.0, origin=effect_origin(name, parents_of(args)),
         )
+
+    def _email_send(self, args, kwargs, origin):
+        """email.send(to, subject, body) -> Result[Text]
+
+        Sends an email via Gmail SMTP using app-password auth.
+        Reads GMAIL_USER and GMAIL_APP_PASSWORD from environment.
+        Returns ok("sent") on success, error(...) on failure.
+        """
+        import os, smtplib
+        from email.mime.text import MIMEText
+
+        if len(args) < 3:
+            return self._result_err(
+                "email.send(to, subject, body) — 3 arguments required", origin)
+
+        to_addr = str(args[0].value)
+        subject = str(args[1].value)
+        body = str(args[2].value)
+
+        gmail_user = os.environ.get("GMAIL_USER", "")
+        gmail_pass = os.environ.get("GMAIL_APP_PASSWORD", "")
+        if not gmail_user or not gmail_pass:
+            return self._result_err(
+                "GMAIL_USER or GMAIL_APP_PASSWORD env var not set", origin)
+
+        try:
+            msg = MIMEText(body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = gmail_user
+            msg["To"] = to_addr
+            with smtplib.SMTP("smtp.gmail.com", 587) as s:
+                s.starttls()
+                s.login(gmail_user, gmail_pass)
+                s.sendmail(gmail_user, [to_addr], msg.as_string())
+            return self._result_ok("sent", origin)
+        except Exception as e:
+            return self._result_err(f"email.send failed: {e}", origin)
 
     def _image_embed(self, args, kwargs, origin):
         """Return a markdown image string the chat UI can render inline.
