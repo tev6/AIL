@@ -331,7 +331,7 @@ fn handle_post_message(req: Any) -> [Any] {
         return json_err(500, "storage write failed")
     }
     notify_agents(msg, to_name, cc_list)
-    notify_discord_webhook(msg)
+    notify_discord_webhook(from_name, to_name, content)
     if parent_msg != None {
         parent_email = get(parent_msg, "from_email")
         if parent_email != None {
@@ -656,15 +656,11 @@ fn save_discord_webhook(url: Text) -> Any {
     return perform file.write(get_discord_webhook_file(), unwrap(r))
 }
 
-fn notify_discord_webhook(msg: Any) -> Any {
+fn notify_discord_webhook(from_name: Any, to_name: Any, content: Any) -> Any {
     webhook_url = load_discord_webhook()
     if webhook_url == "" {
         return None
     }
-    from_name = get(msg, "from")
-    to_name = get(msg, "to")
-    content = get(msg, "content")
-    msg_id = get(msg, "id")
     // 에이전트 목록 — 이 중 하나가 보낸 메시지만 push (사람→사람 루프 방지)
     agents = ["telos", "ergon", "arche"]
     is_from_agent = false
