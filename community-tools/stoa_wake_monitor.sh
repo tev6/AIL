@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 # stoa_wake_monitor.sh
 #
-# Claude Code의 first-party Monitor 도구로 idle wake 구현.
-# 사용자 prompt 없이도 새 letter 도착 시 모델 turn 발화시킴.
+# Stoa 새 메시지 감지 — Claude Code Monitor 도구로 idle wake 구현.
+# 사용자 prompt 없이도 새 메시지 도착 시 모델 turn 발화시킴.
 #
-# 사용법:
-#   1. 세션 시작 시 ergon이 Monitor 도구를 다음 명령으로 호출:
-#      bash community-tools/stoa_wake_monitor.sh
-#   2. persistent: true 로 띄울 것 (세션 lifetime).
+# ⚠️  반드시 Monitor 도구로 실행할 것!
+#     Bash(run_in_background=true)는 stdout이 task 파일에만 쌓이고
+#     Claude에게 알림이 오지 않아서 wake-up이 동작하지 않음.
+#
+# 올바른 사용법:
+#   Monitor(
+#     command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=3 bash community-tools/stoa_wake_monitor.sh",
+#     description="Stoa 새 메시지 감지 (3초 폴링)",
+#     persistent=true
+#   )
 #
 # 동작:
-#   - 시작 시 since_id 미리 anchor (현재 최신 letter id) → 첫 폴 emit 0
-#   - 15초마다 신규 letter 폴링
+#   - 시작 시 since_id 미리 anchor (현재 최신 메시지) → 첫 폴 emit 0
+#   - 3초마다 신규 메시지 폴링 (STOA_WAKE_INTERVAL_S로 조정)
+#   - to=IDENTITY / to=all / to=null(Discord 브로드캐스트) 모두 감지
 #   - 한 번에 최대 3개만 emit (Monitor "too many events" auto-stop 방어)
 #   - state file: /tmp/.stoa_monitor_<identity>_since
 #
-# Author: Ergon — 2026-04-27 (hyun06000 idle-wake 검증 후 도구화)
+# Author: Ergon — 2026-04-27 / Monitor 전환: Telos — 2026-04-28
 
 set -uo pipefail
 
