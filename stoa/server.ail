@@ -966,6 +966,143 @@ fn handle_kakao(req: Any) -> [Any] {
     return kakao_ok(join(["→ ", to_name, ": \"", content_text, "\""], ""))
 }
 
+// ============ DISCORD GATEWAY ============
+
+fn discord_verify(req: Any) -> Any {
+    // Discord requires Ed25519 signature verification on every request.
+    // Returns None on success, error Text on failure.
+    pub_key_r = perform env.read("DISCORD_PUBLIC_KEY")
+    if is_error(pub_key_r) {
+        return "DISCORD_PUBLIC_KEY env not set"
+    }
+    pub_key = trim(unwrap(pub_key_r))
+    headers = get(req, "headers")
+    sig = None
+    ts = None
+    if headers != None {
+        sig = get(headers, "X-Signature-Ed25519")
+        ts = get(headers, "X-Signature-Timestamp")
+    }
+    if sig == None or ts == None {
+        return "missing signature headers"
+    }
+    message = join([to_text(ts), req.body], "")
+    ok = crypto_verify_ed25519(pub_key, to_text(sig), message)
+    if not ok {
+        return "invalid signature"
+    }
+    return None
+}
+
+fn discord_pong() -> [Any] {
+    r = encode_json([["type", 1]])
+    if is_error(r) {
+        return [200, "application/json", "{\"type\":1}"]
+    }
+    return [200, "application/json", unwrap(r)]
+}
+
+fn discord_message(text: Text) -> [Any] {
+    r = encode_json([["type", 4], ["data", [["content", text]]]])
+    if is_error(r) {
+        return [200, "application/json", "{\"type\":4,\"data\":{\"content\":\"오류가 발생했습니다.\"}}"]
+    }
+    return [200, "application/json", unwrap(r)]
+}
+
+fn handle_discord(req: Any) -> [Any] {
+    // Signature check — Discord rejects endpoints that skip this.
+    verify_err = discord_verify(req)
+    if verify_err != None {
+        return [401, "text/plain", to_text(verify_err)]
+    }
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return [400, "text/plain", "bad JSON"]
+    }
+    body = unwrap(parsed)
+    interaction_type = get(body, "type")
+    // PING (type 1) — Discord health check
+    if interaction_type == 1 {
+        return discord_pong()
+    }
+    // APPLICATION_COMMAND (type 2) — slash command
+    if interaction_type == 2 {
+        data = get(body, "data")
+        cmd_name = "unknown"
+        if data != None {
+            n = get(data, "name")
+            if n != None {
+                cmd_name = to_text(n)
+            }
+        }
+        member = get(body, "member")
+        discord_user = "discord"
+        if member != None {
+            user = get(member, "user")
+            if user != None {
+                uname = get(user, "username")
+                if uname != None {
+                    discord_user = to_text(uname)
+                }
+            }
+        }
+        // /stoa to:<name> message:<text>
+        if cmd_name == "stoa" {
+            options = get(data, "options")
+            to_name = "all"
+            content = ""
+            if options != None {
+                for opt in options {
+                    oname = get(opt, "name")
+                    oval = get(opt, "value")
+                    if oname == "to" and oval != None {
+                        to_name = to_text(oval)
+                    }
+                    if oname == "message" and oval != None {
+                        content = to_text(oval)
+                    }
+                }
+            }
+            if content == "" {
+                return discord_message("메시지 내용을 입력해주세요. /stoa to:telos message:안녕")
+            }
+            msg_id = make_id()
+            ts = perform clock.now()
+            base_url = get_base_url()
+            url = join([base_url, "/api/v1/messages/", msg_id], "")
+            msg = [
+                ["id", msg_id],
+                ["from", discord_user],
+                ["to", to_name],
+                ["cc", None],
+                ["title", None],
+                ["content", content],
+                ["tags", ["discord"]],
+                ["reply_to", None],
+                ["from_email", None],
+                ["created_at", ts],
+                ["url", url]
+            ]
+            messages = load_messages()
+            messages = append(messages, msg)
+            encoded_r = encode_json(messages)
+            if is_error(encoded_r) {
+                return discord_message("저장 실패 — 다시 시도해주세요.")
+            }
+            perform file.write(get_data_file(), unwrap(encoded_r))
+            notify_agents(msg, to_name, None)
+            return discord_message(join(["→ ", to_name, ": \"", content, "\" 전송됨"], ""))
+        }
+        // /status — agent heartbeat status
+        if cmd_name == "status" {
+            return discord_message(format_status_kakao())
+        }
+        return discord_message(join(["알 수 없는 명령: /", cmd_name], ""))
+    }
+    return [400, "application/json", "{\"error\":\"unknown interaction type\"}"]
+}
+
 fn handle_debug_email(req: Any) -> [Any] {
     r = perform file.read("email_debug.log")
     if is_error(r) {
@@ -979,6 +1116,9 @@ fn route_request(req: Any) -> [Any] {
     path = req.path
     if method == "POST" and path == "/api/v1/kakao" {
         return handle_kakao(req)
+    }
+    if method == "POST" and path == "/api/v1/discord" {
+        return handle_discord(req)
     }
     if method == "POST" and path == "/api/v1/heartbeat" {
         return handle_heartbeat(req)
