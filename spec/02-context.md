@@ -240,7 +240,7 @@ of §3 declaration syntax. Recognized values:
 |-------|------------------|
 | `"plan"` | Every `perform` (except `human.approve`) auto-gates through `human.approve` first. Decline → `Result-error`. The program does not need to write any explicit approval calls. |
 | `"default"` (or absent) | Current behavior. The program controls when to call `human.approve` itself (per [PRINCIPLES §3a](../docs/PRINCIPLES.md): irreversible only). |
-| `"auto"` | Reserved for an automatic safety classifier (`intent is_safe`, planned). Currently same as `default`. |
+| `"auto"` | Consults `intent is_safe(plan: Text) -> Text` if defined. Verdict `"allow"`/`"safe"` → run. `"deny"`/`"unsafe"` → `Result-error`. `"ask"`/`"review"` → escalate to `human.approve`. Unknown / raise → conservative ask. No `is_safe` defined → no gate. (Arche #3, ergon 2026-04-27.) |
 | `"bypass"` | Reserved for high-trust loops. Currently same as `default`. |
 
 Example — a "show me first" mode for a destructive batch:

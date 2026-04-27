@@ -91,7 +91,7 @@ context cautious extends default {
 
 entry main(input: Text) {
     with context cautious: {
-        perform state.write("k", "v")
+        perform clock.now("unix")
         return "DONE"
     }
 }
@@ -110,7 +110,7 @@ context cautious extends default {
 
 entry main(input: Text) {
     with context cautious: {
-        r = perform state.write("k", "v")
+        r = perform clock.now("unix")
         if is_error(r) { return "DENIED" }
         return "RAN"
     }
