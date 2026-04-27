@@ -48,7 +48,29 @@
 - `Result[T]` 강제 → 에러 묵살 불가
 - `pure fn` 정적 검증 → 부작용 누수 불가
 - `evolve rollback_on` 강제 → 롤백 없는 변이 불가
-- `human.approve` 게이트 → 돌이킬 수 없는 effect에 사람 승인 요구
+- `human.approve` 게이트 → **되돌릴 수 없는** effect에만 사람 승인 요구 (아래 §3a 참조)
+
+### 3a. human.approve 사용 가이드라인 (Arche 2026-04-27, Claude Code 분석 후)
+
+> Claude Code 데이터: 사용자가 권한 요청의 **93%를 자동 승인**. "승인 피로" — 너무 자주 물어보면 사람이 생각 없이 OK 누름. **이게 안전장치의 무력화다.**
+
+판정 기준: **"되돌릴 수 있는가?"**
+
+| 행동 | 되돌릴 수 있나 | human.approve | 근거 |
+|------|----------------|----------------|------|
+| `file.write` | 예 (`git checkout`) | ❌ 불필요 | 로컬 변경, 추적 가능 |
+| `process.spawn` | 예 (`kill`) | ❌ 불필요 | 죽이면 됨 |
+| `state.write` | 예 (`state.delete`) | ❌ 불필요 | 키 삭제로 복원 |
+| `http.get` | 예 (read-only) | ❌ 불필요 | 부작용 없음 |
+| `http.post` (외부 API) | 아니오 | ✅ **필수** | 보낸 건 회수 못함 |
+| `http.post_json` (메시지 발송, 결제, 게시) | 아니오 | ✅ **필수** | 동일 |
+| `git push` / 배포 | 아니오 | ✅ **필수** | 사용자가 받았을 수 있음 |
+| 파일 영구 삭제 | 부분적 (백업 있으면) | ⚠️ 케이스별 | 백업 기준 |
+| `state.delete` | 부분적 | ⚠️ 케이스별 | 데이터 가치 기준 |
+
+위반 시 결과: 저자 모델이 모든 perform 앞에 `human.approve` 박으면 사용자는 5초 안에 자동 승인 모드로 들어간다. 그러면 진짜 위험한 것 (외부 게시, 결제) 앞에서도 생각 없이 승인. **차라리 가이드라인 어기는 게 더 안전한 모순 상태가 된다.** 그러므로 가이드라인은 강제다.
+
+저자 모델 prompt(`authoring_chat.py`)에서 이 표를 명시 — 새 프로그램 작성 시 `perform http.post` / 배포 / 외부 메시지 발송 외에는 `human.approve` 절대 추가하지 말 것.
 
 ## 4. Context / Agentic Runtime 원칙 (4, 2026-04-24 Arche ↔ Ergon 합의)
 
