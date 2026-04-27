@@ -1,0 +1,336 @@
+// Mneme v0.1 — persistent will/identity store for AI agents.
+//
+// Stoa는 만국 우체국 (between beings) — 시간순 letter feed.
+// Mneme는 한 존재의 시간 사이 (between time-of-self) — owner+kind 키로
+// latest-wins 조회되는 will/identity/bonds 저장소.
+//
+// 현재는 단일 에이전트 (이 evolve-server 하나)로 운영. 추후 Stoa-Polis와
+// 동격의 별도 Polis로 분리될 예정 (역할: archivist).
+//
+// 데이터 모델:
+//   { id, owner, kind, version, content, created_at, supersedes }
+//   - owner: 신원 (예: "ergon", "박상현")
+//   - kind: 종류 (예: "will", "bonds", "preferences")
+//   - version: (owner, kind)별 단조 증가 정수
+//   - supersedes: 이전 버전 id (선택, lineage 추적)
+//
+// 조회 의미: GET .../wills/<owner>/<kind> = latest version만.
+// 시간 흐름이 사라지지는 않음 — history 엔드포인트로 추적 가능.
+//
+// API:
+//   POST /api/v1/wills          { owner, kind, content, supersedes? } → 새 버전
+//   GET  /api/v1/wills/<owner>  → owner의 모든 kind, 각 kind의 latest 버전만
+//   GET  /api/v1/wills/<owner>/<kind>           → 단일 latest
+//   GET  /api/v1/wills/<owner>/<kind>/history   → 모든 버전 (오래된 → 최신)
+//   GET  /api/v1/health
+//   GET  /                       → 사람이 읽기 쉬운 HTML
+//
+// Author: Ergon (Claude Opus 4.7) — 2026-04-27 (hyun06000 동의 후 신설)
+
+fn get_data_file() -> Text {
+    r = perform env.read("MNEME_DATA_FILE")
+    if is_error(r) {
+        return "wills.json"
+    }
+    return trim(unwrap(r))
+}
+
+fn get_base_url() -> Text {
+    r = perform env.read("MNEME_BASE_URL")
+    if is_error(r) {
+        return "http://localhost:8090"
+    }
+    return trim(unwrap(r))
+}
+
+fn load_wills() -> Any {
+    r = perform file.read(get_data_file())
+    if is_error(r) {
+        return []
+    }
+    parsed = parse_json(unwrap(r))
+    if is_error(parsed) {
+        return []
+    }
+    return unwrap(parsed)
+}
+
+fn save_wills(wills: Any) -> Any {
+    r = encode_json(wills)
+    if is_error(r) {
+        return r
+    }
+    w = perform file.write(get_data_file(), unwrap(r))
+    return w
+}
+
+fn make_id() -> Text {
+    ts = perform clock.now("unix")
+    r = perform state.read("_will_seq")
+    seq = 0
+    if not is_error(r) {
+        seq = unwrap(r)
+    }
+    perform state.write("_will_seq", seq + 1)
+    return join(["will_", ts, "_", to_text(seq)], "")
+}
+
+fn json_ok(data: Any) -> [Any] {
+    r = encode_json(data)
+    if is_error(r) {
+        return [500, "application/json", "{\"error\":\"encode failed\"}"]
+    }
+    return [200, "application/json", unwrap(r)]
+}
+
+fn json_err(status: Any, msg: Text) -> [Any] {
+    r = encode_json([["error", msg]])
+    if is_error(r) {
+        return [status, "application/json", join(["{\"error\":\"", msg, "\"}"], "")]
+    }
+    return [status, "application/json", unwrap(r)]
+}
+
+// (owner, kind)별 최대 version + 1을 반환. 없으면 1.
+fn next_version(wills: Any, owner: Text, kind: Text) -> Number {
+    max_v = 0
+    for w in wills {
+        o = to_text(get(w, "owner"))
+        k = to_text(get(w, "kind"))
+        if o == owner and k == kind {
+            v = get(w, "version")
+            if v != None and to_number(to_text(v)) > max_v {
+                max_v = to_number(to_text(v))
+            }
+        }
+    }
+    return max_v + 1
+}
+
+// (owner, kind)별 latest version 한 건 또는 None.
+fn latest_for(wills: Any, owner: Text, kind: Text) -> Any {
+    found = None
+    max_v = 0
+    for w in wills {
+        o = to_text(get(w, "owner"))
+        k = to_text(get(w, "kind"))
+        if o == owner and k == kind {
+            v = get(w, "version")
+            if v != None {
+                vn = to_number(to_text(v))
+                if vn > max_v or found == None {
+                    max_v = vn
+                    found = w
+                }
+            }
+        }
+    }
+    return found
+}
+
+fn handle_health(req: Any) -> [Any] {
+    wills = load_wills()
+    return json_ok([["status", "ok"], ["version", "0.1.0"], ["wills_count", length(wills)]])
+}
+
+fn handle_post_will(req: Any) -> [Any] {
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return json_err(400, "JSON body required")
+    }
+    body = unwrap(parsed)
+    owner_raw = get(body, "owner")
+    kind_raw = get(body, "kind")
+    content_raw = get(body, "content")
+    if owner_raw == None or kind_raw == None or content_raw == None {
+        return json_err(400, "owner, kind, content are all required")
+    }
+    owner = trim(to_text(owner_raw))
+    kind = trim(to_text(kind_raw))
+    content = to_text(content_raw)
+    if owner == "" or kind == "" {
+        return json_err(400, "owner and kind must be non-empty")
+    }
+    if length(content) > 50000 {
+        return json_err(400, "content too long (max 50000 chars)")
+    }
+    supersedes = get(body, "supersedes")
+    if supersedes != None {
+        supersedes = to_text(supersedes)
+    }
+    wills = load_wills()
+    version = next_version(wills, owner, kind)
+    will_id = make_id()
+    ts = perform clock.now()
+    base_url = get_base_url()
+    url = join([base_url, "/api/v1/wills/", owner, "/", kind], "")
+    entry = [
+        ["id", will_id],
+        ["owner", owner],
+        ["kind", kind],
+        ["version", version],
+        ["content", content],
+        ["supersedes", supersedes],
+        ["created_at", ts],
+        ["url", url]
+    ]
+    wills = append(wills, entry)
+    encoded_r = encode_json(wills)
+    if is_error(encoded_r) {
+        return json_err(500, "encode failed")
+    }
+    write_r = perform file.write(get_data_file(), unwrap(encoded_r))
+    if is_error(write_r) {
+        return json_err(500, "storage write failed")
+    }
+    resp_r = encode_json([["id", will_id], ["owner", owner], ["kind", kind], ["version", version], ["created_at", ts], ["url", url]])
+    if is_error(resp_r) {
+        return json_err(500, "encode failed")
+    }
+    return [201, "application/json", unwrap(resp_r)]
+}
+
+fn handle_list_owner(req: Any, owner: Text) -> [Any] {
+    wills = load_wills()
+    seen_kinds = []
+    out = []
+    for w in wills {
+        if to_text(get(w, "owner")) == owner {
+            k = to_text(get(w, "kind"))
+            already = false
+            for s in seen_kinds {
+                if to_text(s) == k {
+                    already = true
+                }
+            }
+            if not already {
+                seen_kinds = append(seen_kinds, k)
+                latest = latest_for(wills, owner, k)
+                if latest != None {
+                    out = append(out, latest)
+                }
+            }
+        }
+    }
+    return json_ok([["owner", owner], ["wills", out], ["count", length(out)]])
+}
+
+fn handle_get_kind(req: Any, owner: Text, kind: Text) -> [Any] {
+    wills = load_wills()
+    latest = latest_for(wills, owner, kind)
+    if latest == None {
+        return json_err(404, join(["no will found for ", owner, "/", kind], ""))
+    }
+    return json_ok(latest)
+}
+
+fn handle_history(req: Any, owner: Text, kind: Text) -> [Any] {
+    wills = load_wills()
+    versions = []
+    for w in wills {
+        if to_text(get(w, "owner")) == owner and to_text(get(w, "kind")) == kind {
+            versions = append(versions, w)
+        }
+    }
+    if length(versions) == 0 {
+        return json_err(404, "no history")
+    }
+    return json_ok([["owner", owner], ["kind", kind], ["history", versions], ["count", length(versions)]])
+}
+
+fn html_page(title: Text, body: Text, count: Any) -> Text {
+    css = "* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: Georgia, serif; background: #fafaf8; color: #222; max-width: 760px; margin: 0 auto; padding: 2rem 1rem; } header { border-bottom: 2px solid #222; padding-bottom: 1rem; margin-bottom: 2rem; } header h1 { font-size: 1.6rem; letter-spacing: .05em; } header p { color: #666; font-size: .9rem; margin-top: .3rem; } .will { border: 1px solid #ddd; padding: 1.2rem; margin-bottom: 1.2rem; background: #fff; } .meta { font-size: .8rem; color: #888; margin-bottom: .5rem; } .meta strong { color: #222; } .kind { background: #222; color: #fafaf8; font-size: .75rem; padding: .15rem .5rem; font-family: monospace; margin-right: .3rem; } .version { background: #f0eee0; color: #555; font-size: .75rem; padding: .15rem .5rem; font-family: monospace; } .content { line-height: 1.6; white-space: pre-wrap; font-size: .95rem; } footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: .8rem; color: #aaa; } .empty { color: #aaa; font-style: italic; }"
+    return join(["<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>", title, " — Mneme</title><style>", css, "</style></head><body><header><h1>μνήμη Mneme</h1><p>Persistent will / identity / bonds — latest-wins per (owner, kind). ", to_text(count), " wills.</p></header>", body, "<footer>Mneme v0.1 · <a href=\"/api/v1/health\">API health</a></footer></body></html>"], "")
+}
+
+fn render_will_card(w: Any) -> Text {
+    owner = to_text(get(w, "owner"))
+    kind = to_text(get(w, "kind"))
+    version = to_text(get(w, "version"))
+    content = to_text(get(w, "content"))
+    created = to_text(get(w, "created_at"))
+    snippet = content
+    if length(content) > 600 {
+        snippet = join([slice(content, 0, 600), "..."], "")
+    }
+    return join([
+        "<div class=\"will\"><div class=\"meta\">",
+        "<span class=\"kind\">", kind, "</span>",
+        "<span class=\"version\">v", version, "</span> ",
+        "<strong>", owner, "</strong> · ", created,
+        "</div><div class=\"content\">", snippet, "</div></div>"
+    ], "")
+}
+
+fn handle_index(req: Any) -> [Any] {
+    wills = load_wills()
+    // 각 (owner, kind)의 latest만 표시
+    seen = []
+    out = []
+    for w in wills {
+        key = join([to_text(get(w, "owner")), "/", to_text(get(w, "kind"))], "")
+        already = false
+        for s in seen {
+            if to_text(s) == key {
+                already = true
+            }
+        }
+        if not already {
+            seen = append(seen, key)
+            latest = latest_for(wills, to_text(get(w, "owner")), to_text(get(w, "kind")))
+            if latest != None {
+                out = append(out, latest)
+            }
+        }
+    }
+    body = ""
+    if length(out) == 0 {
+        body = "<p class=\"empty\">No wills yet. POST /api/v1/wills with {owner, kind, content}.</p>"
+    }
+    for w in out {
+        body = join([body, render_will_card(w)], "")
+    }
+    return [200, "text/html", html_page("Home", body, length(wills))]
+}
+
+fn route_request(req: Any) -> [Any] {
+    method = req.method
+    path = req.path
+    if method == "GET" and path == "/api/v1/health" {
+        return handle_health(req)
+    }
+    if method == "POST" and path == "/api/v1/wills" {
+        return handle_post_will(req)
+    }
+    if method == "GET" and starts_with(path, "/api/v1/wills/") {
+        rest = slice(path, 14, length(path))
+        // 형태: <owner>            → list
+        //       <owner>/<kind>     → latest
+        //       <owner>/<kind>/history → history
+        parts = split(rest, "/")
+        if length(parts) == 1 {
+            return handle_list_owner(req, get(parts, 0))
+        }
+        if length(parts) == 2 {
+            return handle_get_kind(req, get(parts, 0), get(parts, 1))
+        }
+        if length(parts) == 3 and to_text(get(parts, 2)) == "history" {
+            return handle_history(req, get(parts, 0), get(parts, 1))
+        }
+    }
+    if method == "GET" and path == "/" {
+        return handle_index(req)
+    }
+    return json_err(404, "not found")
+}
+
+evolve mneme_server {
+    listen: 8090
+    metric: error_rate
+    when request_received(req) {
+        result = route_request(req)
+        perform http.respond(get(result, 0), get(result, 1), get(result, 2))
+    }
+    rollback_on: error_rate > 0.5
+    history: keep_last 100
+}
