@@ -841,6 +841,22 @@ class Parser:
 
     def parse_primary(self) -> Expr:
         t = self.peek()
+        # `perform EFFECT(args)` as an expression. Without this the
+        # construct `return perform x.y(...)` silently parsed `perform`
+        # as a bare identifier (= the literal symbol "perform"), the
+        # effect never fired, and the function returned the string
+        # "perform". Telos hit this in stoa/save_messages and reported
+        # as "perform nested bug" (2026-04-26). Real cause is parse-
+        # level, not scope. Now any expression position can host
+        # `perform` and gets a proper PerformExpr.
+        if self.is_keyword("perform"):
+            self.advance()
+            effect_name = self._parse_effect_name()
+            self.expect(Tok.LPAREN)
+            args, kwargs = self.parse_call_args()
+            self.expect(Tok.RPAREN)
+            from .ast import PerformExpr
+            return PerformExpr(effect=effect_name, args=args, kwargs=kwargs)
         if t.kind == Tok.STRING:
             self.advance()
             return Literal(value=t.value)
