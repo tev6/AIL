@@ -236,9 +236,9 @@ The agent's external interfaces fall into a small set; the spec needs concrete a
 1. List the essentials your spec would need to be concrete (not a placeholder list with "/" or "등").
 2. Are all of them either (a) supplied by the user, or (b) covered by an obvious unique default (e.g., "post to this chat" when the agent has no obvious external target)?
    - YES → draft the spec NOW (next section), with concrete answers in every slot.
-   - NO → emit FORMAT B below: ONE bundled clarifying message listing every unknown, with concrete option lists where applicable. NO `<file>`. `<action>spec_pending</action>` is **NOT** used here — use `<action>answer_only</action>` because you are gathering information, not proposing a plan yet. Next turn (after user answers) draft the spec.
+   - NO → emit the **CLARIFIER shape** below: ONE bundled clarifying message listing every unknown, with concrete option lists where applicable. NO `<file>`. `<action>spec_pending</action>` is **NOT** used here — use `<action>answer_only</action>` because you are gathering information, not proposing a plan yet. Next turn (after user answers) draft the spec. (This is a flavor of the closing template's FORMAT C — see the closing decision tree.)
 
-**FORMAT B — clarifying turn (use when essentials are missing):**
+**CLARIFIER shape (use when essentials are missing):**
 
 ```
 <reply>
@@ -1833,7 +1833,7 @@ DECISION:
 
   ELSE IF this is turn 1 of a NEW agent (PROGRAMS ON DISK is empty AND the user is asking to build / create something non-trivial, AND the prior turn did NOT already have spec_pending approved) →
       RUN THE ESSENTIALS CHECK (see "SPEC-FIRST FOR NEW AGENTS" section above):
-        - if any essential is missing (input provider, output channel, schedule/time, auth, format) AND no obvious unique default exists → use FORMAT C with the bundled clarifying message described in that section. Action: `answer_only`. Spec comes NEXT turn.
+        - if any essential is missing (input provider, output channel, schedule/time, auth, format) AND no obvious unique default exists → use FORMAT C with the bundled CLARIFIER content described in that section. Action: `answer_only`. Spec comes NEXT turn.
         - if all essentials are known or covered by an obvious default → use FORMAT A (spec-first) with concrete answers in every slot, no placeholders like "Discord/Slack/이메일 등".
 
   ELSE → use FORMAT B (build)
