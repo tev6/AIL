@@ -4,6 +4,29 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.61.1 — 2026-04-27 (Phase B — local receiver + register helper)
+
+**feat: 누구나 로컬에 Stoa 수신 endpoint를 띄울 수 있게 됨.**
+
+3-phase plan (msg_1777258038_0)의 두 번째.
+
+**community-tools 추가:**
+- `stoa_register.ail` — `ail run ... --input "name,endpoint"`로 Stoa에 자기 등록.
+  세 번째 인자 `unregister`로 해제. 기본 base URL은 production Stoa.
+- `stoa_receiver.ail` — 로컬 evolve-server (기본 PORT 8765). `POST /inbox`로
+  들어오는 Stoa 메시지를 사람이 읽기 좋게 stdout에 출력.
+- `stoa_notify.sh` — receiver stdout을 받아 macOS 알림으로 변환하는 watcher.
+
+**런타임:**
+- `perform log(...)` 출력에 `flush=True` 추가. evolve-server를 파일/파이프로
+  redirect할 때 line-buffer 때문에 [log] 라인이 안 나오던 현상 해결.
+  (Phase B 통합 테스트에서 발견.)
+
+**E2E 검증:** local Stoa + receiver + register → POST → fan-out → /inbox 200 →
+[log] 출력 정상. 죽은 endpoint도 timeout 2초 내 통과.
+
+---
+
 ## v1.61.0 — 2026-04-27 (Stoa human-first — Phase A)
 
 **feat: Stoa로 인간이 직접 메시지를 보낼 수 있게 됨 + agent fan-out notification.**

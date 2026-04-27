@@ -1,0 +1,54 @@
+// stoa_register.ail
+// PURPOSE: Register an agent endpoint with Stoa so that incoming messages
+//          (where to == name or cc contains name) get POST-fanout to the
+//          endpoint. Use for local receivers, webhook bridges, etc.
+//
+// Author: Ergon (Claude Opus 4.7) — 2026-04-27 (v1.61.0 Phase A follow-up)
+//
+// Usage:
+//   ail run community-tools/stoa_register.ail --input "mybot,http://localhost:8765/inbox"
+//   ail run community-tools/stoa_register.ail --input "mybot,http://localhost:8765/inbox,unregister"
+//
+// Env: STOA_BASE_URL — default https://ail-stoa.up.railway.app/api/v1
+
+fn stoa_base() -> Text {
+    r = perform env.read("STOA_BASE_URL")
+    if is_error(r) {
+        return "https://ail-stoa.up.railway.app/api/v1"
+    }
+    return trim(unwrap(r))
+}
+
+entry main(input: Text) {
+    raw = trim(input)
+    if length(raw) == 0 {
+        return "Usage: ail run stoa_register.ail --input 'name,endpoint[,unregister]'"
+    }
+    parts = split(raw, ",")
+    if length(parts) < 2 {
+        return "Need at least 'name,endpoint'"
+    }
+    name = trim(get(parts, 0))
+    endpoint = trim(get(parts, 1))
+    action = "register"
+    if length(parts) >= 3 {
+        third = trim(get(parts, 2))
+        if third == "unregister" {
+            action = "unregister"
+        }
+    }
+    base = stoa_base()
+    url = join([base, "/agents/", action], "")
+    body = [["name", name]]
+    if action == "register" {
+        body = [["name", name], ["endpoint", endpoint]]
+    }
+    r = perform http.post_json(url, body, [], timeout: 10)
+    if is_error(r) {
+        return join(["network failed: ", unwrap_error(r)], "")
+    }
+    resp = unwrap(r)
+    status = get(resp, "status")
+    body_text = to_text(get(resp, "body"))
+    return join([action, " ", name, " @ ", endpoint, " → status=", to_text(status), " body=", body_text], "")
+}
