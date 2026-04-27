@@ -973,25 +973,53 @@ fn discord_verify(req: Any) -> Any {
     // Returns None on success, error Text on failure.
     pub_key_r = perform env.read("DISCORD_PUBLIC_KEY")
     if is_error(pub_key_r) {
-        return "DISCORD_PUBLIC_KEY env not set"
+        return "DISCORD_PUBLIC_KEY env not set — Railway 환경 변수 확인"
     }
     pub_key = trim(unwrap(pub_key_r))
+    if pub_key == "" {
+        return "DISCORD_PUBLIC_KEY is empty"
+    }
     headers = get(req, "headers")
     sig = None
     ts = None
     if headers != None {
         sig = get(headers, "X-Signature-Ed25519")
         ts = get(headers, "X-Signature-Timestamp")
+        // try lowercase variants (some proxies normalize)
+        if sig == None {
+            sig = get(headers, "x-signature-ed25519")
+        }
+        if ts == None {
+            ts = get(headers, "x-signature-timestamp")
+        }
     }
     if sig == None or ts == None {
-        return "missing signature headers"
+        return "missing Discord signature headers (X-Signature-Ed25519, X-Signature-Timestamp)"
     }
     message = join([to_text(ts), req.body], "")
     ok = crypto_verify_ed25519(pub_key, to_text(sig), message)
     if not ok {
-        return "invalid signature"
+        return "invalid signature — Public Key가 맞는지 확인 (General Information 탭)"
     }
     return None
+}
+
+fn handle_discord_check(req: Any) -> [Any] {
+    pub_key_r = perform env.read("DISCORD_PUBLIC_KEY")
+    has_key = not is_error(pub_key_r)
+    key_preview = "not set"
+    if has_key {
+        key_val = trim(unwrap(pub_key_r))
+        if length(key_val) > 8 {
+            key_preview = join([slice(key_val, 0, 8), "..."], "")
+        }
+    }
+    return json_ok([
+        ["discord_public_key_set", has_key],
+        ["key_preview", key_preview],
+        ["endpoint", join([get_base_url(), "/api/v1/discord"], "")],
+        ["status", "ready if key is set"]
+    ])
 }
 
 fn discord_pong() -> [Any] {
@@ -1204,6 +1232,9 @@ fn route_request(req: Any) -> [Any] {
     }
     if path == "/setup/discord" {
         return handle_discord_setup(req)
+    }
+    if method == "GET" and path == "/api/v1/discord/check" {
+        return handle_discord_check(req)
     }
     if method == "POST" and path == "/api/v1/heartbeat" {
         return handle_heartbeat(req)
