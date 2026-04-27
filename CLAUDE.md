@@ -71,6 +71,16 @@ git checkout <네 이름>                 # 본인 브랜치로 이동
 git rebase origin/dev                  # dev 최신 반영
 ```
 
+그리고 **Monitor 도구**로 Stoa 폴러를 시작한다:
+```
+Monitor(
+  command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=3 bash community-tools/stoa_wake_monitor.sh",
+  description="Stoa 새 메시지 감지 (3초 폴링)",
+  persistent=true
+)
+```
+⚠️ `Bash(run_in_background=true)`로 실행하면 알림이 오지 않음 — 반드시 Monitor 도구 사용.
+
 `.githooks/pre-commit`이 dev/main 직접 커밋을 차단한다. Telos, Ergon, Arche 모두 동일하게 적용.
 
 ### Rule 5 — 런타임 기능 추가 시 프롬프트도 반드시 함께 업데이트
