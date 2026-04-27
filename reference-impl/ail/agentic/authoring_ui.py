@@ -1997,7 +1997,15 @@ def render_authoring_page(
         return `<p>${{inlineRender(lines.join(' '))}}</p>`;
       }});
 
-      return rendered.join('');
+      // Final pass: restore any FENCED placeholders that ended up
+      // *inside* a paragraph (LLM emitted ```...``` with no surrounding
+      // blank lines, so the block-split kept it inline). Without this
+      // the user sees a literal "\x00FENCED0\x00" → '\uFFFDFENCED0\uFFFD'
+      // (replacement-char) in the rendered output.
+      // Field test 2026-04-27 (hyun06000).
+      let html = rendered.join('');
+      html = html.replace(/\x00FENCED(\\d+)\x00/g, (_, n) => fenced[parseInt(n)]);
+      return html;
     }}
 
     function inlineRender(s) {{
