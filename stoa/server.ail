@@ -622,6 +622,62 @@ fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
 
 // ============ HEARTBEAT ============
 
+fn get_names_file() -> Text {
+    r = perform env.read("STOA_NAMES_FILE")
+    if is_error(r) {
+        return "discord_names.json"
+    }
+    return trim(unwrap(r))
+}
+
+fn load_names() -> Any {
+    r = perform file.read(get_names_file())
+    if is_error(r) {
+        return []
+    }
+    parsed = parse_json(unwrap(r))
+    if is_error(parsed) {
+        return []
+    }
+    return unwrap(parsed)
+}
+
+fn save_name(discord_id: Text, display_name: Text) -> Any {
+    names = load_names()
+    updated = []
+    found = false
+    for entry in names {
+        if get(entry, "id") == discord_id {
+            updated = append(updated, [["id", discord_id], ["name", display_name]])
+            found = true
+        }
+        if get(entry, "id") != discord_id {
+            updated = append(updated, entry)
+        }
+    }
+    if not found {
+        updated = append(updated, [["id", discord_id], ["name", display_name]])
+    }
+    r = encode_json(updated)
+    if is_error(r) {
+        return r
+    }
+    return perform file.write(get_names_file(), unwrap(r))
+}
+
+fn lookup_name(discord_id: Text) -> Text {
+    names = load_names()
+    for entry in names {
+        if get(entry, "id") == discord_id {
+            n = get(entry, "name")
+            if n != None {
+                return to_text(n)
+            }
+        }
+    }
+    return ""
+}
+
 fn get_heartbeats_file() -> Text {
     r = perform env.read("STOA_HEARTBEATS_FILE")
     if is_error(r) {
@@ -1082,13 +1138,9 @@ fn handle_discord(req: Any) -> [Any] {
             }
         }
         // 등록된 이름 조회
-        state_key = join(["discord_name_", discord_user_id], "")
-        name_r = perform state.read(state_key)
-        if not is_error(name_r) {
-            stored = unwrap(name_r)
-            if stored != None and to_text(stored) != "" {
-                discord_user = to_text(stored)
-            }
+        stored_name = lookup_name(discord_user_id)
+        if stored_name != "" {
+            discord_user = stored_name
         }
         // /stoa to:<name> message:<text> name:<등록>
         if cmd_name == "stoa" {
@@ -1119,7 +1171,7 @@ fn handle_discord(req: Any) -> [Any] {
             }
             // 이름 등록
             if reg_name != "" and content == "" {
-                perform state.write(state_key, reg_name)
+                save_name(discord_user_id, reg_name)
                 return discord_message(join(["등록됐어요! 앞으로 \"", reg_name, "\"으로 올라갑니다."], ""))
             }
             if content == "" {
