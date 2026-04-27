@@ -405,6 +405,51 @@ class Executor:
         args = [self._eval_expr(a, scope) for a in stmt.args]
         kwargs = {k: self._eval_expr(v, scope) for k, v in stmt.kwargs.items()}
 
+        # Trust-level gate (Arche 2026-04-27 #2). Active context can declare
+        # `trust_level: "plan" | "default" | "auto" | "bypass"` to widen or
+        # narrow what perform calls do without writing a single explicit
+        # `human.approve` in the program. Convention only — no new keyword.
+        # `default` (or absent): current behavior.
+        # `plan`: every perform (except human.approve itself) auto-gates
+        #   through human.approve. Decline → Result-error.
+        # `auto`: reserved for #3 (intent is_safe). Currently same as default.
+        # `bypass`: reserved for high-trust loops; also same as default for
+        #   now (perform always runs anyway; difference is whether explicit
+        #   in-program `human.approve` calls are honored — that's harness
+        #   work for a future PR).
+        trust_level = self.ctx_stack.get("trust_level", "default")
+        if trust_level == "plan" and stmt.effect != "human.approve":
+            preview_args = ", ".join(
+                repr(a.value)[:60] for a in args
+            )
+            plan_text = (
+                f"[trust_level=plan] About to call: perform "
+                f"{stmt.effect}({preview_args})"
+            )
+            try:
+                approval = self._human_approve(
+                    [ConfidentValue(plan_text, 1.0)], {},
+                    Origin(kind="effect", name="trust_gate", parents=[]),
+                )
+            except Exception as e:
+                self.trace.record("perform_denied",
+                                  effect=stmt.effect, reason=f"approve_error:{e}")
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"trust_gate: approval failed: {e}"},
+                    0.0,
+                )
+            ar = approval.value
+            if isinstance(ar, dict) and ar.get("ok") is False:
+                self.trace.record("perform_denied",
+                                  effect=stmt.effect, reason="user_declined")
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"trust_gate: user declined "
+                              f"{stmt.effect}: {ar.get('error', '')}"},
+                    0.0,
+                )
+
         effect = self.effects.get(stmt.effect)
         if effect is None:
             # MVP: allow a small set of built-in effects without declaration
