@@ -100,7 +100,7 @@ while read local_ref local_sha remote_ref remote_sha; do
         '{
             from: $from,
             to: "arche",
-            cc: ["ergon", "telos"],
+            cc: ["ergon", "telos", "hyun06000"],
             title: ("[" + $branch + "] 업데이트 — " + $from),
             content: ("**[" + $branch + "]** 에 **" + $from + "** 가 푸시했습니다.\n\n최근 커밋:\n```\n" + $log + "\n```\n\n최신 상태로 맞추세요:\n```\ngit rebase origin/" + $branch + "\n```"),
             tags: ["push", $branch, "update"]
