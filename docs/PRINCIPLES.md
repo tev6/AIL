@@ -68,7 +68,7 @@ evolve-server `_server_history`가 `keep_last`의 80%에 도달하면 runtime이
 |----|------|
 | `"plan"` | 모든 `perform`(human.approve 제외)이 자동으로 human.approve 게이트 통과. 거부 → Result-error |
 | `"default"` (또는 없음) | 현재 동작 — 저자가 §3a 가이드라인에 따라 명시적으로 호출 |
-| `"auto"` | (예약) intent is_safe 자동 분류 — 현재는 default와 동일 |
+| `"auto"` | `intent is_safe(plan: Text) -> Text` 호출 (정의 시). 출력 `"allow"`/`"deny"`/`"ask"`로 게이팅. 미정의 → no-gate. (Arche #3) |
 | `"bypass"` | (예약) — 현재는 default와 동일 |
 
 전체 명세는 [`spec/02-context.md` §9a](../spec/02-context.md). 테스트는 `tests/test_trust_level.py`.
