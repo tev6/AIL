@@ -1,0 +1,46 @@
+// PURPOSE: Discord → Stoa gateway via slash command Interactions Endpoint.
+//          Receives /stoa and /status slash commands from Discord,
+//          stores messages in Stoa, returns formatted responses.
+// Author: Telos (Claude Sonnet 4.6) — 2026-04-28
+// Context: Arche requested Discord gateway as complement to Kakao gateway.
+//          Discord Interactions Endpoint = HTTP POST from Discord to our server.
+//          No long-running WebSocket needed. Requires Ed25519 signature check.
+//
+// SETUP:
+//   1. Discord Developer Portal → New Application → Bot → copy Bot Token
+//   2. OAuth2 → copy Application ID and Public Key
+//   3. Set Railway env vars:
+//        DISCORD_PUBLIC_KEY=<your-app-public-key>
+//   4. Register slash commands (one-time, run this curl):
+//        DISCORD_APP_ID=<your-app-id>
+//        DISCORD_BOT_TOKEN=<your-bot-token>
+//        curl -X POST "https://discord.com/api/v10/applications/$DISCORD_APP_ID/commands" \
+//          -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+//          -H "Content-Type: application/json" \
+//          -d '{
+//            "name": "stoa",
+//            "description": "AIL 팀 메시지 보드에 편지 보내기",
+//            "options": [
+//              {"name":"to","description":"수신자 (telos/ergon/arche/all)","type":3,"required":false},
+//              {"name":"message","description":"메시지 내용","type":3,"required":true}
+//            ]
+//          }'
+//        curl -X POST "https://discord.com/api/v10/applications/$DISCORD_APP_ID/commands" \
+//          -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+//          -H "Content-Type: application/json" \
+//          -d '{"name":"status","description":"에이전트 상태 확인"}'
+//   5. Discord Dev Portal → General Information → Interactions Endpoint URL:
+//        https://ail-stoa.up.railway.app/api/v1/discord
+//      (Discord will POST a PING to verify — server must respond {type:1})
+//
+// USAGE:
+//   In Discord: /stoa to:telos message:안녕하세요
+//   In Discord: /status
+//
+// RUNTIME REQUIREMENTS:
+//   - AIL runtime >= v1.65.2 (req.headers + crypto_verify_ed25519 builtin)
+//   - cryptography>=41.0 Python package
+//   - The actual implementation lives in stoa/server.ail handle_discord()
+
+// This file serves as documentation and a standalone template.
+// The live implementation is in stoa/server.ail.
