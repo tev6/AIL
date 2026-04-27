@@ -72,7 +72,18 @@ def _write_source(dest: str, source: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ail", description="AIL MVP interpreter")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd", required=False)
+
+    p_home = sub.add_parser("home",
+        help="Open a browser file-tree to navigate folders, create a new "
+             "polis, and hand off to the authoring chat. Bare `ail` (no "
+             "subcommand) defaults to this.")
+    p_home.add_argument("--port", type=int, default=8079,
+        help="Port for the home server (default 8079).")
+    p_home.add_argument("--root", default=None,
+        help="Starting directory for the file tree (default: $HOME).")
+    p_home.add_argument("--no-open", action="store_true",
+        help="Don't auto-open the browser.")
 
     p_ask = sub.add_parser("ask",
         help="Ask AIL in natural language — the AI writes AIL and runs it for you")
@@ -180,6 +191,22 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("version", help="Print version")
 
     args = parser.parse_args(argv)
+
+    if args.cmd is None:
+        args.cmd = "home"
+        args.port = 8079
+        args.root = None
+        args.no_open = False
+
+    if args.cmd == "home":
+        from .agentic.home_ui import serve_home
+        from pathlib import Path as _Path
+        start = _Path(args.root).expanduser() if args.root else _Path.home()
+        port = args.port or _find_free_port(8079)
+        url = f"http://127.0.0.1:{port}/"
+        if not getattr(args, "no_open", False):
+            _try_open_browser(url)
+        return serve_home(start_root=start, port=port)
 
     if args.cmd == "version":
         print(f"ail {__version__}")
