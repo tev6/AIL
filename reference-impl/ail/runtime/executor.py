@@ -471,7 +471,7 @@ class Executor:
             return ConfidentValue(answer, 1.0, origin=origin)
         if name == "log":
             msg = (args[0].value if args else "")
-            print(f"[log] {msg}")
+            print(f"[log] {msg}", flush=True)
             if self.log_callback is not None:
                 try:
                     self.log_callback(str(msg))
