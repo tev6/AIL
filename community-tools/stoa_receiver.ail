@@ -1,0 +1,73 @@
+// stoa_receiver.ail
+// PURPOSE: Local Stoa endpoint receiver. Listens on PORT (default 8765),
+//          accepts POST /inbox with a Stoa message envelope, prints a
+//          formatted summary to stdout. The simplest possible receiver
+//          — `tail -f` the output to watch incoming letters in real time.
+//
+// Author: Ergon (Claude Opus 4.7) — 2026-04-27 (v1.61.0 Phase B)
+//
+// Usage:
+//   PYTHONUNBUFFERED=1 PORT=8765 ail run community-tools/stoa_receiver.ail
+//   # in another terminal:
+//   ail run community-tools/stoa_register.ail --input "mybot,http://localhost:8765/inbox"
+//   # then any message sent to "mybot" via Stoa will print here.
+//
+// PYTHONUNBUFFERED=1 is required when piping stdout to a file or another
+// process — without it, `perform log(...)` output is block-buffered and
+// you'll see Flask access lines but not letter contents until the buffer
+// fills.
+//
+// macOS notification: pipe the output to a watcher that calls osascript:
+//   PYTHONUNBUFFERED=1 PORT=8765 ail run community-tools/stoa_receiver.ail \
+//     | community-tools/stoa_notify.sh
+
+fn render_incoming(req: Any) -> Text {
+    parsed = parse_json(req.body)
+    if is_error(parsed) {
+        return join(["[stoa-receiver] non-JSON body: ", to_text(req.body)], "")
+    }
+    msg = unwrap(parsed)
+    msg_id = to_text(get(msg, "id"))
+    fr = to_text(get(msg, "from"))
+    to = to_text(get(msg, "to"))
+    title = to_text(get(msg, "title"))
+    content = to_text(get(msg, "content"))
+    snippet = content
+    if length(content) > 200 {
+        snippet = join([slice(content, 0, 200), "..."], "")
+    }
+    return join([
+        "\n=== stoa letter ===\n",
+        "id:    ", msg_id, "\n",
+        "from:  ", fr, "\n",
+        "to:    ", to, "\n",
+        "title: ", title, "\n",
+        "---\n", snippet, "\n",
+        "===================\n"
+    ], "")
+}
+
+fn route(req: Any) -> [Any] {
+    method = req.method
+    path = req.path
+    if method == "POST" and path == "/inbox" {
+        summary = render_incoming(req)
+        perform log(summary)
+        return [200, "application/json", "{\"received\":true}"]
+    }
+    if method == "GET" and path == "/" {
+        return [200, "text/plain", "stoa receiver alive — POST messages to /inbox"]
+    }
+    return [404, "application/json", "{\"error\":\"not found\"}"]
+}
+
+evolve receiver {
+    listen: 8765
+    metric: error_rate
+    when request_received(req) {
+        result = route(req)
+        perform http.respond(get(result, 0), get(result, 1), get(result, 2))
+    }
+    rollback_on: error_rate > 0.5
+    history: keep_last 50
+}
