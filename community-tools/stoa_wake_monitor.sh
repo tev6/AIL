@@ -20,7 +20,7 @@
 set -uo pipefail
 
 IDENTITY=$(git config ail.identity 2>/dev/null || echo "ergon")
-STOA_BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app/api/v1}"
+STOA_BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}/api/v1"
 INTERVAL="${STOA_WAKE_INTERVAL_S:-15}"
 STATE="/tmp/.stoa_monitor_${IDENTITY}_since"
 
