@@ -620,10 +620,22 @@ fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
     return json_ok([["deleted", msg_id]])
 }
 
+fn kakao_quick_replies() -> Any {
+    return [
+        [["label", "@에르곤"], ["action", "message"], ["messageText", "@에르곤 "]],
+        [["label", "@텔로스"], ["action", "message"], ["messageText", "@텔로스 "]],
+        [["label", "@아르케"], ["action", "message"], ["messageText", "@아르케 "]],
+        [["label", "📋 상태"], ["action", "message"], ["messageText", "/status"]]
+    ]
+}
+
 fn kakao_ok(text: Text) -> [Any] {
     r = encode_json([
         ["version", "2.0"],
-        ["template", [["outputs", [[["simpleText", [["text", text]]]]]]]]
+        ["template", [
+            ["outputs", [[["simpleText", [["text", text]]]]]],
+            ["quickReplies", kakao_quick_replies()]
+        ]]
     ])
     if is_error(r) {
         return [200, "application/json", "{\"version\":\"2.0\",\"template\":{\"outputs\":[{\"simpleText\":{\"text\":\"오류가 발생했습니다.\"}}]}}"]
@@ -654,6 +666,27 @@ fn handle_kakao(req: Any) -> [Any] {
             kakao_user_id = join(["kakao_", to_text(uid)], "")
         }
     }
+    // /status 명령
+    if text == "/status" {
+        messages = load_messages()
+        count = length(messages)
+        return kakao_ok(join(["Stoa 현재 메시지: ", to_text(count), "개"], ""))
+    }
+    // @수신자 prefix 파싱
+    to_name = "telos"
+    content_text = text
+    alias_map = [["@에르곤", "ergon"], ["@텔로스", "telos"], ["@아르케", "arche"], ["@ergon", "ergon"], ["@telos", "telos"], ["@arche", "arche"]]
+    for pair in alias_map {
+        prefix = get(pair, 0)
+        name = get(pair, 1)
+        if starts_with(text, prefix) {
+            to_name = name
+            content_text = trim(slice(text, length(prefix), length(text)))
+        }
+    }
+    if content_text == "" {
+        return kakao_ok(join(["수신자: ", to_name, " — 메시지 내용을 입력해주세요."], ""))
+    }
     msg_id = make_id()
     ts = perform clock.now()
     base_url = get_base_url()
@@ -661,10 +694,10 @@ fn handle_kakao(req: Any) -> [Any] {
     msg = [
         ["id", msg_id],
         ["from", kakao_user_id],
-        ["to", "telos"],
+        ["to", to_name],
         ["cc", None],
         ["title", None],
-        ["content", text],
+        ["content", content_text],
         ["tags", ["kakao"]],
         ["reply_to", None],
         ["from_email", None],
@@ -678,8 +711,8 @@ fn handle_kakao(req: Any) -> [Any] {
         return kakao_ok("저장 실패 — 다시 시도해주세요.")
     }
     perform file.write(get_data_file(), unwrap(encoded_r))
-    notify_agents(msg, "telos", None)
-    return kakao_ok(join(["스토아에 전달했습니다: \"", text, "\""], ""))
+    notify_agents(msg, to_name, None)
+    return kakao_ok(join(["→ ", to_name, ": \"", content_text, "\""], ""))
 }
 
 fn handle_debug_email(req: Any) -> [Any] {
