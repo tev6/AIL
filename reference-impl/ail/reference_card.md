@@ -167,6 +167,7 @@ REQUIRED fields: metric, when + action, rollback_on, history. Missing any = comp
 ```ail
 evolve SERVER_NAME {
     listen: PORT_NUMBER
+    effects: [file.read, file.write, http.respond, email.send]   // infra-layer deny-first
     metric: error_rate
     when request_received(req) {
         result = route_request(req)
@@ -180,6 +181,11 @@ evolve SERVER_NAME {
 `when request_received(req)` is an event arm — fires on each HTTP request.
 `rollback_on` triggers self-termination (§9). `metric` and `when` fields
 are still present; `rollback_on` + `history` remain required.
+
+`effects:` declares the effect whitelist for this server (infra-layer deny-first).
+Only effects listed here may be `perform`ed. Undeclared effects are denied even if
+they appear in the global `ALLOWED_EFFECTS`. When `effects:` is omitted, the
+citizen-layer `ALLOWED_EFFECTS` check applies instead.
 
 ### Physis — generational evolution (v0.3)
 

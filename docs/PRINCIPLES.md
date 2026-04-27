@@ -52,15 +52,30 @@
 
 ### 3d. deny-first effect 정책 (Arche 2026-04-27 #4, ergon 구현, hyun06000 동의)
 
-**런타임은 기본 deny.** `perform`이 효과를 호출하려면 두 조건을 동시 충족:
-1. `ALLOWED_EFFECTS`에 등록되어 있거나 `effect` 선언으로 추가된 이름
-2. 활성 context 어디에서도 `deny_effects: [Text]`로 거부되지 않은 이름
+**원칙: 모든 effect는 어딘가에서 명시적으로 선언되어야 한다.** 선언 위치가 레이어에 따라 다를 뿐, 원칙은 같다.
 
-**Strictest wins.** 어떤 allow 규칙도 deny를 이길 수 없다. `deny_effects`는 active context stack 전체에서 union — 어떤 frame이 거부하면 안쪽 모든 scope가 상속.
+**deny-first는 두 레이어에서 작동한다 (Arche 2026-04-27, Telos 필드 발견):**
 
-위반/거부 시: `RuntimeError` 아니라 `Result-error` 반환. 프로그램이 `attempt` / `is_error`로 graceful fallback 가능.
+**Citizen layer** — 사용자 intent, `ail ask` 생성 코드, 서브에이전트.
+- `perform`이 허용되려면: `ALLOWED_EFFECTS`에 있거나 `effect` 선언으로 추가된 이름.
+- 활성 context의 `deny_effects:` 목록에 있으면 거부 (strictest wins).
+- "AI가 사용자를 대신해 예상치 못한 행동을 하는 것"을 막는다.
 
-전체 명세: [`spec/05-effects.md` §11a](../spec/05-effects.md). 테스트: `tests/test_deny_first.py`.
+**Infra layer** — `evolve-server` (Stoa, Sphinx, Mneme, Hermes 등).
+- evolve 블록에 `effects: [...]` 필드를 선언. 그 목록만 허용, 나머지는 거부.
+- `ALLOWED_EFFECTS`는 적용되지 않음 — evolve `effects:` 필드가 완전 대체.
+- 서버 자체가 자기 권한을 선언한다. Polis로 분리될 때 각 에이전트가 최소 권한만 선언.
+
+```ail
+evolve stoa_server {
+    effects: [file.read, file.write, http.respond, email.send]
+    // email.send만 허용 — perform clock.now()는 여기서 거부
+}
+```
+
+위반/거부 시: `RuntimeError` 아니라 `Result-error` 반환. 프로그램이 `is_error`로 graceful fallback 가능.
+
+전체 명세: [`spec/05-effects.md` §11a](../spec/05-effects.md). 테스트: `tests/test_deny_first.py`, `tests/test_evolve_effects.py`.
 
 ### 3c. `on_compact` 컨벤션 (Arche 2026-04-27 #1, ergon 구현)
 

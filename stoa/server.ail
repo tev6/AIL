@@ -675,6 +675,7 @@ fn route_request(req: Any) -> [Any] {
 
 evolve stoa_server {
     listen: 8090
+    effects: [file.read, file.write, clock.now, state.read, state.write, env.read, http.post_json, http.respond, email.send]
     metric: error_rate
     when request_received(req) {
         result = route_request(req)
