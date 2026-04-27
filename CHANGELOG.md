@@ -4,6 +4,19 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.63.1 — 2026-04-27 (이미지 첨부 UX — window-wide paste/drop)
+
+hyun06000 피드백: "맥에서 스샷찍으면 우측 아래에 썸네일이 뜨는데 그거 드래그해서
+넣을 수 있었으면 좋겠고, Cmd+V도 됐으면."
+
+- **drop zone을 윈도우 전체로 확장** — 작은 textarea를 정확히 맞출 필요 없음.
+  드래그 시작 시 페이지 전체에 점선 dashed 오버레이 + "여기에 놓으면 첨부됩니다"
+  안내. 맥 Cmd+Shift+4 후 우측 하단 썸네일 드래그 환경에 최적화.
+- **window-level paste handler** 추가 — textarea에 포커스 없어도 Cmd+V로 바로
+  첨부. 다른 input/textarea에 포커스가 있으면 hijack 안 함 (regular paste 보존).
+- 텍스트 입력 중 의도치 않게 파일 paste가 잡히는 문제 없음 (textarea handler가
+  먼저 잡고 image면만 처리).
+
 ## v1.63.0 — 2026-04-27 (이미지 in/out — vision input + image.embed)
 
 **feat: 비개발자가 막힌 화면을 캡쳐해서 붙여넣으면 모델이 보고 다음 지침을 줌.**
