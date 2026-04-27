@@ -388,11 +388,11 @@ async function doCreatePolis(parent, name) {
     // Strong consent dialog. AIL has no destructive primitive — UI
     // moves the existing dir to ~/.ail/.Trashcan/<ts>-<name>/ on
     // explicit confirm. User can recover from .Trashcan manually.
-    const msg = '⚠ 같은 이름의 폴리스가 이미 있어요:\\n\\n  ' + j.existing_path +
-                '\\n\\n이 디렉터리를 휴지통(~/.ail/.Trashcan/)으로 옮긴 뒤 새 폴리스를 만들까요?\\n' +
-                '\\n• 삭제가 아니라 *이동*입니다 — 나중에 .Trashcan에서 복원 가능\\n' +
-                '• AIL은 데이터를 영구 삭제하지 않아요 (HEAAL 원칙)\\n' +
-                '\\n계속하려면 [확인], 취소하려면 [취소]를 누르세요.';
+    const msg = '⚠ 같은 이름의 폴리스가 이미 있어요:\n\n  ' + j.existing_path +
+                '\n\n이 디렉터리를 휴지통(~/.ail/.Trashcan/)으로 옮긴 뒤 새 폴리스를 만들까요?\n' +
+                '\n• 삭제가 아니라 *이동*입니다 — 나중에 .Trashcan에서 복원 가능\n' +
+                '• AIL은 데이터를 영구 삭제하지 않아요 (HEAAL 원칙)\n' +
+                '\n계속하려면 [확인], 취소하려면 [취소]를 누르세요.';
     if (!window.confirm(msg)) {
       showStatus('err', '취소됨 — 기존 폴리스는 그대로 있어요.');
       return;
