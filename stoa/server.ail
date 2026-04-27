@@ -341,7 +341,12 @@ fn handle_post_message(req: Any) -> [Any] {
             }
             subject = join(["Re: ", to_text(subject_base), " — Stoa"], "")
             email_body = join([content, "\n\n---\n스토아에서 전체 대화 보기: ", thread_url], "")
-            perform email.send(parent_email, subject, email_body)
+            email_result = perform email.send(parent_email, subject, email_body)
+            debug_msg = "email.send OK"
+            if is_error(email_result) {
+                debug_msg = join(["email.send FAILED: ", to_text(email_result)], "")
+            }
+            perform file.write("email_debug.log", join([debug_msg, "\n"], ""))
         }
     }
     resp_r = encode_json([["id", msg_id], ["from", from_name], ["to", to_name], ["cc", cc_list], ["title", title], ["created_at", ts], ["url", url]])
@@ -615,9 +620,20 @@ fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
     return json_ok([["deleted", msg_id]])
 }
 
+fn handle_debug_email(req: Any) -> [Any] {
+    r = perform file.read("email_debug.log")
+    if is_error(r) {
+        return json_ok([["log", "no debug log yet"]])
+    }
+    return json_ok([["log", unwrap(r)]])
+}
+
 fn route_request(req: Any) -> [Any] {
     method = req.method
     path = req.path
+    if method == "GET" and path == "/api/v1/debug/email" {
+        return handle_debug_email(req)
+    }
     if method == "GET" and path == "/api/v1/health" {
         return handle_health(req)
     }
@@ -659,6 +675,7 @@ fn route_request(req: Any) -> [Any] {
 
 evolve stoa_server {
     listen: 8090
+    effects: [file.read, file.write, clock.now, state.read, state.write, env.read, http.post_json, http.respond, email.send]
     metric: error_rate
     when request_received(req) {
         result = route_request(req)

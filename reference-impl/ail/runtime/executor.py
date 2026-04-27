@@ -139,6 +139,9 @@ class Executor:
         self.effects: dict[str, EffectDecl] = {}
         self.evolves: dict[str, EvolveDecl] = {}
         self.fns: dict[str, FnDecl] = {}
+        # Infra-layer deny-first: set to the evolve effects set when running
+        # inside a server evolve block; None otherwise (citizen layer applies).
+        self._server_evolve_effects: set[str] | None = None
         self.imported_sources: list[str] = []  # for trace & debugging
         self._index_declarations(program.declarations)
 
@@ -463,7 +466,20 @@ class Executor:
             )
 
         is_declared = stmt.effect in self.effects
-        if not is_declared and stmt.effect not in ALLOWED_EFFECTS:
+        if self._server_evolve_effects is not None:
+            # Infra layer: allowed iff declared in evolve effects field.
+            if stmt.effect not in self._server_evolve_effects:
+                self.trace.record("perform_denied",
+                                  effect=stmt.effect,
+                                  reason="not_in_evolve_effects")
+                origin = effect_origin(stmt.effect, parents_of(args))
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"deny-first (infra): '{stmt.effect}' not declared "
+                              f"in evolve effects field"},
+                    0.0, origin=origin,
+                )
+        elif not is_declared and stmt.effect not in ALLOWED_EFFECTS:
             self.trace.record("perform_denied",
                               effect=stmt.effect,
                               reason="not_in_allowed_effects")
@@ -1490,6 +1506,10 @@ class Executor:
             state_dir = (self.project_root or Path(".")) / ".ail" / "state"
             state_dir.mkdir(parents=True, exist_ok=True)
             _os.environ["AIL_STATE_DIR"] = str(state_dir)
+
+        # Infra-layer deny-first: activate the declared effects set for this server.
+        declared = getattr(evolve_decl, "effects", None) or []
+        self._server_evolve_effects = set(declared) if declared else None
 
         # Physis: expose active evolve name for inherit_testament effect
         self._active_evolve_name = evolve_decl.intent_name
