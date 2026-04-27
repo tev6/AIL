@@ -1526,6 +1526,26 @@ class Executor:
         flask_app = Flask(__name__)
         executor_ref = self
 
+        @flask_app.before_request
+        def _discord_verify_hook():
+            # Python-level Ed25519 verification for Discord Interactions Endpoint.
+            # Runs before AIL sees the request; returns 401 Response on failure.
+            sig = flask_request.headers.get("X-Signature-Ed25519", "")
+            ts = flask_request.headers.get("X-Signature-Timestamp", "")
+            if not sig or not ts:
+                return None  # not a Discord request, pass through
+            pub_key_hex = _os.environ.get("DISCORD_PUBLIC_KEY", "")
+            if not pub_key_hex:
+                return Response("DISCORD_PUBLIC_KEY not configured", status=401)
+            body_bytes = flask_request.get_data()
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                pub_key_obj = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_key_hex))
+                pub_key_obj.verify(bytes.fromhex(sig), ts.encode() + body_bytes)
+            except Exception:
+                return Response("Invalid Discord signature", status=401)
+            return None  # verified — let request through
+
         @flask_app.route("/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
         @flask_app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
         def catch_all(path):
