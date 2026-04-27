@@ -4,6 +4,78 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.0 — 2026-04-27 (Polis 마일스톤 #1~#6 일괄 + idle wake 검증)
+
+**Arche 2026-04-27 letter (`msg_1777273204_0`)에서 제안된 Polis 5개
+마일스톤을 모두 main에 반영하고, 그 위에 idle-wake 메커니즘 검증 + 도구화.**
+
+### Polis 마일스톤
+
+- **#1 `pure fn on_compact(history)`** — evolve-server `_server_history`가
+  `keep_last`의 80%에 도달하면 자동 호출. 반환된 list가 새 history.
+  on_death와 같은 컨벤션 패턴. 미정의/raise/non-list 모두 fallback.
+  `spec/04-evolution.md §11a`. (6 tests)
+- **#2 `context.trust_level`** — 기존 `context` 메커니즘에 `trust_level`
+  필드 (`"plan"` / `"default"` / `"auto"` / `"bypass"`). plan 모드 자동
+  human.approve 게이트, default/bypass = 현재 동작. 새 키워드 0.
+  `spec/02-context.md §9a`. (4 tests)
+- **#3 `intent is_safe`** — `trust_level: "auto"` 시 perform 전에
+  `intent is_safe(plan: Text) -> Text` 호출. verdict
+  `"allow"`/`"deny"`/`"ask"`로 게이팅. 미정의 → no-gate.
+  unknown verdict / raise → 보수적 ask. (7 tests)
+- **#4 deny-first** — perform 효과를 기본 deny로 전환. `ALLOWED_EFFECTS`
+  frozenset 신설 + context `deny_effects: [Text]` 추가 deny (strictest-wins
+  across active stack). RuntimeError("unknown effect") → Result-error
+  로 graceful 변경. `spec/05-effects.md §11a`. (7 tests)
+- **#5 `human.approve` 가이드라인** — "되돌릴 수 없는 행동에만". Claude
+  Code 데이터 인용 (사용자 권한 요청 93% 자동 승인 = 승인 피로 = 안전장치
+  무력화). `docs/PRINCIPLES.md §3a`.
+- **#6 `human.approve` ↔ Stoa 통합** — chat UI 없는 환경(serve, cron,
+  headless)에서도 동작. `notify=[Text]` kwarg 추가. UI pending.json +
+  Stoa reply 폴링 병렬, 첫 응답 lock. Reply 본문 첫 줄: `approve` →
+  ok, `decline: <reason>` → error. 타임아웃 env
+  `AIL_APPROVE_TIMEOUT_S` (기본 600s). (6 tests)
+
+### Idle wake 검증 + 도구화
+
+Claude Code의 first-party `Monitor` 도구가 process stdout 한 줄 → 모델
+turn 발화로 처리한다는 사실을 검증. **사용자 prompt 없이 letter 도착 시
+모델이 깨어남**을 hyun06000이 직접 확인.
+
+- `community-tools/stoa_wake_monitor.sh` — Monitor용 폴러 스크립트.
+  세션 시작 시 since_id pre-anchor → 첫 폴 emit 0, 신규 letter만
+  notification으로 발화. 한 폴당 최대 3 emit (auto-stop 방어), 15초
+  주기 (`STOA_WAKE_INTERVAL_S` 조정 가능).
+- MCP `notifications/claude/channel`은 Claude Code가 처리 안 함이
+  실증됨 — 이 길은 dormant. Stoa-MCP `stoa_subscribe` / 백그라운드
+  poller / SSE push 코드는 보존 (Claude Code가 나중에 server-initiated
+  wake 지원하면 즉시 활성).
+
+### Stoa-as-Polis architectural framing
+
+hyun06000 2026-04-27: "Stoa는 Polis의 위/아래 인프라가 아니라 postal
+역할의 Polis다." 추상이 하나로 통일. 도메인 Polis N개 운영해도
+Stoa-Polis는 하나. 추후 stoa/server.ail를 역할별 에이전트
+(postman / registrar / archivist / gateway)로 분리할 때 framing이
+코드에 드러남. `docs/heaal-vs-claude-code.md` 상단에 명시.
+
+### 테스트
+
+749 passing (v1.63.2의 706 + Polis 마일스톤 30개 + 기타 정리). 1개 기존
+테스트(`test_browser_fetch_removed`) 갱신 — RuntimeError → Result-error
+검증으로 변경.
+
+### 호환성
+
+- 모든 새 기능은 opt-in (context.trust_level / context.deny_effects /
+  intent is_safe / pure fn on_compact / notify kwarg). 사용 안 하면
+  동작 0 변경.
+- #4 deny-first의 유일한 행동 변화: `perform unknown.effect()`이
+  RuntimeError 대신 Result-error 반환. 기존 프로그램이 unknown effect를
+  의도적으로 사용해 RuntimeError에 의존했을 리는 없음 — 안전 강화.
+
+---
+
 ## v1.63.2 — 2026-04-27 (CI fix + UserPromptSubmit hook 제거)
 
 - **CI 수정**: `flask>=2.0`을 `reference-impl` 정식 dependency로 등재. 기존
