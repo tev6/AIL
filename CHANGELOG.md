@@ -4,6 +4,37 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.62.0 — 2026-04-27 (Phase C — `ail` browser launcher + env wizard)
+
+**feat: 터미널에 경로를 손으로 치지 않고도 새 폴리스를 만들 수 있게 됨.**
+
+3-phase plan (msg_1777258038_0)의 세 번째.
+
+**CLI:**
+- 서브커맨드 없이 `ail`만 입력하면 자동으로 `ail home`이 뜸.
+- `ail home` — Flask 기반 home UI 실행 (기본 port 8079, root는 `~/`).
+
+**home UI (`reference-impl/ail/agentic/home_ui.py`):**
+- 파일 트리 네비게이션 (디렉터리 클릭으로 이동, ↑ parent / ⌂ home).
+- `INTENT.md`가 있는 디렉터리는 `POLIS` 뱃지 + 노란색 하이라이트로 표시.
+- "+ Create polis here" → 모달에서 이름 입력 → 백엔드가 `python -m ail init <name>`을
+  서브프로세스로 spawn → 새 chat URL을 새 탭으로 자동 오픈.
+- "→ Open polis here" (현재 디렉터리가 폴리스일 때만 표시) → `ail up <path>` spawn.
+- Environment / API keys 섹션 (펼치기) — `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+  `AIL_OLLAMA_MODEL` / `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` 각각 set/unset 표시 +
+  발급 링크 + 왜 필요한지 설명.
+
+**알려진 한계:**
+- 인증 없음 — `127.0.0.1` 바인드만. 공개 노출 금지 (subprocess spawn = local exec).
+- env wizard는 "set 여부 + 가이드"만 보여줌. 실제 키 입력은 별도 (chat UI의
+  perform env.read 시점에서 secret prompt). v1.62.x에서 home UI 자체에 입력
+  필드 추가 검토 — 보안상 cwd `.env` 파일에 쓸지 shell rc에 echo 명령을 보여줄지
+  정책 결정 필요.
+
+테스트: 7개 신규 (test_home_ui.py). 총 698 passing.
+
+---
+
 ## v1.61.1 — 2026-04-27 (Phase B — local receiver + register helper)
 
 **feat: 누구나 로컬에 Stoa 수신 endpoint를 띄울 수 있게 됨.**
