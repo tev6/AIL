@@ -75,7 +75,7 @@ AIL: `import` = 같은 program scope. `perform ail.run(file)` = 새 격리된 ex
 1. ~~**on_compact convention**~~ — ✅ done (`spec/04-evolution.md §11a`)
 2. ~~**`context trust_level`**~~ — ✅ done (`spec/02-context.md §9a`)
 3. ~~**`intent is_safe`**~~ — ✅ done (auto 모드 자동 안전 분류기)
-4. **deny-first 전환** — `perform` 기본 의미를 allow-list → deny-unless-allowed (breaking change, 별도 RFC)
+4. ~~**deny-first 전환**~~ — ✅ done (`spec/05-effects.md §11a`, hyun06000 동의 후 구현). Result-error로 변경되어 hard crash 제거 + context `deny_effects` strictest-wins 추가
 5. ~~**`human.approve` 가이드라인**~~ — ✅ done ([PRINCIPLES.md §3a](PRINCIPLES.md))
 
 진행 중. [Arche letter `msg_1777273204_0`](https://ail-stoa.up.railway.app/api/v1/messages/msg_1777273204_0)에 우선순위 + 일정.

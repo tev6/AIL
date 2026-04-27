@@ -36,6 +36,33 @@ from .provenance import (
     parents_of,
 )
 from .parallel import plan_groups
+
+
+# deny-first effect policy (Arche #4, ergon 2026-04-27).
+# Single source of truth for "what `perform` MAY invoke". The runtime
+# starts from "deny everything" and admits only names in this set.
+# Context can additively deny (deny_effects: [Text]) — strictest-wins:
+# once any layer in the active context stack denies an effect, every
+# inner scope inherits the deny. Adding a new effect requires:
+#   1. Implementation in _builtin_effect dispatch
+#   2. Name added to ALLOWED_EFFECTS below
+# Forgetting (2) makes the effect deniable — a feature, not a bug.
+ALLOWED_EFFECTS: frozenset[str] = frozenset({
+    "human_ask", "ask_human",
+    "log",
+    "http.get", "http.post", "http.post_json", "http.put_json",
+    "http.graphql", "http.respond",
+    "file.read", "file.write",
+    "clock.now",
+    "state.read", "state.write", "state.has", "state.delete",
+    "schedule.every",
+    "env.read",
+    "human.approve",
+    "search.web",
+    "ail.run",
+    "inherit_testament",
+    "image.embed",
+})
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
 from pathlib import Path
@@ -405,6 +432,49 @@ class Executor:
         args = [self._eval_expr(a, scope) for a in stmt.args]
         kwargs = {k: self._eval_expr(v, scope) for k, v in stmt.kwargs.items()}
 
+        # deny-first policy (Arche 2026-04-27 #4). Strictest-wins:
+        # 1. Context deny_effects (additive across all active frames) → deny
+        # 2. Not in ALLOWED_EFFECTS / not a declared effect → deny
+        # Both produce a Result-error, not a RuntimeError, so the
+        # program can attempt-fallback rather than crash.
+        denied_in_ctx: set[str] = set()
+        for frame in getattr(self.ctx_stack, "frames", []):
+            try:
+                if frame.has("deny_effects"):
+                    raw = frame.get("deny_effects")
+                    if isinstance(raw, list):
+                        for d in raw:
+                            denied_in_ctx.add(str(d))
+                    elif isinstance(raw, str):
+                        denied_in_ctx.add(raw)
+            except Exception:
+                pass
+        if stmt.effect in denied_in_ctx:
+            self.trace.record("perform_denied",
+                              effect=stmt.effect,
+                              reason="context_deny_effects")
+            origin = effect_origin(stmt.effect, parents_of(args))
+            return ConfidentValue(
+                {"_result": True, "ok": False,
+                 "error": f"deny-first: '{stmt.effect}' denied by "
+                          f"active context (deny_effects)"},
+                0.0, origin=origin,
+            )
+
+        is_declared = stmt.effect in self.effects
+        if not is_declared and stmt.effect not in ALLOWED_EFFECTS:
+            self.trace.record("perform_denied",
+                              effect=stmt.effect,
+                              reason="not_in_allowed_effects")
+            origin = effect_origin(stmt.effect, parents_of(args))
+            return ConfidentValue(
+                {"_result": True, "ok": False,
+                 "error": f"deny-first: '{stmt.effect}' is not in "
+                          f"the allowed effect set and not a declared "
+                          f"effect"},
+                0.0, origin=origin,
+            )
+
         # Trust-level gate (Arche 2026-04-27 #2). Active context can declare
         # `trust_level: "plan" | "default" | "auto" | "bypass"` to widen or
         # narrow what perform calls do without writing a single explicit
@@ -607,14 +677,16 @@ class Executor:
             return self._inherit_testament(args, kwargs, origin)
         if name == "image.embed":
             return self._image_embed(args, kwargs, origin)
-        raise RuntimeError(
-            f"unknown effect: {name} "
-            f"(supported: human_ask, log, http.get, http.post, "
-            f"http.post_json, http.put_json, http.graphql, file.read, file.write, "
-            f"clock.now, state.read, state.write, state.has, "
-            f"state.delete, schedule.every, env.read, human.approve, "
-            f"search.web, ail.run, inherit_testament, image.embed, "
-            f"or a declared effect)"
+        # Defense in depth: _exec_perform's deny-first check should
+        # already have caught this. If we reached here, an internal
+        # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
+        # to invoke an unknown effect — return Result-error instead of
+        # crashing.
+        return ConfidentValue(
+            {"_result": True, "ok": False,
+             "error": f"deny-first: unknown effect '{name}' (allowed "
+                      f"set: {sorted(ALLOWED_EFFECTS)})"},
+            0.0, origin=effect_origin(name, parents_of(args)),
         )
 
     def _image_embed(self, args, kwargs, origin):

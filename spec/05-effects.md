@@ -212,6 +212,58 @@ The host OS maintains an effect ledger: an append-only record of every effect pe
 
 Programs MAY read their own past ledger entries through the `runtime.ledger` interface, subject to authorization. Programs MAY NOT write to the ledger directly; only `perform` writes, and only through the runtime.
 
+## 11a. deny-first policy (Arche 2026-04-27 #4, ergon)
+
+The runtime treats the set of permitted effects as **deny-by-default**.
+An effect runs only if it is *both*:
+
+1. listed in the runtime's `ALLOWED_EFFECTS` set (or declared via
+   `effect`), AND
+2. not denied by any active context's `deny_effects` field.
+
+**Strictest rule wins.** No allow rule can override a deny.
+
+### Why deny-first instead of allow-list
+
+A pure allow-list ("these effects are permitted") makes the answer to
+"is X permitted?" depend on whether X has been *added* to the list.
+When a new effect is implemented, the implementer must also remember to
+add it — and there is no failsafe if they forget. Deny-first is the
+same set in practice today, but the *meaning* shifts: the runtime
+starts from "permit nothing" and the implementer must justify each
+addition. Forgetting to add an effect is now a gate, not a leak.
+
+### Context-level additive deny
+
+```ail
+context locked extends default {
+    deny_effects: ["http.post", "http.post_json", "file.write"]
+}
+intent on_user_request(req: Text) -> Text { goal: Text }
+entry main(input: Text) {
+    with context locked: {
+        out = on_user_request(input)
+        return out
+    }
+}
+```
+
+Inside `with context locked`, any `perform http.post(...)` returns
+`Result-error("deny-first: 'http.post' denied by active context
+(deny_effects)")`. Programs can `attempt` / `is_error` it.
+
+`deny_effects` is **additive across the active context stack** — once
+any frame denies an effect, every nested scope inherits the deny. An
+inner `with context` cannot loosen what an outer `with context`
+denied. This is what "strictest wins" means structurally.
+
+### Failure mode is graceful, not crash
+
+Pre-#4: an unknown effect raised `RuntimeError`, killing the program.
+Post-#4: returns `Result-error`. The harness still rejects, but the
+program can fall back via `attempt`. Crashes were never the safety
+mechanism — Result is.
+
 ## 12. What effects are not
 
 - **Not private.** Observability is non-optional.
