@@ -1,0 +1,113 @@
+<svg width="680" height="560" viewBox="0 0 680 560" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>ail logo</title>
+<desc>A logo for ail. A classical Doric column stands at center with vertical fluting. A horizontal harness band wraps its middle, with rings on either side. Three reins extend from each ring, converging at small filled circles representing AI agents holding the harness together. A wax-seal style medallion is pressed onto the center of the harness, marked with a checkmark to denote verified, trustworthy code. Below sits the wordmark "ail".</desc>
+
+<defs>
+<style>
+.ink { fill: #111111; }
+.ink-stroke { stroke: #111111; fill: none; }
+.muted-stroke { stroke: #888888; fill: none; }
+.bg-fill { fill: #ffffff; }
+.wordmark {
+  font-family: 'Times New Roman', Georgia, serif;
+  font-weight: 400;
+  font-size: 56px;
+  letter-spacing: 0.02em;
+  fill: #111111;
+}
+.tag {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.36em;
+  fill: #888888;
+}
+</style>
+</defs>
+
+<!-- ============ DORIC COLUMN ============ -->
+<path d="M 295 150 L 385 150 L 390 380 L 290 380 Z" class="ink-stroke" stroke-width="1.5"/>
+
+<!-- Vertical fluting -->
+<line x1="306" y1="150" x2="304" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="318" y1="150" x2="316" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="330" y1="150" x2="329" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="342" y1="150" x2="342" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="354" y1="150" x2="355" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="366" y1="150" x2="368" y2="380" class="muted-stroke" stroke-width="0.8"/>
+<line x1="378" y1="150" x2="381" y2="380" class="muted-stroke" stroke-width="0.8"/>
+
+<!-- Capital -->
+<rect x="280" y="135" width="120" height="8" class="ink"/>
+<path d="M 285 143 L 285 150 L 395 150 L 395 143 Z" class="ink-stroke" stroke-width="1.5" fill="#ffffff"/>
+
+<!-- Base -->
+<path d="M 285 380 L 285 388 L 395 388 L 395 380 Z" class="ink-stroke" stroke-width="1.5" fill="#ffffff"/>
+<rect x="275" y="388" width="130" height="10" class="ink"/>
+<rect x="265" y="398" width="150" height="6" class="ink"/>
+
+<!-- ============ HARNESS BAND ============ -->
+<rect x="288" y="248" width="104" height="26" class="ink"/>
+
+<!-- Rings on either side -->
+<circle cx="288" cy="261" r="8" class="bg-fill"/>
+<circle cx="288" cy="261" r="8" class="ink-stroke" stroke-width="1.5"/>
+<circle cx="288" cy="261" r="3" class="ink"/>
+
+<circle cx="392" cy="261" r="8" class="bg-fill"/>
+<circle cx="392" cy="261" r="8" class="ink-stroke" stroke-width="1.5"/>
+<circle cx="392" cy="261" r="3" class="ink"/>
+
+<!-- ============ THREE REINS, EACH SIDE — AGENTS HOLDING TOGETHER ============ -->
+<!-- LEFT side -->
+<path d="M 280 261 C 240 240, 200 215, 160 188" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="156" cy="186" r="6" class="ink"/>
+<path d="M 280 261 C 230 258, 180 252, 130 245" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="126" cy="245" r="6" class="ink"/>
+<path d="M 280 261 C 240 280, 200 300, 160 320" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="156" cy="322" r="6" class="ink"/>
+
+<!-- RIGHT side -->
+<path d="M 400 261 C 440 240, 480 215, 520 188" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="524" cy="186" r="6" class="ink"/>
+<path d="M 400 261 C 450 258, 500 252, 550 245" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="554" cy="245" r="6" class="ink"/>
+<path d="M 400 261 C 440 280, 480 300, 520 320" class="ink-stroke" stroke-width="1.5" stroke-linecap="round"/>
+<circle cx="524" cy="322" r="6" class="ink"/>
+
+<!-- ============ WAX SEAL OF TRUST ============ -->
+<g transform="translate(340 261)">
+  <path d="M 0 -22
+           A 22 22 0 0 1 11 -19
+           A 22 22 0 0 1 19 -11
+           A 22 22 0 0 1 22 0
+           A 22 22 0 0 1 19 11
+           A 22 22 0 0 1 11 19
+           A 22 22 0 0 1 0 22
+           A 22 22 0 0 1 -11 19
+           A 22 22 0 0 1 -19 11
+           A 22 22 0 0 1 -22 0
+           A 22 22 0 0 1 -19 -11
+           A 22 22 0 0 1 -11 -19
+           A 22 22 0 0 1 0 -22 Z"
+        class="ink"/>
+  <circle cx="0" cy="-22" r="2" class="bg-fill"/>
+  <circle cx="15.5" cy="-15.5" r="2" class="bg-fill"/>
+  <circle cx="22" cy="0" r="2" class="bg-fill"/>
+  <circle cx="15.5" cy="15.5" r="2" class="bg-fill"/>
+  <circle cx="0" cy="22" r="2" class="bg-fill"/>
+  <circle cx="-15.5" cy="15.5" r="2" class="bg-fill"/>
+  <circle cx="-22" cy="0" r="2" class="bg-fill"/>
+  <circle cx="-15.5" cy="-15.5" r="2" class="bg-fill"/>
+
+  <circle cx="0" cy="0" r="15" class="bg-fill"/>
+  <circle cx="0" cy="0" r="15" class="ink-stroke" stroke-width="1"/>
+
+  <path d="M -7 0 L -2 6 L 8 -5" class="ink-stroke" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+
+<!-- ============ WORDMARK ============ -->
+<text x="340" y="470" text-anchor="middle" class="wordmark">ail</text>
+
+<text x="340" y="500" text-anchor="middle" class="tag">VERIFIED · BY · CONSTRUCTION</text>
+
+</svg>
