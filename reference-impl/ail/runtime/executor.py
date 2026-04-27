@@ -1415,13 +1415,21 @@ class Executor:
         }
         merged_headers.update(custom_headers)
 
+        timeout_s = 30.0
+        _timeout_cv = kwargs.get("timeout")
+        if _timeout_cv is not None:
+            try:
+                timeout_s = float(_timeout_cv.value)
+            except Exception:
+                pass
+
         try:
             req = urllib.request.Request(
                 url, method=method,
                 data=body_text.encode("utf-8"),
                 headers=merged_headers,
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 content = resp.read().decode("utf-8", errors="replace")
                 status = float(resp.status)
             result = {
