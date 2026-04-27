@@ -179,10 +179,15 @@ def test_open_polis_rejects_non_polis(client):
 def test_admin_stop_endpoint_returns_ok(client, monkeypatch):
     """Closing the browser tab triggers sendBeacon('/admin/stop') so
     the terminal `ail` process exits too (non-developer UX). The
-    endpoint schedules SIGTERM in a daemon thread — we stub os.kill
-    so the test process doesn't actually die."""
-    import os
-    monkeypatch.setattr(os, "kill", lambda *a, **kw: None)
+    endpoint schedules SIGTERM in a daemon thread — we stub
+    threading.Thread so the suicide thread never runs (otherwise it
+    fires after monkeypatch teardown and kills the test runner;
+    CI exit 143 in v1.64.4)."""
+    import threading
+    class _NoopThread:
+        def __init__(self, *a, **kw): pass
+        def start(self): pass
+    monkeypatch.setattr(threading, "Thread", _NoopThread)
     c, _ = client
     r = c.post("/admin/stop")
     assert r.status_code == 200

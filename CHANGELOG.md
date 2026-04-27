@@ -4,6 +4,18 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.5 — 2026-04-27 (CI fix: admin_stop 테스트 격리)
+
+v1.64.4 CI 실패 (exit 143). `/admin/stop` 엔드포인트가 실제 SIGTERM을
+0.2s 지연 daemon thread로 발사 — 테스트가 monkeypatch로 `os.kill`을
+스텁했지만 thread는 monkeypatch teardown 이후에 깨어나 진짜 SIGTERM 발사
+→ 다음 테스트 파일(`test_http_graphql`)을 죽임.
+
+수정: `threading.Thread` 자체를 noop 클래스로 monkeypatch → suicide
+스레드가 아예 안 돎.
+
+---
+
 ## v1.64.4 — 2026-04-27 (팝업 차단 + Open=편집 + 홈 탭 닫기 → 터미널 종료)
 
 hyun06000 field test 두 가지:
