@@ -55,6 +55,63 @@ def test_create_polis_rejects_existing(client):
     c, root = client
     r = c.post("/create-polis", json={"parent": str(root), "name": "alpha"})
     assert r.status_code == 409
+    j = r.get_json()
+    # The structured 409 the UI uses to enter the trash-and-retry flow.
+    assert j.get("error_code") == "name_exists"
+    assert "existing_path" in j
+
+
+def test_trash_polis_moves_to_trashcan(client, monkeypatch, tmp_path):
+    """Existing polis dir → moved to ~/.ail/.Trashcan/<ts>-<name>/.
+    Confirms HEAAL: no destructive deletion at the AIL layer; the UI
+    offers move-to-trash with explicit confirm."""
+    c, root = client
+    # Stub HOME so the trashcan lands somewhere we can inspect.
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+    target = root / "alpha"  # has INTENT.md (fixture)
+    assert target.exists()
+    r = c.post("/trash-polis",
+               json={"path": str(target), "confirm": True})
+    assert r.status_code == 200, r.get_json()
+    j = r.get_json()
+    assert j["ok"] is True
+    moved_to = j["moved_to"]
+    assert "Trashcan" in moved_to
+    # Source gone, trash entry exists
+    assert not target.exists()
+    from pathlib import Path as _P
+    assert (_P(moved_to) / "INTENT.md").exists()
+
+
+def test_trash_polis_requires_confirm(client):
+    c, root = client
+    r = c.post("/trash-polis", json={"path": str(root / "alpha")})
+    assert r.status_code == 400
+    assert r.get_json().get("error_code") == "confirm_required"
+
+
+def test_trash_polis_refuses_non_polis_non_empty(client, tmp_path):
+    """Defensive: refuse to trash a directory that is not a polis
+    AND not empty. Stops the UI from accidentally trashing /Users
+    or a project root that happens to share a name."""
+    c, root = client
+    # `beta` exists from fixture but has no INTENT.md and isn't empty
+    # (well — actually it IS empty in the fixture). Make it non-empty
+    # to trigger the guard.
+    (root / "beta" / "random.txt").write_text("not a polis")
+    r = c.post("/trash-polis",
+               json={"path": str(root / "beta"), "confirm": True})
+    assert r.status_code == 400
+    assert r.get_json().get("error_code") == "not_a_polis"
+
+
+def test_trash_polis_404_for_missing_path(client):
+    c, root = client
+    r = c.post("/trash-polis",
+               json={"path": str(root / "no_such_dir"), "confirm": True})
+    assert r.status_code == 404
 
 
 def test_open_polis_rejects_non_polis(client):

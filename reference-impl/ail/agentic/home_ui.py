@@ -107,7 +107,14 @@ def _make_app(start_root: Path):
             return jsonify({"error": "parent dir does not exist"}), 400
         new_dir = target_parent / name
         if new_dir.exists():
-            return jsonify({"error": f"{new_dir} already exists"}), 409
+            # Don't overwrite. Return a structured 409 the UI can hand
+            # to the trash-and-retry flow (HEAAL: AIL has no
+            # destructive primitive — UI moves to trash with consent).
+            return jsonify({
+                "error": f"{new_dir} already exists",
+                "error_code": "name_exists",
+                "existing_path": str(new_dir),
+            }), 409
         # Spawn `ail init <name>` from inside parent dir, --no-open so we
         # control the browser hand-off ourselves.
         try:
@@ -124,6 +131,67 @@ def _make_app(start_root: Path):
             "ok": True,
             "path": str(new_dir),
             "chat_url": f"http://127.0.0.1:{port}/",
+        })
+
+    @app.route("/trash-polis", methods=["POST"])
+    def trash_polis():
+        """Move a directory to ~/.ail/.Trashcan/<ts>-<name>/ instead of
+        deleting it. AIL itself has no destructive primitive (Arche's
+        position): the UI offers move-to-trash with explicit user
+        consent so a colliding name can be reused without losing prior
+        work. The user can manually delete from .Trashcan later.
+        """
+        data = request.get_json(silent=True) or {}
+        path = data.get("path", "").strip()
+        confirm = bool(data.get("confirm"))
+        if not path:
+            return jsonify({"error": "path is required"}), 400
+        if not confirm:
+            return jsonify({
+                "error": "confirm=true required",
+                "error_code": "confirm_required",
+            }), 400
+        target = Path(path).expanduser().resolve()
+        if not target.exists():
+            return jsonify({"error": "path does not exist"}), 404
+        if not target.is_dir():
+            return jsonify({"error": "not a directory"}), 400
+        # Refuse to trash anything that isn't recognizably a polis or
+        # an empty dir — defensive against UI misuse pointing at /Users
+        # or similar.
+        is_polis = (target / "INTENT.md").exists()
+        is_empty = not any(target.iterdir())
+        if not (is_polis or is_empty):
+            return jsonify({
+                "error": "refusing to trash a non-polis non-empty directory "
+                         "(no INTENT.md found)",
+                "error_code": "not_a_polis",
+            }), 400
+        # Refuse to trash a path that looks like a system or home root
+        # by accident (parent of trash, $HOME exact, /, etc.).
+        home = Path.home().resolve()
+        if target == home or target == home.parent or str(target) == "/":
+            return jsonify({"error": "refusing to trash a root/home path"}), 400
+        try:
+            trash_dir = home / ".ail" / ".Trashcan"
+            trash_dir.mkdir(parents=True, exist_ok=True)
+            import time
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            trash_target = trash_dir / f"{stamp}-{target.name}"
+            # Disambiguate if a same-second trash entry already exists
+            counter = 1
+            while trash_target.exists():
+                trash_target = trash_dir / f"{stamp}-{target.name}-{counter}"
+                counter += 1
+            target.rename(trash_target)
+        except OSError as e:
+            return jsonify({
+                "error": f"trash move failed: {type(e).__name__}: {e}"
+            }), 500
+        return jsonify({
+            "ok": True,
+            "moved_from": str(target),
+            "moved_to": str(trash_target),
         })
 
     @app.route("/open-polis", methods=["POST"])
@@ -304,20 +372,53 @@ document.getElementById('create-btn').onclick = () => {
 document.getElementById('cancel-btn').onclick = () => {
   document.getElementById('modal-bg').classList.remove('show');
 };
+async function doCreatePolis(parent, name) {
+  showStatus('ok', 'Spawning new polis…');
+  const r = await fetch('/create-polis', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({parent, name})
+  });
+  const j = await r.json();
+  if (r.ok) {
+    showStatus('ok', 'Polis at ' + j.path + ' — opening chat at ' + j.chat_url + ' …');
+    setTimeout(() => { window.open(j.chat_url, '_blank'); }, 1500);
+    return;
+  }
+  if (j.error_code === 'name_exists') {
+    // Strong consent dialog. AIL has no destructive primitive — UI
+    // moves the existing dir to ~/.ail/.Trashcan/<ts>-<name>/ on
+    // explicit confirm. User can recover from .Trashcan manually.
+    const msg = '⚠ 같은 이름의 폴리스가 이미 있어요:\\n\\n  ' + j.existing_path +
+                '\\n\\n이 디렉터리를 휴지통(~/.ail/.Trashcan/)으로 옮긴 뒤 새 폴리스를 만들까요?\\n' +
+                '\\n• 삭제가 아니라 *이동*입니다 — 나중에 .Trashcan에서 복원 가능\\n' +
+                '• AIL은 데이터를 영구 삭제하지 않아요 (HEAAL 원칙)\\n' +
+                '\\n계속하려면 [확인], 취소하려면 [취소]를 누르세요.';
+    if (!window.confirm(msg)) {
+      showStatus('err', '취소됨 — 기존 폴리스는 그대로 있어요.');
+      return;
+    }
+    showStatus('ok', '휴지통으로 이동 중…');
+    const tr = await fetch('/trash-polis', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path: j.existing_path, confirm: true})
+    });
+    const tj = await tr.json();
+    if (!tr.ok) {
+      showStatus('err', '휴지통 이동 실패: ' + (tj.error || tr.status));
+      return;
+    }
+    showStatus('ok', '이동 완료 → ' + tj.moved_to + ' · 새 폴리스 생성 중…');
+    // Retry create now that the path is free
+    return await doCreatePolis(parent, name);
+  }
+  showStatus('err', j.error || 'create failed');
+}
+
 document.getElementById('confirm-btn').onclick = async () => {
   const name = document.getElementById('polis-name').value.trim();
   if (!name) return;
   document.getElementById('modal-bg').classList.remove('show');
-  showStatus('ok', 'Spawning new polis…');
-  const r = await fetch('/create-polis', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({parent: cwdEl.textContent, name})
-  });
-  const j = await r.json();
-  if (!r.ok) { showStatus('err', j.error || 'create failed'); return; }
-  // wait for chat server to come up, then open
-  showStatus('ok', 'Polis at ' + j.path + ' — opening chat at ' + j.chat_url + ' …');
-  setTimeout(() => { window.open(j.chat_url, '_blank'); }, 1500);
+  await doCreatePolis(cwdEl.textContent, name);
 };
 openBtn.onclick = async () => {
   showStatus('ok', 'Starting `ail up` for ' + cwdEl.textContent + ' …');
