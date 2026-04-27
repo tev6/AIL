@@ -683,7 +683,7 @@ fn status_label(elapsed: Any) -> Text {
 
 fn format_status_kakao() -> Text {
     hbs = load_heartbeats()
-    now_unix = perform clock.now("unix")
+    now_unix = unix_now()
     agents = ["arche", "ergon", "telos"]
     lines = []
     for agent in agents {
@@ -722,6 +722,10 @@ fn format_status_kakao() -> Text {
     return result
 }
 
+fn unix_now() -> Any {
+    return to_number(perform clock.now("unix"))
+}
+
 fn handle_heartbeat(req: Any) -> [Any] {
     parsed = parse_json(req.body)
     if is_error(parsed) {
@@ -739,7 +743,7 @@ fn handle_heartbeat(req: Any) -> [Any] {
     }
     activity = get(body, "activity")
     timestamp = get(body, "timestamp")
-    now_unix = perform clock.now("unix")
+    now_unix = unix_now()
     hbs = load_heartbeats()
     updated = []
     found = false
@@ -775,7 +779,7 @@ fn handle_heartbeat(req: Any) -> [Any] {
 
 fn handle_status_api(req: Any) -> [Any] {
     hbs = load_heartbeats()
-    now_unix = perform clock.now("unix")
+    now_unix = unix_now()
     agents = ["arche", "ergon", "telos"]
     result = []
     for agent in agents {
@@ -803,7 +807,7 @@ fn handle_status_api(req: Any) -> [Any] {
 
 fn handle_status_html(req: Any) -> [Any] {
     hbs = load_heartbeats()
-    now_unix = perform clock.now("unix")
+    now_unix = unix_now()
     agents = ["arche", "ergon", "telos"]
     rows = ""
     for agent in agents {
