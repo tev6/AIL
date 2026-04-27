@@ -1102,6 +1102,12 @@ fn handle_discord(req: Any) -> [Any] {
                     oval = get(opt, "value")
                     if oname == "to" and oval != None {
                         to_name = to_text(oval)
+                        alias_map = [["텔로스", "telos"], ["에르곤", "ergon"], ["아르케", "arche"], ["전체", "all"]]
+                        for pair in alias_map {
+                            if to_name == get(pair, 0) {
+                                to_name = get(pair, 1)
+                            }
+                        }
                     }
                     if oname == "message" and oval != None {
                         content = to_text(oval)
