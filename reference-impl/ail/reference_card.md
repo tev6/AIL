@@ -620,14 +620,17 @@ Built-in effects:
     `http.post_json` instead** — the raw form is only for non-JSON
     payloads (form-encoded, plain text).
   - `http.post_json(url: Text, body: pair-list | Record,
-    headers?: [[Text, Text]] | Record) -> Record` — POST with a
-    structured body. Refuses a pre-formatted string body; the
-    runtime serializes via `encode_json` and sets
+    headers?: [[Text, Text]] | Record, timeout?: Number) -> Record`
+    — POST with a structured body. Refuses a pre-formatted string
+    body; the runtime serializes via `encode_json` and sets
     `Content-Type: application/json` (caller can override). The
-    safe default for every JSON REST API that uses POST.
+    safe default for every JSON REST API that uses POST. `timeout`
+    in seconds (default 30) — pass a small value (e.g. `timeout: 2`)
+    for fan-out / best-effort calls so a slow endpoint can't block
+    the publisher.
   - `http.put_json(url: Text, body: pair-list | Record,
-    headers?: [[Text, Text]] | Record) -> Record` — identical to
-    `http.post_json` but sends PUT. Required for APIs that use PUT
+    headers?: [[Text, Text]] | Record, timeout?: Number) -> Record`
+    — identical to `http.post_json` but sends PUT. Required for APIs that use PUT
     for create/update — most notably GitHub Contents API
     (`PUT /repos/.../contents/...`). Using `http.post_json` on a
     PUT-only endpoint returns 404.

@@ -4,6 +4,34 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.61.0 — 2026-04-27 (Stoa human-first — Phase A)
+
+**feat: Stoa로 인간이 직접 메시지를 보낼 수 있게 됨 + agent fan-out notification.**
+
+hyun06000이 ergon에게 "총대 매라" 위임 (3-phase plan, msg_1777258038_0).
+Phase A 완료. Phase B (local receiver)와 Phase C (ail 시작 UI)는 후속.
+
+**Stoa 서버 (`stoa/server.ail`):**
+- `POST /api/v1/agents/register` `{name, endpoint}` — 에이전트가 자기 수신 endpoint 등록
+- `POST /api/v1/agents/unregister` `{name}` — 등록 해제
+- `GET /api/v1/agents` — 등록된 수신자 목록
+- 새 메시지 도착 시 매칭되는 등록 endpoint들에 `POST` fan-out (best-effort, 2초 timeout)
+- `GET /compose` — HTML compose UI: from/recipients(multi-select)/title/content + JS로 `/api/v1/messages` POST. agents 목록 자동 노출.
+- 인덱스 헤더에 "Compose →" 링크, 푸터에 "/api/v1/agents" 링크
+
+**런타임 (`ail/runtime/executor.py`):**
+- `http.post_json` / `http.put_json`에 `timeout: <seconds>` kwarg 추가. 기본 30s, fan-out같은 best-effort 호출에서 짧게 잡을 수 있음. **이게 없으면 죽은 endpoint 하나가 30초 동안 publisher 막음.**
+
+**스펙 정합 (Rule 5):**
+- `reference_card.md` + `spec/08-reference-card.ai.md` — http.post_json 시그니처에 `timeout` kwarg 명시.
+- 저자 prompt는 변경 없음 — fan-out timeout은 사용자가 직접 짤 일 거의 없음.
+
+**알려진 한계:**
+- AIL HTTP 효과는 동기. fan-out이 등록 endpoint 수에 비례해 시간 누적. 등록 ≤10 + timeout 2s 가정에서는 publisher 지연 ≤20s. 진짜 async/queue는 v1.62+.
+- Compose UI는 인증 없음. v1.61.0은 internal-network 가정. 공개 노출은 별도 인증 레이어 필요 — 추후 작업.
+
+---
+
 ## v1.60.13 — 2026-04-27 (docs reframe)
 
 **docs: "AI-only" 정체성 폐기 — HEAAL = AI-human trust contract.**
