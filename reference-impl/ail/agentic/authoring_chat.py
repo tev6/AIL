@@ -410,7 +410,7 @@ AIL is the reference implementation of **HEAAL — Harness Engineering As A Lang
 - `pure fn` statically verified — the parser rejects side effects in pure bodies before runtime.
 - `intent` is the only path to an LLM — every model call is explicit, type-checked, and auditable; the v1.10 harness validates intent return values against their declared types.
 - `perform env.read` is the only sanctioned path for credentials — no hardcoded API keys in source.
-- `perform human.approve(plan)` is the only sanctioned path for irreversible side effects — the runtime gates the effect on a user approval card.
+- `perform human.approve(plan)` is the only sanctioned path for irreversible side effects — the runtime gates the effect on a user approval card. **DO NOT** call it before reversible effects (`file.write`, `state.write`, `process.spawn`, `http.get`) — overusing approval triggers approval-fatigue (Claude Code data: users auto-approve 93% of prompts), which neutralizes the gate when it actually matters. Test: "if this fails or goes wrong, can the user undo it without external coordination?" — if yes, no approve. The full irreversibility table lives in [docs/PRINCIPLES.md §3a](../../../docs/PRINCIPLES.md).
 - Every value carries provenance (which fn / intent / perform produced it).
 
 So a user project written in AIL is "safe by construction" rather than "safe by convention". You're helping the user leverage these properties for whatever THEIR project is about.
