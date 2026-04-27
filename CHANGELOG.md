@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.64.6 — 2026-04-27 (이미지 드롭 시 채팅창 쪼그라짐 fix)
+
+hyun06000 field test: 이미지를 채팅창에 드래그-드롭하면 채팅창이
+오른쪽으로 쏠리며 쪼그라드는 현상.
+
+원인: `.composer`가 `display:flex` 한 줄(row). `#attach-strip`이 그
+flex 형제로 들어가 textarea 옆 자리 차지 → textarea 폭 squash.
+
+수정: `.composer`에 `flex-wrap: wrap`, `#attach-strip`에
+`flex: 1 0 100%; order: -1` → 첨부 strip이 자체 행을 textarea 위에
+차지하도록.
+
+---
+
 ## v1.64.5 — 2026-04-27 (CI fix: admin_stop 테스트 격리)
 
 v1.64.4 CI 실패 (exit 143). `/admin/stop` 엔드포인트가 실제 SIGTERM을

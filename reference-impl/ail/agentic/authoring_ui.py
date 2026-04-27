@@ -253,7 +253,12 @@ def render_authoring_page(
       color: #6b7280; white-space: pre-wrap; }}
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
       background: var(--bg); border-top: 1px solid var(--border);
-      display: flex; gap: 8px; align-items: flex-end; }}
+      display: flex; gap: 8px; align-items: flex-end;
+      flex-wrap: wrap; }}
+    /* Attachment strip is a sibling flex item; force it onto its own
+       full-width row so it doesn't squash the textarea sideways when
+       images are added (drag-drop UX field test 2026-04-27). */
+    #attach-strip {{ flex: 1 0 100%; order: -1; }}
     textarea {{ flex: 1; font-family: inherit; font-size: 15px;
       padding: 10px 12px; border: 1px solid var(--border);
       border-radius: 8px; background: #fff; color: var(--fg);
