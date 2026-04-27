@@ -819,7 +819,7 @@ class Executor:
         if isinstance(fmt, str):
             fmt = fmt.lower()
         if fmt in ("unix", "epoch", "seconds"):
-            value = int(time.time())
+            value = str(int(time.time()))
         else:
             # iso / default
             value = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
