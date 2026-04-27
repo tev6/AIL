@@ -296,6 +296,7 @@ class Parser:
         raw: dict[str, Any] = {}
         listen_expr: Expr | None = None
         server_arm: ServerRequestArm | None = None
+        declared_effects: list[str] = []
 
         while not self.check(Tok.RBRACE):
             if self.check(Tok.EOF):
@@ -370,6 +371,20 @@ class Parser:
                 self.expect_keyword("keep_last")
                 history_keep = int(self.expect(Tok.NUMBER).value)
 
+            elif field_name == "effects":
+                # `effects: [effect.name, ...]` — infra-layer deny-first
+                self.expect(Tok.COLON)
+                self.expect(Tok.LBRACK)
+                while not self.check(Tok.RBRACK):
+                    name_tok = self.expect(Tok.IDENT).value
+                    # allow dotted names like email.send, http.respond
+                    while self.match(Tok.DOT):
+                        name_tok += "." + self.expect(Tok.IDENT).value
+                    declared_effects.append(name_tok)
+                    if not self.match(Tok.COMMA):
+                        break
+                self.expect(Tok.RBRACK)
+
             elif field_name == "require":
                 # `require review_by: <role>`
                 self.expect_keyword("review_by")
@@ -414,6 +429,7 @@ class Parser:
             raw=raw,
             listen_expr=listen_expr,
             server_arm=server_arm,
+            effects=declared_effects,
         )
 
     def _parse_evolve_action(self):

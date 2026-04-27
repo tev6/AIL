@@ -317,6 +317,10 @@ class EvolveDecl:
     # server_arm is set. listen_expr is the port; server_arm is the handler.
     listen_expr: "Expr | None" = None
     server_arm: "ServerRequestArm | None" = None
+    # Infra-layer deny-first (Arche 2026-04-27): effects allowed in this
+    # evolve-server. When non-empty, replaces ALLOWED_EFFECTS check for
+    # this server. Undeclared effects are still denied.
+    effects: "list[str]" = field(default_factory=list)
 
 
 @dataclass
