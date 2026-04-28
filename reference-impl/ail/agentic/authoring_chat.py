@@ -92,8 +92,10 @@ class AuthoringChat:
         """
         history = self._load_history()
         project_state = self._read_project_state()
+        ui_state = self._compute_ui_state()
 
-        goal_text = self._build_goal_prompt(project_state, history, user_message)
+        goal_text = self._build_goal_prompt(
+            project_state, history, user_message, ui_state)
 
         invoke_inputs = {"user_message": user_message}
         if attachments:
@@ -202,12 +204,116 @@ class AuthoringChat:
 
     # ---------- prompt construction ----------
 
+    def _compute_ui_state(self) -> dict[str, bool]:
+        """Snapshot of which UI affordances are *currently* visible.
+
+        Telos 2026-04-29 (Arche field test): the author model used to
+        say "click [🚀 배포하기] at top right" even when the deploy
+        bar was hidden. The v1.68.2 fix was a prompt blacklist
+        ("don't mention deploy"); this is the proper fix — give the
+        model the ground truth and let it reason factually.
+
+        Every UI affordance the agent could *plausibly* point at
+        becomes a boolean flag. The prompt instructs the agent to
+        reference an affordance ONLY if its flag is true.
+        """
+        from ..bundle import detect_lifecycle_files
+        from .process_manager import (
+            _program_is_evolve_server, read_deployment,
+        )
+        flags: dict[str, bool] = {}
+        try:
+            flags["deployable"] = _program_is_evolve_server(self.project)
+        except Exception:
+            flags["deployable"] = False
+        try:
+            flags["deployed"] = read_deployment(self.project) is not None
+        except Exception:
+            flags["deployed"] = False
+        # Chat history affordance ("Back to chat" link on /service).
+        try:
+            history_path = self.project.state_dir / "chat_history.jsonl"
+            flags["has_chat_history"] = (
+                history_path.is_file()
+                and history_path.stat().st_size > 0
+            )
+        except OSError:
+            flags["has_chat_history"] = False
+        # Bundle CTA — scattered lifecycle files visible to user.
+        try:
+            scattered = detect_lifecycle_files(self.project.root)
+            # The CTA also requires no existing evolve block. Check:
+            has_evolve = False
+            for p in self.project.root.iterdir():
+                if (
+                    p.is_file() and p.suffix == ".ail"
+                    and "evolve " in p.read_text(encoding="utf-8")
+                ):
+                    has_evolve = True
+                    break
+            flags["bundle_cta_visible"] = (
+                len(scattered) >= 2 and not has_evolve
+            )
+        except OSError:
+            flags["bundle_cta_visible"] = False
+        # Schedule status.
+        import json as _json
+        flags["schedule_active"] = False
+        flags["schedule_paused"] = False
+        try:
+            sched_path = self.project.state_dir / "schedule.json"
+            if sched_path.is_file():
+                payload = _json.loads(
+                    sched_path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    seconds = payload.get("seconds")
+                    if seconds is not None and float(seconds) > 0:
+                        flags["schedule_active"] = True
+                    flags["schedule_paused"] = bool(payload.get("paused"))
+        except (OSError, ValueError, _json.JSONDecodeError):
+            pass
+        return flags
+
+    @staticmethod
+    def _format_ui_state(flags: dict[str, bool]) -> str:
+        """Render the UI-state flags as a fact block the model can cite."""
+        lines = ["=== CURRENT UI STATE — ground truth, do NOT contradict ==="]
+        lines.append(
+            "The user's chat window currently looks like this. Reference an "
+            "affordance ONLY when its flag is true. NEVER invent a screen "
+            "position (\"우측 상단\", \"top right\"). When the user might "
+            "expect a button that's not there, explain *why* it's hidden "
+            "instead of telling them to click it."
+        )
+        for key in sorted(flags):
+            mark = "✅ visible" if flags[key] else "❌ NOT visible"
+            lines.append(f"  - {key}: {mark}")
+        lines.append(
+            "Implications:\n"
+            "  - deployable=false → there is NO Deploy button anywhere. "
+            "Don't tell the user to click it. Mention `<action>ready_to_serve</action>` "
+            "only when the program you're emitting is an evolve-server.\n"
+            "  - deployed=true → the agent is already running in the "
+            "background. Refer to it via the [🔗 열기] link (in the deploy bar) "
+            "rather than asking the user to deploy again.\n"
+            "  - bundle_cta_visible=true → a [🔧 지금 합치기] card is "
+            "in the chat thread. Do NOT re-implement bundling yourself; "
+            "tell the user to click it.\n"
+            "  - schedule_paused=true → the scheduler is in throttle "
+            "(5 consecutive failures). The user must click [▶ 다시 켜기] "
+            "in the yellow card after fixing the cause; new runs you "
+            "trigger from chat will fail until then."
+        )
+        return "\n".join(lines)
+
     def _build_goal_prompt(
-        self, state: dict[str, str], history: list[dict], user_message: str
+        self, state: dict[str, str], history: list[dict], user_message: str,
+        ui_state: dict[str, bool] | None = None,
     ) -> str:
         reference_card = self._load_reference_card()
         history_text = self._format_history(history)
         state_text = self._format_state(state)
+        ui_state_text = self._format_ui_state(ui_state or {})
 
         return f"""You are the author and driver of an AIL project. The user is NOT a programmer and the whole point of this project is to MINIMIZE human involvement. Do the work. Stop asking.
 
@@ -1908,6 +2014,9 @@ Project name: {self.project.root.name}
 
 {state_text}
 === END PROJECT STATE ===
+
+{ui_state_text}
+=== END UI STATE ===
 
 === CONVERSATION HISTORY (most recent last) ===
 {history_text}

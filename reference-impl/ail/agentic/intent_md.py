@@ -183,6 +183,11 @@ def parse_intent_md(text: str, *, default_name: str = "app") -> IntentSpec:
 
     sections = _split_sections(body)
     preamble = sections.get("_preamble", "").strip()
+    # Telos 2026-04-29: strip HTML comments from preamble so scaffold
+    # hints like `<!-- 만들고 싶은 기능을 적으세요 -->` don't bleed into
+    # the author model's goal text. They're meant for the human reader
+    # editing INTENT.md, not for the AI's authoring brief.
+    preamble = re.sub(r"<!--.*?-->", "", preamble, flags=re.DOTALL).strip()
 
     behavior = [m.group(1) for m in _BULLET_RE.finditer(sections.get("behavior", ""))]
     evolution = [m.group(1) for m in _BULLET_RE.finditer(sections.get("evolution", ""))]
