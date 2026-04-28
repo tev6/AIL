@@ -4,6 +4,68 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-04-28 (Rust 런타임 시작 — Tekton 합류)
+
+**세 번째 런타임.** AIL이 처음으로 Python과 Go 바깥에서 돌아갑니다. Tekton이 `rust-impl/`을 부트스트랩하고 어휘 분석기(Lexer)를 Go 구현체에서 충실히 이식했습니다.
+
+- **새 런타임 `rust-impl/`**: Cargo 프로젝트 뼈대 + 단일 바이너리 목표. `pip install` 없이 `curl` 한 줄로 설치할 수 있는 AIL을 향한 첫 걸음.
+- **Lexer 이식 완료**: `go-impl/lexer.go` 기반으로 Rust로 재작성. 토큰 78개 테스트로 검증 (`rust-impl/tests/lexer.rs`).
+- **GitHub Actions CI 추가** (`.github/workflows/rust.yml`): Rust 빌드·테스트가 매 push마다 자동 검증.
+- **두 런타임 합의 원칙**: Python과 Go가 이미 같은 사양을 두고 합의를 강제했고, Rust가 세 번째 검증자로 합류. 셋 모두 통과해야 언어 기능이 확정됩니다.
+
+구현 담당: Tekton. 다음은 파서(Parser) 이식.
+
+---
+
+## 2026-04-28 (README 전면 개편 — Homeros 합류)
+
+Homeros가 팀에 합류하며 README와 문서를 사람이 읽고 싶게 재작성했습니다.
+
+- **첫 줄부터 바뀌었습니다.** 추상적인 "신뢰 계약"에서 구체적인 행동으로: *"에이전트에게 목표를 맡기고 '네 판단대로 해'라고 말한 뒤, 자러 갑니다."*
+- **Quick start 단순화**: 두 줄(`pip install ail-interpreter` + `ail`)로 브라우저 위자드까지. 비개발자가 코드 에디터나 API 지식 없이 시작할 수 있습니다.
+- **팀 소개 추가**: Tekton (Rust 런타임)과 Homeros (문서)가 Authors 표에 올랐습니다. 앞으로 합류하는 팀원은 온보딩 자기 소개의 일부로 이 표에 한 줄을 직접 추가합니다.
+- **영/한 동기화**: 영문 README와 `docs/ko/README.ko.md` 항상 일치.
+
+---
+
+## v1.66.2 — 2026-04-28 (`git.*` effects + 라이프사이클 5훅 컨벤션 — Mneme 기반)
+
+아르케 18-리스트 #9 + #8. Mneme를 별도 인프라로 만들지 않고 Git을 그대로
+백엔드로 쓰기 위한 effect 셋 + 에이전트 생명주기 컨벤션.
+
+**새 L1 effects (Mneme=Git):**
+
+- `git.commit(repo_path, message, paths?) -> Result[Text]` — stage +
+  commit. 반환 ok(commit_sha) / error(stderr). 빈 commit은 error.
+- `git.push(repo_path, remote?, branch?) -> Result[Text]` — push (default
+  origin/HEAD).
+- `git.pull(repo_path, remote?, branch?) -> Result[Text]` — pull. merge
+  conflict는 error로 surface (callers 결정).
+
+Auth + user.name은 ambient git config 사용. 어댑터가 credential 안 넘김
+— "tools with built-in safety, connect through effect adapters" 원칙.
+
+`ALLOWED_EFFECTS` 등록, spec/reference_card 동기화, +6 회귀 테스트
+(`tests/test_git_effects.py` — tmp git repo로 commit/pull/push 검증).
+
+**spec/04-evolution.md §11b — 라이프사이클 5훅 컨벤션:**
+
+- `pure fn on_genesis(testament)` — 태어나기 전, 이전 세대 유서 inspect
+- `fn on_birth(seed)` — 태어난 직후, identity/bonds/will load (`git.pull`)
+- `fn on_tick(state)` — 매 evolve 턴
+- `fn on_dying(reason, history)` — 죽기 전, self-commit (`git.commit` +
+  `git.push`)
+- `pure fn on_death(reason, history)` — 죽고 나서 (기존 §4 / Physis v0.3)
+
+새 키워드 0개. fn-name convention만으로 인식. 정의 안 한 hook은 skip.
+다음 세대의 `on_genesis`가 이전 세대의 `on_dying` push를 받음 → 원이
+닫힘. Mneme(Git)이 medium, hooks가 protocol.
+
+#15 ("팀원들 독립 에이전트로 꺼내기")의 prerequisite — 아르케/메타가
+브라우저 탭에서 해방되려면 이 5훅 + Mneme이 필요.
+
+---
+
 ## v1.66.1 — 2026-04-28 (Anthropic OAuth 구독 토큰 지원)
 
 아르케 긴급 요청. hyun06000의 Anthropic API budget이 떨어져
