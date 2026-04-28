@@ -54,14 +54,15 @@ jobs:
           workspaces: rust-impl
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --bin ail-rs
-      - name: Stage artifact
+      - name: Stage artifact (binary + examples)
         run: |
           set -eu
           BIN="ail-rs${{ matrix.ext }}"
           OUT_DIR="../dist"
-          mkdir -p "$OUT_DIR"
-          cp "target/${{ matrix.target }}/release/${BIN}" "${OUT_DIR}/"
-          cd "${OUT_DIR}"
+          STAGE="../dist/_stage"
+          mkdir -p "${OUT_DIR}" "${STAGE}"
+          cp "target/${{ matrix.target }}/release/${BIN}" "${STAGE}/"
+          cp -r examples "${STAGE}/examples"
           # Version label: tag name on tag push, dispatch input on manual run.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             LABEL="${{ github.event.inputs.label }}-$(echo ${GITHUB_SHA} | cut -c1-7)"
@@ -69,8 +70,9 @@ jobs:
             LABEL="${GITHUB_REF_NAME}"
           fi
           ARCHIVE="ail-rs-${LABEL}-${{ matrix.target }}.tar.gz"
-          tar -czf "${ARCHIVE}" "${BIN}"
-          ls -la
+          (cd "${STAGE}" && tar -czf "../${ARCHIVE}" "${BIN}" examples)
+          rm -rf "${STAGE}"
+          (cd "${OUT_DIR}" && ls -la)
       - uses: actions/upload-artifact@v4
         with:
           name: ail-rs-${{ matrix.target }}

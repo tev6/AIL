@@ -56,16 +56,22 @@ jobs:
         with:
           workspaces: rust-impl
       - run: cargo build --release --target ${{ matrix.target }} --bin ail-rs
-      - name: Stage binary
+      - name: Stage binary + examples
         run: |
           set -eu
           OUT="../dist"
-          mkdir -p "$OUT"
+          STAGE="../dist/_stage"
+          mkdir -p "${OUT}" "${STAGE}"
           BRANCH=$(echo "${GITHUB_REF##*/}")
           SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           ARCHIVE="ail-rs-${BRANCH}-${SHA}-${{ matrix.target }}.tar.gz"
-          cp "target/${{ matrix.target }}/release/ail-rs" "${OUT}/"
-          (cd "${OUT}" && tar -czf "${ARCHIVE}" ail-rs && rm ail-rs && ls -la)
+          # Bundle binary + examples so a downloaded tarball can be smoke-tested
+          # end-to-end without writing any code.
+          cp "target/${{ matrix.target }}/release/ail-rs" "${STAGE}/"
+          cp -r examples "${STAGE}/examples"
+          (cd "${STAGE}" && tar -czf "../${ARCHIVE}" ail-rs examples)
+          rm -rf "${STAGE}"
+          (cd "${OUT}" && ls -la)
       - uses: actions/upload-artifact@v4
         with:
           name: ail-rs-${{ matrix.target }}

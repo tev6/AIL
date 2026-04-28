@@ -29,12 +29,22 @@ rust-impl/
     └── eval.rs
 ```
 
+## Install (one-liner, after a public release)
+
+```
+curl -fsSL https://raw.githubusercontent.com/hyun06000/AIL/main/rust-impl/install.sh | sh
+```
+
+Auto-detects platform, fetches the latest `rust-v*.*.*` release tarball (binary + `examples/` bundled), and installs `ail-rs` into `~/.local/bin`. Override with `AIL_RS_VERSION=...` or `AIL_RS_PREFIX=...`. No Rust toolchain required.
+
+> Until the first `rust-v*.*.*` tag is cut, the installer will report "no release found" — use the dev-artifact path or build from source below.
+
 ## Build from source
 
 ```
 cd rust-impl
 cargo build --release
-./target/release/ail-rs run program.ail
+./target/release/ail-rs run examples/01_hello.ail "world"
 ```
 
 Requires a stable Rust toolchain (https://rustup.rs).
@@ -49,12 +59,13 @@ Field-test path (dev):
    - macOS Apple Silicon → `ail-rs-aarch64-apple-darwin`
    - macOS Intel         → `ail-rs-x86_64-apple-darwin`
    - Linux x86_64        → `ail-rs-x86_64-unknown-linux-gnu`
-3. Unzip the artifact, then untar:
+3. Unzip the artifact, then untar — the tarball contains both the `ail-rs` binary and a bundled `examples/` directory of smoke-test programs:
    ```
    unzip ail-rs-aarch64-apple-darwin.zip
    tar -xzf ail-rs-dev-<sha>-aarch64-apple-darwin.tar.gz
-   ./ail-rs --help
-   ./ail-rs run program.ail
+   ./ail-rs run examples/01_hello.ail "world"
+   ./ail-rs run examples/02_arithmetic.ail
+   # See examples/README.md for the full smoke-test set.
    ```
 
 Release path (main): same, but from [Releases](https://github.com/hyun06000/AIL/releases) — pick the latest `rust-v*.*.*`.
