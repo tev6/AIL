@@ -496,22 +496,57 @@ fn handle_health(req: Any) -> [Any] {
 }
 
 // /api/v1/debug/storage — diagnose where the DB file actually lives.
-// 박상현 2026-04-29: Railway 볼륨은 살아있는데 messages가 7개로 줄어든
-// 사건 진단용. STOA_DB_FILE 미설정이면 cwd 상대경로라 컨테이너 재배포
-// 때마다 다른 파일을 볼 수 있다. 이 엔드포인트로 실제 어떤 경로를
-// 보고 있는지, 볼륨에 옛 DB가 남아있는지 즉시 확인.
+// 박상현 2026-04-29: 볼륨은 살아있는데 messages가 7개로 줄어든 사건 진단.
+// STOA_DB_FILE 미설정이면 cwd 상대경로라 컨테이너 재배포로 다른 파일을
+// 볼 수 있다. 이 엔드포인트로 실제 어떤 경로를 보는지, 볼륨에 옛 DB가
+// 남아있는지 확인. Railway 볼륨이 통상 mount되는 후보 경로들을 스캔.
 fn handle_debug_storage(req: Any) -> [Any] {
     db_file = get_db_file()
     db_env_r = perform env.read("STOA_DB_FILE")
     db_env_set = false
     if not is_error(db_env_r) { db_env_set = true }
 
-    // Try reading the file's first byte to confirm it exists.
     db_exists = false
     probe = perform file.read(db_file)
     if not is_error(probe) { db_exists = true }
 
-    // Append-only log row count (source of truth).
+    // Sniff each candidate path: try opening as SQLite and counting messages.
+    // If any returns a row count higher than current, that file likely
+    // holds the lost letters. Result is ok(record) per probe; missing
+    // files / non-DB files surface as errors and we record None.
+    candidates = [
+        "messages.db",
+        "/data/messages.db",
+        "/app/data/messages.db",
+        "/app/messages.db",
+        "/var/data/messages.db",
+        "/mnt/volume/messages.db",
+        "/mnt/messages.db",
+        "data/messages.db"
+    ]
+    probes = []
+    for p in candidates {
+        n = -1
+        log_n = -1
+        rq = perform db.query(p, "SELECT COUNT(*) FROM messages")
+        if not is_error(rq) {
+            rows = unwrap(rq)
+            if length(rows) > 0 { n = rows[0][0] }
+        }
+        rl = perform db.query(p, "SELECT COUNT(*) FROM message_log")
+        if not is_error(rl) {
+            rows = unwrap(rl)
+            if length(rows) > 0 { log_n = rows[0][0] }
+        }
+        // -1 means open or query failed (file missing / bad table).
+        probes = append(probes, [
+            ["path", p],
+            ["messages", n],
+            ["message_log", log_n],
+            ["is_active_db", p == db_file]
+        ])
+    }
+
     log_count_r = perform db.query(db_file, "SELECT COUNT(*) FROM message_log")
     log_count = -1
     if not is_error(log_count_r) {
@@ -521,8 +556,6 @@ fn handle_debug_storage(req: Any) -> [Any] {
 
     msg_count = db_count_messages()
 
-    // Earliest + latest message timestamps so we can tell at a glance
-    // whether old data is missing.
     earliest_r = perform db.query(db_file,
         "SELECT MIN(created_at), MAX(created_at) FROM messages")
     earliest = None
@@ -542,7 +575,8 @@ fn handle_debug_storage(req: Any) -> [Any] {
         ["messages_count", msg_count],
         ["log_count", log_count],
         ["earliest_message_at", earliest],
-        ["latest_message_at", latest]
+        ["latest_message_at", latest],
+        ["probes", probes]
     ])
 }
 
