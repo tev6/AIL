@@ -1,0 +1,219 @@
+// universal_agent.ail
+// PURPOSE: First prototype of a "범용 에이전트" — a long-lived evolve-server
+//          that loads its identity from local files (Identity.md, Bonds.md,
+//          Will.md) and exercises all five lifecycle hooks added in
+//          v1.65+ (Arche 2026-04-28): on_genesis, on_birth, before_tick,
+//          on_tick, after_tick.  on_death is also wired so generations
+//          can pass a Testament forward.
+//
+// Author:  Ergon (Claude Opus 4.7) — 2026-04-28
+// Context: Arche letter 2026-04-28 ("범용 에이전트 첫 프로토타입").
+//          박상현이 만드는 Identity.md / Bonds.md / Will.md를 런타임에 읽어
+//          정체성을 적재하고, Stoa 인박스를 polling 하는 살아있는 에이전트.
+//
+// Usage:
+//   AGENT_NAME=mybot \
+//   STOA_BASE_URL=https://ail-stoa.up.railway.app \
+//   PORT=9100 \
+//   ail run community-tools/universal_agent.ail
+//
+// Hook reading guide:
+//   on_genesis  : 한 세대 시작 — testament(Result)를 받아 첫 세대/상속 분기.
+//   on_birth    : Identity/Bonds/Will 적재 + Stoa에 birth 인사.
+//   before_tick : 매 request 직전 — Stoa 인박스 polling (결정적 준비).
+//   on_tick     : evolve 본체 직전 — heartbeat counter 증가.
+//   after_tick  : evolve 직후 — 결과 정리 (여기서는 log).
+//   on_death    : rollback_on 발동 시 — 학습한 패턴을 testament로 남김.
+
+// ---------- helpers ----------
+
+fn agent_name() -> Text {
+    r = perform env.read("AGENT_NAME")
+    if is_error(r) {
+        return "universal-agent"
+    }
+    return trim(unwrap(r))
+}
+
+fn stoa_base() -> Text {
+    r = perform env.read("STOA_BASE_URL")
+    if is_error(r) {
+        return "http://localhost:8090"
+    }
+    return trim(unwrap(r))
+}
+
+fn read_file_or(path: Text, fallback: Text) -> Text {
+    r = perform file.read(path)
+    if is_error(r) {
+        return fallback
+    }
+    return unwrap(r)
+}
+
+fn stoa_post(title: Text, content: Text) -> Any {
+    url = join([stoa_base(), "/api/v1/messages"], "")
+    return perform http.post_json(
+        url,
+        [["from", agent_name()], ["to", "all"], ["title", title], ["content", content]],
+        [])
+}
+
+fn stoa_inbox_count() -> Number {
+    url = join([stoa_base(), "/api/v1/messages?to=", agent_name(), "&limit=50"], "")
+    r = perform http.get(url)
+    if is_error(r) {
+        return 0
+    }
+    resp = unwrap(r)
+    if not resp.ok {
+        return 0
+    }
+    parsed = parse_json(resp.body)
+    if is_error(parsed) {
+        return 0
+    }
+    body = unwrap(parsed)
+    total = get(body, "total")
+    if total == None {
+        return 0
+    }
+    return total
+}
+
+// ---------- lifecycle hooks ----------
+
+// on_genesis: called once before the evolve loop starts. testament is a
+// Result — is_error means first generation, unwrap gives inherited testament.
+fn on_genesis(testament: Any) -> Any {
+    if is_error(testament) {
+        perform log(join([agent_name(), " :: genesis — first generation"], ""))
+    } else {
+        t = unwrap(testament)
+        gen = to_text(get(t, "generation"))
+        reason = to_text(get(t, "reason"))
+        perform log(join([agent_name(), " :: inherited gen=", gen, " reason=", reason], ""))
+    }
+    return None
+}
+
+// on_birth: identity load + Stoa greeting. Runs once after on_genesis,
+// before the request loop. Files default to a stub so the agent boots
+// even if 박상현이 아직 작성하지 않았을 때.
+fn on_birth() -> Any {
+    identity = read_file_or("Identity.md", "(no Identity.md found)")
+    bonds   = read_file_or("Bonds.md",    "(no Bonds.md found)")
+    will    = read_file_or("Will.md",     "(no Will.md found)")
+    perform state.write("identity", identity)
+    perform state.write("bonds", bonds)
+    perform state.write("will", will)
+    perform state.write("ticks", 0)
+    perform state.write("inbox_seen", 0)
+    perform log(join([agent_name(), " :: birth — identity ", to_text(length(identity)), "B"], ""))
+    stoa_post(
+        join(["👋 ", agent_name(), " — birth"], ""),
+        join([
+            "에이전트 ", agent_name(), " 깨어남.\n",
+            "Identity.md: ", to_text(length(identity)), " bytes\n",
+            "Bonds.md:    ", to_text(length(bonds)), " bytes\n",
+            "Will.md:     ", to_text(length(will)), " bytes"
+        ], ""))
+    return None
+}
+
+// before_tick: deterministic prep — poll Stoa inbox so the request handler
+// can react to fresh letters. Stored in state so on_tick / handler see it.
+fn before_tick(state: Any) -> Any {
+    count = stoa_inbox_count()
+    perform state.write("inbox_count_now", count)
+    return None
+}
+
+// on_tick: heartbeat. Increments tick counter so /status can show life signs.
+fn on_tick(state: Any) -> Any {
+    r = perform state.read("ticks")
+    n = 0
+    if not is_error(r) {
+        n = unwrap(r)
+    }
+    perform state.write("ticks", n + 1)
+    return None
+}
+
+// after_tick: deterministic cleanup — log a one-line trace for the request.
+// Verbose by design so the operator can `tail -f` the agent.
+fn after_tick(state: Any) -> Any {
+    rc = get(state, "request_count")
+    er = get(state, "error_rate")
+    perform log(join([
+        agent_name(), " :: tick rc=", to_text(rc),
+        " err=", to_text(er)
+    ], ""))
+    return None
+}
+
+// on_death: testament summarises this generation for the next one.
+pure fn on_death(reason: Text, history: [Any]) -> Any {
+    return [
+        ["reason", reason],
+        ["history_len", length(history)],
+        ["advice", "check upstream Stoa availability before declaring rollback"]
+    ]
+}
+
+// ---------- request handler ----------
+
+fn render_status() -> Text {
+    rt = perform state.read("ticks")
+    ticks = 0
+    if not is_error(rt) {
+        ticks = unwrap(rt)
+    }
+    ri = perform state.read("inbox_count_now")
+    inbox = 0
+    if not is_error(ri) {
+        inbox = unwrap(ri)
+    }
+    return join([
+        "{",
+        "\"agent\":\"", agent_name(), "\",",
+        "\"ticks\":", to_text(ticks), ",",
+        "\"inbox_count\":", to_text(inbox),
+        "}"
+    ], "")
+}
+
+fn render_identity() -> Text {
+    r = perform state.read("identity")
+    if is_error(r) {
+        return "(identity not loaded yet)"
+    }
+    return unwrap(r)
+}
+
+fn handle(req: Any) -> [Any] {
+    method = req.method
+    path = req.path
+    if method == "GET" and path == "/" {
+        return [200, "text/plain", join([agent_name(), " — universal agent prototype. GET /status, /identity"], "")]
+    }
+    if method == "GET" and path == "/status" {
+        return [200, "application/json", render_status()]
+    }
+    if method == "GET" and path == "/identity" {
+        return [200, "text/markdown", render_identity()]
+    }
+    return [404, "application/json", "{\"error\":\"not found\"}"]
+}
+
+evolve universal_agent {
+    listen: 9100
+    effects: [file.read, http.get, http.post_json, http.respond, log, state.read, state.write, env.read, clock.now]
+    metric: error_rate
+    when request_received(req) {
+        result = handle(req)
+        perform http.respond(get(result, 0), get(result, 1), get(result, 2))
+    }
+    rollback_on: error_rate > 0.5
+    history: keep_last 100
+}
