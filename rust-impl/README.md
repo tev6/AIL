@@ -8,7 +8,7 @@ Third reference implementation of AIL, after Python (`reference-impl/`) and Go (
 - Memory safety + concurrency for Phase-2 work.
 - Third independent runtime is a third spec checker — divergence between three implementations is the loudest possible signal that the spec is ambiguous.
 
-**Status (2026-04-28):** Phase-0 bootstrap. Lexer landed.
+**Status (2026-04-28):** Phase-0 complete (lexer + parser + evaluator). `intent` execution requires an adapter (not bundled yet).
 
 ## Layout
 
@@ -17,27 +17,76 @@ rust-impl/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs       # public surface
-│   ├── lexer.rs     # Phase-0
-│   └── main.rs      # ail-rs CLI (currently: dump tokens)
+│   ├── lexer.rs     # tokenizer
+│   ├── ast.rs       # Expr/Stmt/Decl
+│   ├── parser.rs    # recursive-descent
+│   ├── value.rs     # ValueKind + confidence
+│   ├── eval.rs      # interpreter + builtins
+│   └── main.rs      # ail-rs CLI
 └── tests/
-    └── lexer.rs     # behavioral tests
+    ├── lexer.rs
+    ├── parser.rs
+    └── eval.rs
 ```
 
-## Build
+## Build from source
 
 ```
 cd rust-impl
 cargo build --release
-cargo test
+./target/release/ail-rs run program.ail
+```
+
+Requires a stable Rust toolchain (https://rustup.rs).
+
+## Run from a downloaded binary (no toolchain needed)
+
+Every push to `dev`/`main` produces a release-mode binary as a GitHub Actions artifact. Tagged releases (`rust-v*.*.*`) publish the same binaries to GitHub Releases.
+
+Field-test path (dev):
+1. Open the latest [`rust` workflow run](https://github.com/hyun06000/AIL/actions/workflows/rust.yml) on `dev`.
+2. Scroll to the bottom — download the artifact for your platform:
+   - macOS Apple Silicon → `ail-rs-aarch64-apple-darwin`
+   - macOS Intel         → `ail-rs-x86_64-apple-darwin`
+   - Linux x86_64        → `ail-rs-x86_64-unknown-linux-gnu`
+3. Unzip the artifact, then untar:
+   ```
+   unzip ail-rs-aarch64-apple-darwin.zip
+   tar -xzf ail-rs-dev-<sha>-aarch64-apple-darwin.tar.gz
+   ./ail-rs --help
+   ./ail-rs run program.ail
+   ```
+
+Release path (main): same, but from [Releases](https://github.com/hyun06000/AIL/releases) — pick the latest `rust-v*.*.*`.
+
+## CLI
+
+```
+ail-rs tokens FILE.ail              # dump token stream
+ail-rs parse  FILE.ail              # dump parsed Program AST (Debug)
+ail-rs run    FILE.ail [INPUT]      # execute the entry block, print final value
+```
+
+Example:
+```
+$ cat hello.ail
+fn shout(s: Text) -> Text { return upper(s) + "!" }
+entry main(text: Text) {
+    return shout(text)
+}
+
+$ ail-rs run hello.ail "hello"
+HELLO!
 ```
 
 ## Roadmap (Tekton)
 
-1. **Lexer** ✅ — port of `go-impl/lexer.go`, ~340 LOC equiv.
-2. **AST + parser** — port of `go-impl/parser.go`.
-3. **Evaluator** — `fn`, `entry`, primitives, arithmetic, lists, builtins.
-4. **`intent`** via Anthropic / Ollama HTTP adapter.
-5. **`evolve`-as-server** — match Python runtime's HTTP/process model.
-6. **Cross-runtime conformance suite** — same `.ail` programs, three runtimes, byte-identical token & evaluation traces.
+1. **Lexer**     ✅
+2. **Parser + AST** ✅
+3. **Evaluator** ✅ (Phase-0 — fn, entry, primitives, arithmetic, lists, ~25 builtins, attempt cascade)
+4. **Single-binary release pipeline** ✅ (workflow_dispatch + tag-driven)
+5. **Cross-runtime conformance suite** — same `.ail` programs run on Python / Go / Rust, results compared. Spec parity by construction.
+6. **`intent`** via Anthropic / Ollama HTTP adapter (Anthropic supports `sk-ant-oat01` OAuth tokens for subscription users).
+7. **`evolve`-as-server** — match Python runtime's HTTP/process model.
 
 The Python runtime (`reference-impl/`) remains the canonical spec source. Rust catches up subset by subset.
