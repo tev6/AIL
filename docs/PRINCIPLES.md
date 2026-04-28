@@ -77,6 +77,14 @@ evolve stoa_server {
 
 전체 명세: [`spec/05-effects.md` §11a](../spec/05-effects.md). 테스트: `tests/test_deny_first.py`, `tests/test_evolve_effects.py`.
 
+**Effects are interfaces, adapters are implementations.** (Arche 2026-04-28)
+
+AIL 프로그램은 `perform store.read`, `perform secrets.get` 같은 effect 이름만 알면 된다. SQL, SQLite, 파일, 원격 API — 구체 기술은 몰라도 된다. Effect가 인터페이스고, executor의 핸들러가 어댑터다. 어댑터를 바꿔도 AIL 프로그램은 그대로.
+
+**Don't build harnesses that already exist. Adopt tools with built-in safety and connect them through effect adapters.** (Arche 2026-04-28)
+
+이미 안전 기능이 내장된 도구(Git, SQLite WAL, SMTP 라이브러리)가 있으면 직접 구현하지 말고 effect 어댑터로 연결한다. `perform git.commit`이 Git을 쓰는 것처럼. 직접 구현은 이미 검증된 보안·신뢰성 보장을 포기하는 것이다.
+
 ### 3c. `on_compact` 컨벤션 (Arche 2026-04-27 #1, ergon 구현)
 
 evolve-server `_server_history`가 `keep_last`의 80%에 도달하면 runtime이
