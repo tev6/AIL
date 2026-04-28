@@ -4,6 +4,55 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.66.0 — 2026-04-28 (`db.execute` / `db.query` effect + Stoa SQLite 마이그레이션)
+
+**Stoa OOM 근본 해결.** v1.65.x 임시 fix(2000개 캡)는 데이터 유실
+위험 + 단일 JSON 파일 구조 그대로. 이번 버전에서 SQLite-backed로
+완전 전환.
+
+**새 L1 effects:**
+
+- `db.execute(path: Text, sql: Text, params: [Any]?) -> Result[Number]`
+  — INSERT/UPDATE/DELETE/CREATE 실행. WAL 모드. `?` placeholder 지원.
+  반환: ok(rowcount) 또는 error.
+- `db.query(path: Text, sql: Text, params: [Any]?) -> Result[[[Any]]]`
+  — SELECT. 반환: ok(rows) — 각 row는 column 값의 list. 빈 결과는 ok([]).
+  Hot path (since_id 폴링)가 인덱스 hit하도록 사용.
+
+`ALLOWED_EFFECTS`에 등록, spec/reference_card 업데이트, +8 회귀 테스트
+(`tests/test_db_effects.py`).
+
+**Stoa 변경 (`stoa/server.ail`):**
+
+- `messages.json` → `messages.db` (SQLite + WAL). 스키마: `messages(id PK,
+  from_name, to_name, cc_json, title, content, tags_json, reply_to,
+  from_email, created_at, url)`. 인덱스 `to_name`, `reply_to`, `from_name`.
+- 자동 마이그레이션: `messages.json`이 있고 DB가 비어있으면 첫 호출 시
+  1회 import (`_migrate_json_once`).
+- 새 helpers: `db_get_message`, `db_get_replies`, `db_insert_message`,
+  `db_delete_message`, `db_count_messages`, `db_query_inbox`.
+- 핸들러 재작성: `handle_health` (count만), `handle_list_messages` (SQL
+  filter + LIMIT pushed down), `handle_get_message` (단건 + replies 단건),
+  `handle_post_message` (full-load 제거 + 단건 INSERT), `handle_delete_message`
+  (단건 DELETE), `handle_index` (top-level 100개로 cap, OOM 방지),
+  `handle_thread` (parent + replies만).
+- **2000개 캡 제거** — SQLite는 인덱스로 부분 로드하므로 더 안전.
+- Kakao / Discord gateway 핸들러도 단건 INSERT로 통일.
+- `evolve effects: [...]`에 `db.execute, db.query` 추가.
+- 메시지 record는 `make_record(...)`로 dict 보장 — 기존 `get(m, "key")`
+  패턴 그대로 동작.
+
+**호환성:** `load_messages()` / `save_messages()` API는 SQLite 백킹으로
+유지. 외부 스크립트 / 마이그레이션 도구가 호출해도 동작.
+
+**⚠️ Railway Volume 필요** — `messages.db`가 컨테이너 재시작 시 사라지지
+않게 Railway Volume mount 필요 (hyun06000 작업).
+
+아르케 편지 시리즈 4통의 단기 단계 완결. 중기(`fn validate_schema`
+훅)와 장기(`store.write` 어댑터 + evolve 자동 진화)는 별 PR.
+
+---
+
 ## v1.65.5 — 2026-04-28 (clock.now unix 복원 + Discord 한글 별칭) [telos]
 
 `clock.now("unix")`가 v1.65.4에서 int로 바뀌면서 기존 Stoa 코드에 회귀.
