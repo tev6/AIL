@@ -46,6 +46,8 @@ Three runtimes, three CLI shapes — the harness maps them transparently:
 
 | Runtime | Command shape |
 |---------|---------------|
-| Rust    | `ail-rs run PROG [INPUT]`              |
-| Go      | `ail-go run PROG [--input INPUT]`      |
-| Python  | `ail run PROG [--input INPUT]`         |
+| Rust    | `ail-rs run PROG [INPUT]`                       |
+| Go      | `ail-go run PROG [--input INPUT]`               |
+| Python  | `ail run --raw PROG [--input INPUT]`            |
+
+Python's CLI prints a multi-line banner with `value:` and `confidence:` by default. `--raw` matches the go-impl/ail-rs single-line printer — same value, no decoration. The spec doesn't mandate either shape; this is a presentation choice.

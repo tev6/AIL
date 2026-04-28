@@ -105,11 +105,21 @@ for prog in "${CORPUS}"/*.ail; do
     rust)
       cmd_args=("$prog" "$input")
       ;;
-    go|python)
+    go)
       if [ -n "$input" ]; then
         cmd_args=("$prog" --input "$input")
       else
         cmd_args=("$prog")
+      fi
+      ;;
+    python)
+      # `ail run --raw` prints value-only matching go-impl's default printer
+      # (the conformance fixture shape). Without --raw, ail prints a banner
+      # + confidence — useful for humans, noise for cross-runtime diffing.
+      if [ -n "$input" ]; then
+        cmd_args=(--raw "$prog" --input "$input")
+      else
+        cmd_args=(--raw "$prog")
       fi
       ;;
   esac
