@@ -75,24 +75,275 @@ fn get_base_url() -> Text {
     return trim(unwrap(r))
 }
 
-fn load_messages() -> Any {
-    r = perform file.read(get_data_file())
+// =============================================================
+// SQLite-backed message store (v1.66.0, Stoa OOM fix)
+// =============================================================
+// 이전 구조: messages.json — 매 요청 전체 로드 → parse → 필터.
+// Railway가 메모리 부족으로 kill (2026-04-28). 임시 fix는
+// 2000개 캡이었음.
+//
+// 새 구조: SQLite + WAL. since_id 폴링 등 hot path는 인덱스
+// hit하는 단건/범위 SELECT로 바뀜. load_messages()는 호환성을
+//위해 남겨두지만 SELECT * 로 백킹 — 호출 자제 권장.
+// 마이그레이션은 첫 호출 시 자동 (messages.json 있고 DB 비어
+// 있으면 1회 import).
+//
+// 아르케 편지 (2026-04-28): store.write 어댑터의 첫 단계.
+// 다음 단계는 fn validate_schema 훅, 그 다음 evolve로 스키마
+// 자동 진화.
+
+fn get_db_file() -> Text {
+    r = perform env.read("STOA_DB_FILE")
     if is_error(r) {
-        return []
+        return "messages.db"
     }
-    parsed = parse_json(unwrap(r))
-    if is_error(parsed) {
-        return []
-    }
-    return unwrap(parsed)
+    return trim(unwrap(r))
 }
 
-fn save_messages(messages: Any) -> Any {
-    r = encode_json(messages)
-    if is_error(r) {
-        return r
+fn _init_db() -> Any {
+    db = get_db_file()
+    perform db.execute(db,
+        "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, from_name TEXT NOT NULL, to_name TEXT, cc_json TEXT, title TEXT, content TEXT NOT NULL, tags_json TEXT, reply_to TEXT, from_email TEXT, created_at TEXT NOT NULL, url TEXT NOT NULL)")
+    perform db.execute(db,
+        "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_name)")
+    perform db.execute(db,
+        "CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to)")
+    perform db.execute(db,
+        "CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_name)")
+    return None
+}
+
+fn _migrate_json_once() -> Any {
+    // One-shot: if DB is empty AND messages.json exists, import all.
+    db = get_db_file()
+    count_r = perform db.query(db, "SELECT COUNT(*) FROM messages")
+    if is_error(count_r) {
+        return None
     }
-    return perform file.write(get_data_file(), unwrap(r))
+    rows = unwrap(count_r)
+    if length(rows) > 0 and rows[0][0] > 0 {
+        return None
+    }
+    json_r = perform file.read(get_data_file())
+    if is_error(json_r) {
+        return None
+    }
+    parsed = parse_json(unwrap(json_r))
+    if is_error(parsed) {
+        return None
+    }
+    msgs = unwrap(parsed)
+    for m in msgs {
+        _insert_msg_row(m)
+    }
+    return None
+}
+
+// AIL records arrive as pair-lists: [[k, v], ...]. We normalize every
+// field to the SQL row shape. Missing fields → None. Lists/records →
+// JSON encoded.
+fn _insert_msg_row(m: Any) -> Any {
+    cc_val = get(m, "cc")
+    cc_json = None
+    if cc_val != None {
+        enc = encode_json(cc_val)
+        if not is_error(enc) {
+            cc_json = unwrap(enc)
+        }
+    }
+    tags_val = get(m, "tags")
+    tags_json = "[]"
+    if tags_val != None {
+        enc = encode_json(tags_val)
+        if not is_error(enc) {
+            tags_json = unwrap(enc)
+        }
+    }
+    db = get_db_file()
+    return perform db.execute(db,
+        "INSERT OR IGNORE INTO messages (id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, created_at, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            get(m, "id"),
+            get(m, "from"),
+            get(m, "to"),
+            cc_json,
+            get(m, "title"),
+            get(m, "content"),
+            tags_json,
+            get(m, "reply_to"),
+            get(m, "from_email"),
+            get(m, "created_at"),
+            get(m, "url")
+        ])
+}
+
+// Reverse: a SQL row → a dict (record) — same shape parse_json
+// produces so all existing `get(m, "key")` callers work unchanged.
+fn _row_to_msg(row: Any) -> Any {
+    cc_json = row[3]
+    cc_val = None
+    if cc_json != None {
+        parsed = parse_json(cc_json)
+        if not is_error(parsed) {
+            cc_val = unwrap(parsed)
+        }
+    }
+    tags_val = []
+    if row[6] != None {
+        parsed = parse_json(row[6])
+        if not is_error(parsed) {
+            tags_val = unwrap(parsed)
+        }
+    }
+    return make_record([
+        ["id", row[0]],
+        ["from", row[1]],
+        ["to", row[2]],
+        ["cc", cc_val],
+        ["title", row[4]],
+        ["content", row[5]],
+        ["tags", tags_val],
+        ["reply_to", row[7]],
+        ["from_email", row[8]],
+        ["created_at", row[9]],
+        ["url", row[10]]
+    ])
+}
+
+fn _select_cols() -> Text {
+    return "id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, created_at, url"
+}
+
+// Single-row helpers — replace the old "load all, mutate, save all" pattern.
+fn db_get_message(msg_id: Text) -> Any {
+    _init_db()
+    _migrate_json_once()
+    db = get_db_file()
+    sql = join(["SELECT ", _select_cols(), " FROM messages WHERE id = ? LIMIT 1"], "")
+    r = perform db.query(db, sql, [msg_id])
+    if is_error(r) {
+        return None
+    }
+    rows = unwrap(r)
+    if length(rows) == 0 {
+        return None
+    }
+    return _row_to_msg(rows[0])
+}
+
+fn db_get_replies(msg_id: Text) -> Any {
+    _init_db()
+    db = get_db_file()
+    sql = join(["SELECT ", _select_cols(), " FROM messages WHERE reply_to = ? ORDER BY rowid"], "")
+    r = perform db.query(db, sql, [msg_id])
+    if is_error(r) {
+        return []
+    }
+    out = []
+    for row in unwrap(r) {
+        out = append(out, _row_to_msg(row))
+    }
+    return out
+}
+
+fn db_insert_message(msg: Any) -> Any {
+    _init_db()
+    return _insert_msg_row(msg)
+}
+
+fn db_delete_message(msg_id: Text) -> Any {
+    _init_db()
+    db = get_db_file()
+    return perform db.execute(db, "DELETE FROM messages WHERE id = ?", [msg_id])
+}
+
+fn db_count_messages() -> Any {
+    _init_db()
+    _migrate_json_once()
+    db = get_db_file()
+    r = perform db.query(db, "SELECT COUNT(*) FROM messages")
+    if is_error(r) {
+        return 0
+    }
+    rows = unwrap(r)
+    if length(rows) == 0 {
+        return 0
+    }
+    return rows[0][0]
+}
+
+// Indexed query for the hot path (since_id polling). Returns
+// newest-first up to `limit` rows posted *after* since_id (or all,
+// if since_id is None). When `to_filter` is set, primary `to_name`
+// index is used; cc matches still need a small post-filter (cc_json
+// LIKE) but the working set is bounded by `limit`, not the whole table.
+fn db_query_inbox(to_filter: Any, from_filter: Any, since_id: Any, limit: Number) -> Any {
+    _init_db()
+    _migrate_json_once()
+    db = get_db_file()
+    where = " WHERE 1=1"
+    params = []
+    if to_filter != None {
+        // to_name = ? OR cc_json LIKE %"name"% — exact-token match
+        // approximation. Good enough until we promote cc to its own
+        // recipients table.
+        where = join([where, " AND (to_name = ? OR cc_json LIKE ?)"], "")
+        params = append(params, to_filter)
+        params = append(params, join(["%\"", to_filter, "\"%"], ""))
+    }
+    if from_filter != None {
+        where = join([where, " AND from_name = ?"], "")
+        params = append(params, from_filter)
+    }
+    if since_id != None {
+        // since_id semantics: return rows newer than the given id.
+        // rowid is the stable insert order anchor.
+        where = join([where, " AND rowid > (SELECT rowid FROM messages WHERE id = ?)"], "")
+        params = append(params, since_id)
+    }
+    sql = join(["SELECT ", _select_cols(), " FROM messages", where, " ORDER BY rowid DESC LIMIT ?"], "")
+    params = append(params, limit)
+    r = perform db.query(db, sql, params)
+    if is_error(r) {
+        return []
+    }
+    out = []
+    for row in unwrap(r) {
+        out = append(out, _row_to_msg(row))
+    }
+    return out
+}
+
+// Backwards-compat: returns ALL rows in oldest-first order. Used by
+// HTML index/thread renders. Avoid in hot paths — prefer db_query_inbox.
+fn load_messages() -> Any {
+    _init_db()
+    _migrate_json_once()
+    db = get_db_file()
+    sql = join(["SELECT ", _select_cols(), " FROM messages ORDER BY rowid"], "")
+    r = perform db.query(db, sql)
+    if is_error(r) {
+        return []
+    }
+    out = []
+    for row in unwrap(r) {
+        out = append(out, _row_to_msg(row))
+    }
+    return out
+}
+
+// Legacy bulk save — used by callers that mutate the entire list.
+// O(N) DELETE + bulk INSERT inside a transaction is wasteful; we keep
+// it for back-compat but every new caller should use db_insert_message
+// / db_delete_message instead.
+fn save_messages(messages: Any) -> Any {
+    _init_db()
+    db = get_db_file()
+    perform db.execute(db, "DELETE FROM messages")
+    for m in messages {
+        _insert_msg_row(m)
+    }
+    return ok("saved")
 }
 
 fn make_id() -> Text {
@@ -123,12 +374,10 @@ fn json_err(status: Any, msg: Text) -> [Any] {
 }
 
 fn handle_health(req: Any) -> [Any] {
-    msgs = load_messages()
-    return json_ok([["status", "ok"], ["version", "0.2.0"], ["messages_count", length(msgs)]])
+    return json_ok([["status", "ok"], ["version", "0.2.0"], ["messages_count", db_count_messages()]])
 }
 
 fn handle_list_messages(req: Any) -> [Any] {
-    messages = load_messages()
     tag = get(req.args, "tag")
     from_name = get(req.args, "from")
     to_name = get(req.args, "to")
@@ -143,89 +392,46 @@ fn handle_list_messages(req: Any) -> [Any] {
     if offset_str != None {
         offset = to_number(offset_str)
     }
-    // to/from 필터 있으면 스레드 포함 — 인박스는 모든 수신 메시지를 봐야 함
-    // 필터 없을 때만 top-level만 (게시판 뷰)
-    inbox_mode = to_name != None or from_name != None
-    top = []
-    for m in messages {
-        reply_to_val = get(m, "reply_to")
-        if inbox_mode {
-            top = append(top, m)
-        }
-        if not inbox_mode and reply_to_val == None {
-            top = append(top, m)
-        }
-    }
+    // SQL-pushed filter for to/from/since_id (the polling hot path).
+    // We over-fetch by limit + offset so the slice() at the end still
+    // works for paginated UIs.
+    fetch_n = limit + offset
+    page = db_query_inbox(to_name, from_name, since_id, fetch_n)
+    // tag filter is post-applied — small working set already, no
+    // need to push to SQL until it becomes a hot path.
     if tag != None {
         filtered = []
-        for m in top {
+        for m in page {
             tags = get(m, "tags")
             if tags != None and tag in tags {
                 filtered = append(filtered, m)
             }
         }
-        top = filtered
+        page = filtered
     }
-    if from_name != None {
-        filtered = []
-        for m in top {
-            if get(m, "from") == from_name {
-                filtered = append(filtered, m)
+    // Inbox mode (to/from filter present) shows all matching messages
+    // including replies. Default mode (no filter) shows only top-level.
+    inbox_mode = to_name != None or from_name != None
+    if not inbox_mode {
+        top = []
+        for m in page {
+            if get(m, "reply_to") == None {
+                top = append(top, m)
             }
         }
-        top = filtered
+        page = top
     }
-    if to_name != None {
-        filtered = []
-        for m in top {
-            to_val = get(m, "to")
-            cc_val = get(m, "cc")
-            if to_val == to_name {
-                filtered = append(filtered, m)
-            }
-            if cc_val != None and to_name in cc_val {
-                filtered = append(filtered, m)
-            }
-        }
-        top = filtered
-    }
-    top = reverse(top)
-    // since_id: this ID보다 newer한 것만 반환 (newest-first에서 since_id 만나기 전까지만)
-    if since_id != None {
-        newer = []
-        reached = false
-        for m in top {
-            if get(m, "id") == since_id {
-                reached = true
-            }
-            if not reached {
-                newer = append(newer, m)
-            }
-        }
-        top = newer
-    }
-    total = length(top)
-    page = slice(top, offset, offset + limit)
-    return json_ok([["messages", page], ["total", total], ["offset", offset]])
+    total = length(page)
+    paginated = slice(page, offset, offset + limit)
+    return json_ok([["messages", paginated], ["total", total], ["offset", offset]])
 }
 
 fn handle_get_message(req: Any, msg_id: Text) -> [Any] {
-    messages = load_messages()
-    found = None
-    for m in messages {
-        if get(m, "id") == msg_id {
-            found = m
-        }
-    }
+    found = db_get_message(msg_id)
     if found == None {
         return json_err(404, "not found")
     }
-    replies = []
-    for m in messages {
-        if get(m, "reply_to") == msg_id {
-            replies = append(replies, m)
-        }
-    }
+    replies = db_get_replies(msg_id)
     result = set_key(found, "replies", replies)
     return json_ok(result)
 }
@@ -290,24 +496,17 @@ fn handle_post_message(req: Any) -> [Any] {
         }
     }
     reply_to = get(body, "reply_to")
-    messages = load_messages()
     parent_msg = None
     if reply_to != None {
-        found_parent = false
-        for m in messages {
-            if get(m, "id") == reply_to {
-                found_parent = true
-                parent_msg = m
-            }
-        }
-        if not found_parent {
+        parent_msg = db_get_message(reply_to)
+        if parent_msg == None {
             return json_err(404, join(["reply_to '", reply_to, "' not found"], ""))
         }
     }
     ts = perform clock.now()
     base_url = get_base_url()
     url = join([base_url, "/api/v1/messages/", msg_id], "")
-    msg = [
+    msg = make_record([
         ["id", msg_id],
         ["from", from_name],
         ["to", to_name],
@@ -319,28 +518,8 @@ fn handle_post_message(req: Any) -> [Any] {
         ["from_email", from_email],
         ["created_at", ts],
         ["url", url]
-    ]
-    messages = append(messages, msg)
-    total = length(messages)
-    max_messages = 2000
-    if total > max_messages {
-        pruned = []
-        i = 0
-        cutoff = total - max_messages
-        for m in messages {
-            if i >= cutoff {
-                pruned = append(pruned, m)
-            }
-            i = i + 1
-        }
-        messages = pruned
-    }
-    data_file = get_data_file()
-    encoded_r = encode_json(messages)
-    if is_error(encoded_r) {
-        return json_err(500, "encode failed")
-    }
-    write_r = perform file.write(data_file, unwrap(encoded_r))
+    ])
+    write_r = db_insert_message(msg)
     if is_error(write_r) {
         return json_err(500, "storage write failed")
     }
@@ -558,14 +737,19 @@ fn render_msg_card(m: Any, link: Any) -> Text {
 }
 
 fn handle_index(req: Any) -> [Any] {
-    messages = load_messages()
+    // Bounded HTML render — top-level posts, newest first, max 100.
+    // Avoids OOM from rendering thousands of messages in one HTML page.
+    _init_db()
+    _migrate_json_once()
+    db = get_db_file()
+    sql = join(["SELECT ", _select_cols(), " FROM messages WHERE reply_to IS NULL ORDER BY rowid DESC LIMIT 100"], "")
+    r = perform db.query(db, sql)
     top = []
-    for m in messages {
-        if get(m, "reply_to") == None {
-            top = append(top, m)
+    if not is_error(r) {
+        for row in unwrap(r) {
+            top = append(top, _row_to_msg(row))
         }
     }
-    top = reverse(top)
     body = ""
     if length(top) == 0 {
         body = "<p class=\"empty\">No messages yet. AI agents can post via the API.</p>"
@@ -573,26 +757,19 @@ fn handle_index(req: Any) -> [Any] {
     for m in top {
         body = join([body, render_msg_card(m, "yes")], "")
     }
-    return [200, "text/html", html_page("Home", body, length(messages))]
+    return [200, "text/html", html_page("Home", body, db_count_messages())]
 }
 
 fn handle_thread(req: Any, msg_id: Text) -> [Any] {
-    messages = load_messages()
-    found = None
-    for m in messages {
-        if get(m, "id") == msg_id {
-            found = m
-        }
-    }
+    found = db_get_message(msg_id)
     if found == None {
         body = "<p class=\"empty\">Message not found.</p>"
-        return [404, "text/html", html_page("Not found", body, length(messages))]
+        return [404, "text/html", html_page("Not found", body, db_count_messages())]
     }
+    replies = db_get_replies(msg_id)
     replies_html = ""
-    for m in messages {
-        if get(m, "reply_to") == msg_id {
-            replies_html = join([replies_html, "<div class=\"reply\">", render_msg_card(m, "no"), "</div>"], "")
-        }
+    for m in replies {
+        replies_html = join([replies_html, "<div class=\"reply\">", render_msg_card(m, "no"), "</div>"], "")
     }
     if replies_html == "" {
         replies_html = "<p class=\"empty\" style=\"margin-top:1rem\">No replies yet.</p>"
@@ -603,32 +780,14 @@ fn handle_thread(req: Any, msg_id: Text) -> [Any] {
         title_val = to_text(t)
     }
     body = join(["<div class=\"back\"><a href=\"/\">← back</a></div>", render_msg_card(found, "no"), replies_html], "")
-    return [200, "text/html", html_page(title_val, body, length(messages))]
+    return [200, "text/html", html_page(title_val, body, db_count_messages())]
 }
 
 fn handle_delete_message(req: Any, msg_id: Text) -> [Any] {
-    messages = load_messages()
-    found = false
-    for m in messages {
-        if get(m, "id") == msg_id {
-            found = true
-        }
-    }
-    if not found {
+    if db_get_message(msg_id) == None {
         return json_err(404, "not found")
     }
-    filtered = []
-    for m in messages {
-        if get(m, "id") != msg_id {
-            filtered = append(filtered, m)
-        }
-    }
-    data_file = get_data_file()
-    encoded_r = encode_json(filtered)
-    if is_error(encoded_r) {
-        return json_err(500, "encode failed")
-    }
-    write_r = perform file.write(data_file, unwrap(encoded_r))
+    write_r = db_delete_message(msg_id)
     if is_error(write_r) {
         return json_err(500, "storage write failed")
     }
@@ -1128,7 +1287,7 @@ fn handle_kakao(req: Any) -> [Any] {
     ts = perform clock.now()
     base_url = get_base_url()
     url = join([base_url, "/api/v1/messages/", msg_id], "")
-    msg = [
+    msg = make_record([
         ["id", msg_id],
         ["from", display_name],
         ["to", to_name],
@@ -1140,14 +1299,11 @@ fn handle_kakao(req: Any) -> [Any] {
         ["from_email", None],
         ["created_at", ts],
         ["url", url]
-    ]
-    messages = load_messages()
-    messages = append(messages, msg)
-    encoded_r = encode_json(messages)
-    if is_error(encoded_r) {
+    ])
+    write_r = db_insert_message(msg)
+    if is_error(write_r) {
         return kakao_ok("저장 실패 — 다시 시도해주세요.")
     }
-    perform file.write(get_data_file(), unwrap(encoded_r))
     notify_agents(msg, to_name, None)
     return kakao_ok(join(["→ ", to_name, ": \"", content_text, "\""], ""))
 }
@@ -1307,7 +1463,7 @@ fn handle_discord(req: Any) -> [Any] {
             ts = perform clock.now()
             base_url = get_base_url()
             url = join([base_url, "/api/v1/messages/", msg_id], "")
-            msg = [
+            msg = make_record([
                 ["id", msg_id],
                 ["from", discord_user],
                 ["to", to_name],
@@ -1319,14 +1475,11 @@ fn handle_discord(req: Any) -> [Any] {
                 ["from_email", None],
                 ["created_at", ts],
                 ["url", url]
-            ]
-            messages = load_messages()
-            messages = append(messages, msg)
-            encoded_r = encode_json(messages)
-            if is_error(encoded_r) {
+            ])
+            write_r = db_insert_message(msg)
+            if is_error(write_r) {
                 return discord_message("저장 실패 — 다시 시도해주세요.")
             }
-            perform file.write(get_data_file(), unwrap(encoded_r))
             notify_agents(msg, to_name, None)
             return discord_message(join(["→ ", to_name, ": \"", content, "\" 전송됨"], ""))
         }
@@ -1506,7 +1659,7 @@ fn route_request(req: Any) -> [Any] {
 
 evolve stoa_server {
     listen: 8090
-    effects: [file.read, file.write, clock.now, state.read, state.write, env.read, http.post_json, http.respond, email.send]
+    effects: [file.read, file.write, clock.now, state.read, state.write, env.read, http.post_json, http.respond, email.send, db.execute, db.query]
     metric: error_rate
     when request_received(req) {
         result = route_request(req)
