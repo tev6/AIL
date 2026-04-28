@@ -802,6 +802,125 @@ def render_authoring_page(
     refreshScheduleThrottle();
     setInterval(refreshScheduleThrottle, 5000);
 
+    // ---- Bundle CTA — scattered lifecycle files (Telos 2026-04-29) ----
+    // 인간 패턴 (분리→검증→합치기)을 인정하는 GUI 1차 경로.
+    // 자동 감지: on_*.ail이 2개 이상 + evolve 블록 없음 → chat 입구에
+    // [🔧 합치기] 카드 자동 출현. 한 번 누르면 endpoint가 합쳐진 한
+    // 파일을 만들고 원본은 .ail/_archive/로 이동(삭제 X).
+    let bundleCard = null;
+    let bundleCardShownFor = '';
+    async function refreshBundleCTA() {{
+      let st;
+      try {{
+        const r = await fetch('/authoring-bundle/detect');
+        if (!r.ok) return;
+        st = await r.json();
+      }} catch (e) {{ return; }}
+      if (!st || !st.can_bundle) {{
+        if (bundleCard) {{
+          bundleCard.remove();
+          bundleCard = null;
+          bundleCardShownFor = '';
+        }}
+        return;
+      }}
+      const sig = (st.candidates || []).join(',');
+      if (bundleCard && sig === bundleCardShownFor) return;
+      if (bundleCard) bundleCard.remove();
+      bundleCardShownFor = sig;
+      const turn = document.createElement('div');
+      turn.className = 'turn agent';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.style.cssText =
+        'background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;' +
+        'font-size:13px;';
+      const head = document.createElement('div');
+      head.innerHTML =
+        '🔧 <b>합쳐서 배포 가능하게 만들 수 있어요.</b>';
+      bubble.appendChild(head);
+      const body = document.createElement('div');
+      body.style.cssText = 'margin-top:4px;font-size:12px;color:#047857;';
+      body.textContent =
+        st.count + '개 라이프사이클 파일이 흩어져 있어요. 한 덩어리로 ' +
+        '합치면 [🚀 지금 배포하기] 카드가 나타납니다. ' +
+        '원본 파일은 .ail/_archive/ 로 옮겨서 보관됩니다.';
+      bubble.appendChild(body);
+      const list = document.createElement('div');
+      list.style.cssText =
+        'margin-top:6px;font-size:11px;color:#065f46;' +
+        'font-family:ui-monospace,Menlo,monospace;';
+      list.textContent = '대상: ' + (st.candidates || []).join(', ');
+      bubble.appendChild(list);
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:8px;display:flex;gap:10px;';
+      const goBtn = document.createElement('button');
+      goBtn.textContent = '🔧 지금 합치기';
+      goBtn.style.cssText =
+        'padding:6px 14px;background:#047857;color:#fff;border:0;' +
+        'border-radius:4px;cursor:pointer;font-size:12px;font-weight:500;';
+      const skipBtn = document.createElement('a');
+      skipBtn.href = '#';
+      skipBtn.textContent = '나중에';
+      skipBtn.style.cssText =
+        'color:#6b7280;text-decoration:underline;font-size:12px;' +
+        'align-self:center;';
+      skipBtn.addEventListener('click', (ev) => {{
+        ev.preventDefault();
+        if (bundleCard) {{
+          bundleCard.remove();
+          bundleCard = null;
+        }}
+      }});
+      goBtn.addEventListener('click', async () => {{
+        goBtn.disabled = true;
+        goBtn.textContent = '합치는 중…';
+        try {{
+          const r = await fetch('/authoring-bundle/run', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{}}),
+          }});
+          const data = await r.json();
+          if (!r.ok || !data.ok) {{
+            const msg = (data && data.error) || ('HTTP ' + r.status);
+            addError('합치기 실패: ' + msg);
+            goBtn.disabled = false;
+            goBtn.textContent = '🔧 지금 합치기';
+            return;
+          }}
+          // Replace card with success bubble.
+          bubble.style.background = '#f0fdf4';
+          bubble.innerHTML =
+            '✅ <b>합쳤어요.</b> ' + data.output + ' 한 파일에 ' +
+            'lifecycle 5종 + evolve 블록이 들어갔어요. 원본 ' +
+            (data.archived || []).length + '개는 .ail/_archive/ 로 ' +
+            '옮겨졌습니다.<div style="margin-top:6px;font-size:11px;' +
+            'color:#16a34a">이제 위 [🚀 지금 배포하기] 카드를 눌러 ' +
+            '배포할 수 있어요.</div>';
+          // Refresh related affordances.
+          await refreshFileTree();
+          await refreshDeployBar();
+          if (typeof updateQuickRunBar === 'function') {{
+            try {{ updateQuickRunBar(); }} catch (e) {{}}
+          }}
+        }} catch (e) {{
+          addError('합치기 네트워크 오류: ' + e.message);
+          goBtn.disabled = false;
+          goBtn.textContent = '🔧 지금 합치기';
+        }}
+      }});
+      row.appendChild(goBtn);
+      row.appendChild(skipBtn);
+      bubble.appendChild(row);
+      turn.appendChild(bubble);
+      thread.appendChild(turn);
+      bundleCard = turn;
+      scrollBottom();
+    }}
+    refreshBundleCTA();
+    setInterval(refreshBundleCTA, 8000);
+
     // After an agent turn that wrote files, re-check deployable
     // status and (if the program is an evolve-server) demote the
     // inline Run widget + surface a chat-thread CTA aimed at the
