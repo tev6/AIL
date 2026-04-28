@@ -63,6 +63,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "inherit_testament",
     "image.embed",
     "email.send",
+    "db.execute", "db.query",
 })
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
@@ -696,6 +697,10 @@ class Executor:
             return self._image_embed(args, kwargs, origin)
         if name == "email.send":
             return self._email_send(args, kwargs, origin)
+        if name == "db.execute":
+            return self._db_execute(args, kwargs, origin)
+        if name == "db.query":
+            return self._db_query(args, kwargs, origin)
         # Defense in depth: _exec_perform's deny-first check should
         # already have caught this. If we reached here, an internal
         # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
@@ -744,6 +749,64 @@ class Executor:
             return self._result_ok("sent", origin)
         except Exception as e:
             return self._result_err(f"email.send failed: {e}", origin)
+
+    def _db_execute(self, args, kwargs, origin):
+        """db.execute(path, sql, params=[]) -> Result[Int]
+
+        Run an INSERT/UPDATE/DELETE/CREATE on a SQLite file.
+        Returns ok(rowcount) on success, error(...) on failure.
+        params can be omitted (no placeholders) or a list of scalar values.
+
+        Foundation for Stoa SQLite migration (v1.66.0). Aristokratic
+        store.write adapter (Arche 2026-04-28 letter 3) will eventually
+        wrap this so a write goes through validate hook → store backend.
+        Until then, callers use db.* directly.
+        """
+        import sqlite3
+        if len(args) < 2:
+            return self._result_err(
+                "db.execute(path, sql, params=[]) — path + sql required", origin)
+        path = str(args[0].value)
+        sql = str(args[1].value)
+        params = list(args[2].value) if len(args) >= 3 and args[2].value else []
+        try:
+            conn = sqlite3.connect(path, timeout=10)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                cur = conn.execute(sql, params)
+                conn.commit()
+                return self._result_ok(cur.rowcount, origin)
+            finally:
+                conn.close()
+        except Exception as e:
+            return self._result_err(f"db.execute failed: {e}", origin)
+
+    def _db_query(self, args, kwargs, origin):
+        """db.query(path, sql, params=[]) -> Result[[[Any]]]
+
+        Run a SELECT on a SQLite file. Returns ok([[col1, col2, ...], ...])
+        as a list of rows where each row is a list of column values.
+        Returns ok([]) for an empty result set. Column names are NOT
+        returned — callers know the SELECT shape they wrote.
+        """
+        import sqlite3
+        if len(args) < 2:
+            return self._result_err(
+                "db.query(path, sql, params=[]) — path + sql required", origin)
+        path = str(args[0].value)
+        sql = str(args[1].value)
+        params = list(args[2].value) if len(args) >= 3 and args[2].value else []
+        try:
+            conn = sqlite3.connect(path, timeout=10)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                cur = conn.execute(sql, params)
+                rows = [list(r) for r in cur.fetchall()]
+                return self._result_ok(rows, origin)
+            finally:
+                conn.close()
+        except Exception as e:
+            return self._result_err(f"db.query failed: {e}", origin)
 
     def _image_embed(self, args, kwargs, origin):
         """Return a markdown image string the chat UI can render inline.

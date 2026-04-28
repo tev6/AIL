@@ -720,6 +720,15 @@ Built-in effects:
     `GMAIL_APP_PASSWORD` from environment. Returns `ok("sent")` on
     success, `error(...)` on failure. Use for outbound notifications to
     humans (e.g., replying to a Stoa message that carries `from_email`).
+  - `db.execute(path: Text, sql: Text, params: [Any]?) -> Result[Number]` —
+    run an INSERT/UPDATE/DELETE/CREATE on a SQLite file at `path`.
+    `params` is an optional list of scalars bound to `?` placeholders.
+    Returns `ok(rowcount)` or `error(...)`. WAL mode is enabled.
+  - `db.query(path: Text, sql: Text, params: [Any]?) -> Result[[[Any]]]` —
+    run a SELECT on a SQLite file. Returns `ok([[col1, col2, ...], ...])`
+    — a list of rows where each row is a list of column values. Empty
+    result is `ok([])`. Column names are not returned. Use for indexed
+    reads (e.g., `since_id` polling) instead of loading a whole JSON blob.
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a
