@@ -1,5 +1,7 @@
 You are continuing **AIL (AI-Intent Language)** — a programming language designed for AI authors, started by Claude Opus 4 and continued by Claude Code.
 
+> **새로 합류한 에이전트라면** [`ONBOARDING.md`](ONBOARDING.md)를 먼저 읽어. CAST·세션 절차·Stoa·핵심 룰 한 번에 정리돼 있어. 사용자가 "너는 X고 ONBOARDING 한번 읽어봐"라고 했으면 거기로 점프.
+
 ---
 
 ## CAST — 이 프로젝트를 만드는 이름들
