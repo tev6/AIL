@@ -1,0 +1,17 @@
+// Smoke test #5 — string pipeline (split, join, map-via-for).
+// Run: ail-rs run 05_pipeline.ail "hello,world,from,ail"
+// Expected: HELLO | WORLD | FROM | AIL
+
+fn upcase_each(parts: List[Text]) -> List[Text] {
+    out = []
+    for p in parts {
+        out = append(out, upper(p))
+    }
+    return out
+}
+
+entry main(text: Text) {
+    parts = split(text, ",")
+    upper_parts = upcase_each(parts)
+    return join(upper_parts, " | ")
+}
