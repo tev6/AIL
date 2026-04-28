@@ -1046,8 +1046,10 @@ def render_authoring_page(
           addAgent(entry.reply, entry.files || [], entry.action || null);
         }}
       }});
-      // If history ends on answer_only (buried run card), re-attach a
-      // run card at the bottom so the user doesn't have to scroll up.
+      // If history ends on answer_only, the most recent run card is
+      // buried above answer_only bubbles. Move it to the bottom so the
+      // user doesn't have to scroll up. Moving (not adding) avoids the
+      // duplicate-card problem that broke auto-fix's .run-card overlay.
       const lastIsRun = lastAgentAction === 'ready_to_run'
         || lastAgentAction === 'ready_to_serve'
         || lastAgentAction === 'ready_to_deploy';
@@ -1055,7 +1057,12 @@ def render_authoring_page(
         && programsForNext[0].parses !== false
         && programsForNext[0].entry_present !== false;
       if (!lastIsRun && hasValidProgram) {{
-        addRunWidget(false);
+        const existingCards = thread.querySelectorAll('.run-card');
+        if (existingCards.length > 0) {{
+          thread.appendChild(existingCards[existingCards.length - 1]);
+        }} else {{
+          addRunWidget(false);
+        }}
       }}
       scrollBottom();
     }}
