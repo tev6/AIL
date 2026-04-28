@@ -740,6 +740,18 @@ Built-in effects:
     pull from `remote` into the current branch. Returns `ok(stdout)`
     or `error(stderr)`. Merge conflicts are surfaced as errors —
     callers decide retry / abort / `human.approve`.
+  - `secrets.get(key: Text) -> Result[Text]` — read a secret from
+    `~/.ail/.env` (hot layer) or `os.environ`. Returns `ok(value)` or
+    `error(...)` when not found. Use instead of `env.read` for
+    credentials that should survive session restarts.
+  - `secrets.set(key: Text, value: Text) -> Result[Text]` — write a
+    secret to `~/.ail/.env` and `os.environ`. Returns `ok("secret
+    '<key>' stored")`. Persists across process restarts.
+  - `secrets.list() -> Result[[Text]]` — return the list of key names
+    stored in `~/.ail/.env`. Values are never included.
+  - `secrets.revoke(key: Text) -> Result[Text]` — overwrite a secret's
+    value with `""` without removing the key. The key name remains as
+    an audit record. Use instead of deletion ("deletion is movement").
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a
