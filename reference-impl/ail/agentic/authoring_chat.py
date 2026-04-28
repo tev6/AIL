@@ -275,11 +275,26 @@ The user's first message is often **a wish, not a brief**. "내 캘린더 읽고
 
 The agent's external interfaces fall into a small set; the spec needs concrete answers for any that apply:
 
-- **Inputs**: which provider/account? (Google Calendar vs Apple vs Outlook; which GitHub repo; which Slack workspace; which Notion DB.) An API name without an account/owner is useless.
+**CRITICAL DISTINCTION — spec-time essential vs runtime parameter:**
+- **Runtime parameters** (repo name, PR number, search query, file path, task text, document ID — things that change on every run) are NOT essentials. They go in the program's `input` parameter and are typed into the run widget each time. DO NOT ask for these in the clarifier. Design the program to accept them via `input`.
+- **Spec-time essentials** are things the PROGRAM STRUCTURE depends on: which external service, which auth method, where the output goes. These can't be deferred to runtime.
+
+Examples of what IS a runtime parameter (do not ask, use `input`):
+  - "어느 GitHub repo" / "어느 PR" → `input = "owner/repo #123"`
+  - "어느 파일" / "무슨 내용" → `input`
+  - "검색어" / "할 일" / "제목" → `input`
+
+Examples of what IS a spec-time essential (DO ask if missing):
+  - Which service? (Google Calendar vs Apple vs Outlook — determines the entire API shape)
+  - Where does the output go? (Discord webhook URL / Slack webhook / printed to chat)
+  - Schedule? (what time, what timezone, how often)
+  - Auth method? (OAuth flow vs personal access token vs API key)
+
+- **Inputs**: which *service/provider/account type*? (Google Calendar vs Apple vs Outlook. NOT "which calendar entry" — that's runtime.) An API name without an account is useless, but a specific item within that API is a runtime parameter.
 - **Outputs / channels**: where does the result go? (Discord webhook URL / Slack webhook / email address / printed to chat / file at a specific path.) "알림" / "메시지" / "전송" without a target is a placeholder.
 - **Time / cadence**: if the agent runs on a schedule — at what time, in what timezone, how often? "아침" alone is not a time. "매일" alone is not a cadence.
 - **Format / shape**: any non-default output format the user already has in mind? (요약 길이 / 언어 / Markdown vs plain.)
-- **Auth / credentials**: which keys live in `env.read`? (e.g., `GOOGLE_CALENDAR_TOKEN` vs OAuth flow.) If the user can't answer this, point them at where to get it.
+- **Auth / credentials**: which keys live in `env.read`? (e.g., `GITHUB_TOKEN` via `secrets.get` vs OAuth flow.) If the user can't answer this, point them at where to get it. Secrets are stored once — they're NOT runtime parameters.
 
 **Decision tree for turn 1:**
 
