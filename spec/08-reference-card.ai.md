@@ -729,6 +729,17 @@ Built-in effects:
     — a list of rows where each row is a list of column values. Empty
     result is `ok([])`. Column names are not returned. Use for indexed
     reads (e.g., `since_id` polling) instead of loading a whole JSON blob.
+  - `git.commit(repo_path: Text, message: Text, paths: [Text]?) -> Result[Text]` —
+    stage `paths` (or all changes if `None`) in the repo and commit.
+    Returns `ok(commit_sha)` or `error(stderr)`. Auth + user.name come
+    from ambient git config (the agent's own identity).
+  - `git.push(repo_path: Text, remote?: Text, branch?: Text) -> Result[Text]` —
+    push `branch` (or current HEAD) to `remote` (default `"origin"`).
+    Returns `ok(stdout)` or `error(stderr)`.
+  - `git.pull(repo_path: Text, remote?: Text, branch?: Text) -> Result[Text]` —
+    pull from `remote` into the current branch. Returns `ok(stdout)`
+    or `error(stderr)`. Merge conflicts are surfaced as errors —
+    callers decide retry / abort / `human.approve`.
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a

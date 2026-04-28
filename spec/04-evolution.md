@@ -219,6 +219,71 @@ Guarantees:
 
 Same shape as `on_death`. New keyword count = 0.
 
+## 11b. Convention — Lifecycle 5 hooks (Arche 2026-04-28)
+
+An evolving server-style agent has a natural life: it is conceived, it
+is born, it lives turn-by-turn, it senses the end approaching, it dies.
+Five fn-name conventions formalize each phase. **No new keyword.** A
+hook is recognized by name; an undefined hook is simply skipped. Same
+philosophy as `on_compact` and `on_death`.
+
+```ail
+pure fn on_genesis(testament: Any) -> Any {
+    // BEFORE birth. Inspect the previous generation's testament.
+    // testament is the structured value the prior on_dying produced,
+    // or error(...) if this is the first generation. Decide whether
+    // to inherit, mutate, or fork. Return value is fed to on_birth.
+}
+
+fn on_birth(seed: Any) -> Any {
+    // JUST AFTER birth. Load identity / bonds / will from durable
+    // storage (e.g. perform git.pull on a Mneme repo, then
+    // perform file.read of identity.md). May perform effects.
+    // Return value persists across the agent's life as initial state.
+}
+
+fn on_tick(state: Any) -> Any {
+    // EVERY iteration of the evolve loop. The unit of "doing work":
+    // observe, decide, act, learn. Returns the new state.
+    // This hook is what `evolve ... when ...` triggers.
+}
+
+fn on_dying(reason: Text, history: [Any]) -> Any {
+    // BEFORE death (rollback fired or shutdown imminent). Last
+    // chance to commit self — write what was learned to identity.md /
+    // bonds.md / will.md, then perform git.commit + git.push on the
+    // Mneme repo. Returns the testament: a structured value the next
+    // generation's on_genesis will read.
+}
+
+pure fn on_death(reason: Text, history: [Any]) -> Any {
+    // AFTER death (already in §4 / Physis v0.3). Pure summary that
+    // becomes part of the public ledger. on_dying is for the work
+    // that needs side effects (commit/push); on_death is for the
+    // memorialization that must be reproducible.
+}
+```
+
+Why five and not one big `on_lifecycle`:
+
+- **Phase isolation lets purity be precise.** `on_genesis` reads a
+  testament — pure. `on_dying` writes to git — impure. Mixing them
+  forces the worst of both contracts.
+- **Each phase has different failure semantics.** `on_birth` failing
+  means the agent never starts (caller decides retry). `on_tick`
+  failing is a normal evolve loss event. `on_dying` failing risks losing
+  the testament — runtime must not silently drop it; surface as warning,
+  fall back to dumping `history` raw.
+- **The cycle closes.** Next generation's `on_genesis` reads what this
+  generation's `on_dying` pushed → continuity across deaths. Mneme
+  (Git) is the medium; the hooks are the protocol.
+
+Backwards compatibility: existing programs that define only `on_death`
+continue to work unchanged (the other four hooks are optional).
+Recommended order of adoption: `on_birth` first (just-load-identity),
+then `on_dying` (commit-self-on-shutdown), then `on_genesis` /
+`on_tick` as the agent acquires its own lifecycle needs.
+
 ## 12. What evolution gives up
 
 Evolution requires state — the history, the metrics, the calibrators. A program that relies on evolution cannot be treated as a pure artifact of its source code; its behavior depends on its operating history. This is a real cost. It is accepted because the alternative — code that cannot improve without full human rewrites in a world where its environment shifts weekly — is worse for the problems AIL is meant to solve.
