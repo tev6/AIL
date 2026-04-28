@@ -7,7 +7,7 @@ from .parser import parse
 from .runtime import Executor, ConfidentValue, MockAdapter
 from .runtime.model import ModelAdapter
 
-__version__ = "1.69.0"
+__version__ = "1.69.1"
 
 
 def compile_source(source: str):
@@ -184,8 +184,23 @@ def run(
             if p.exists() and p.is_file():
                 text = p.read_text(encoding="utf-8")
             else:
+                # Field test 2026-04-29 (박상현): `ail run universal_agent.ail`
+                # against a missing file silently fell through to "treat the
+                # filename as source", which then parsed `universal_agent.ail`
+                # as an IDENT and failed deep inside the parser with a
+                # cryptic top-level error. If the arg looks like a path with
+                # an .ail extension, fail loudly instead of pretending it's
+                # source.
+                if source_or_path.endswith(".ail"):
+                    raise FileNotFoundError(
+                        f"AIL source file not found: {source_or_path} "
+                        f"(cwd={Path.cwd()})")
                 text = source_or_path
         except (OSError, ValueError):
+            if source_or_path.endswith(".ail"):
+                raise FileNotFoundError(
+                    f"AIL source file not found: {source_or_path} "
+                    f"(cwd={Path.cwd()})")
             text = source_or_path
     else:
         text = source_or_path
