@@ -1,6 +1,6 @@
 // Smoke test #1 — string + builtin call.
-// Run: ail-rs run 01_hello.ail "world"
-// Expected: HELLO, WORLD!
+// INPUT: world
+// OUTPUT: HELLO, WORLD!
 
 fn shout(s: Text) -> Text {
     return upper("hello, " + s) + "!"

@@ -1,6 +1,6 @@
 # Examples — field-test programs for `ail-rs`
 
-Five small `.ail` programs that exercise the Phase-0 surface. Each file has a header comment with the run command and expected output, so a downloaded binary can be smoke-tested end-to-end without writing any code.
+Five small `.ail` programs that exercise the Phase-0 surface. Each file has machine-readable `// INPUT:` and `// OUTPUT:` directives, so the same files double as the cross-runtime conformance corpus (see `tests/conformance/`). Update one place, both flows stay in sync.
 
 ## Run
 
@@ -33,4 +33,12 @@ done
 | `04_result_attempt.ail`  | `error()` Result envelope, `attempt`/`try` cascade |
 | `05_pipeline.ail`        | `split` + `for` + `append` + `upper` + `join` |
 
-If any output diverges from the expected line in the file header, that's a runtime regression worth investigating — the Python reference is the source of truth, so cross-check with `cd reference-impl && python -m ail run ../rust-impl/examples/<file>.ail "world"`.
+If any output diverges from the `// OUTPUT:` directive, that's a runtime regression. Cross-check against the Python reference (canonical source of truth) and the Go runtime:
+
+```bash
+bash tests/conformance/run.sh rust
+bash tests/conformance/run.sh go
+bash tests/conformance/run.sh python
+```
+
+CI runs all three on every push touching `rust-impl/`, `go-impl/`, `reference-impl/`, or this corpus.
