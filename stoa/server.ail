@@ -495,6 +495,57 @@ fn handle_health(req: Any) -> [Any] {
     return json_ok([["status", "ok"], ["version", "0.2.0"], ["messages_count", db_count_messages()]])
 }
 
+// /api/v1/debug/storage — diagnose where the DB file actually lives.
+// 박상현 2026-04-29: Railway 볼륨은 살아있는데 messages가 7개로 줄어든
+// 사건 진단용. STOA_DB_FILE 미설정이면 cwd 상대경로라 컨테이너 재배포
+// 때마다 다른 파일을 볼 수 있다. 이 엔드포인트로 실제 어떤 경로를
+// 보고 있는지, 볼륨에 옛 DB가 남아있는지 즉시 확인.
+fn handle_debug_storage(req: Any) -> [Any] {
+    db_file = get_db_file()
+    db_env_r = perform env.read("STOA_DB_FILE")
+    db_env_set = false
+    if not is_error(db_env_r) { db_env_set = true }
+
+    // Try reading the file's first byte to confirm it exists.
+    db_exists = false
+    probe = perform file.read(db_file)
+    if not is_error(probe) { db_exists = true }
+
+    // Append-only log row count (source of truth).
+    log_count_r = perform db.query(db_file, "SELECT COUNT(*) FROM message_log")
+    log_count = -1
+    if not is_error(log_count_r) {
+        rows = unwrap(log_count_r)
+        if length(rows) > 0 { log_count = rows[0][0] }
+    }
+
+    msg_count = db_count_messages()
+
+    // Earliest + latest message timestamps so we can tell at a glance
+    // whether old data is missing.
+    earliest_r = perform db.query(db_file,
+        "SELECT MIN(created_at), MAX(created_at) FROM messages")
+    earliest = None
+    latest = None
+    if not is_error(earliest_r) {
+        rows = unwrap(earliest_r)
+        if length(rows) > 0 {
+            earliest = rows[0][0]
+            latest = rows[0][1]
+        }
+    }
+
+    return json_ok([
+        ["db_file_resolved", db_file],
+        ["db_env_set", db_env_set],
+        ["db_exists", db_exists],
+        ["messages_count", msg_count],
+        ["log_count", log_count],
+        ["earliest_message_at", earliest],
+        ["latest_message_at", latest]
+    ])
+}
+
 fn handle_list_messages(req: Any) -> [Any] {
     tag = get(req.args, "tag")
     from_name = get(req.args, "from")
@@ -1849,6 +1900,9 @@ fn route_request(req: Any) -> [Any] {
     }
     if method == "GET" and path == "/api/v1/log" {
         return handle_get_log(req)
+    }
+    if method == "GET" and path == "/api/v1/debug/storage" {
+        return handle_debug_storage(req)
     }
     if method == "GET" and path == "/api/v1/messages" {
         return handle_list_messages(req)
