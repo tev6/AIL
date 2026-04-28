@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use ail::{AnthropicAdapter, Evaluator, Lexer, Parser};
+use ail::{AnthropicAdapter, Evaluator, Lexer, OllamaAdapter, Parser};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -126,13 +126,20 @@ fn cmd_run(prog: &str, args: &[String]) -> ExitCode {
         }
     };
 
-    // Adapter: explicit `--adapter` wins. Otherwise, auto-enable Anthropic
-    // when the program declares an `intent` AND ANTHROPIC_API_KEY is set —
-    // this mirrors Python's "the intent works if you have a key" UX so a
-    // user who follows the install one-liner doesn't have to learn flags.
+    // Adapter resolution. Explicit `--adapter` wins. Otherwise auto-detect
+    // when the program has `intent` declarations:
+    //   1. ANTHROPIC_API_KEY set → anthropic (cloud, billed)
+    //   2. OLLAMA_MODEL set      → ollama    (local, free)
+    //   3. otherwise              → no adapter; intent calls error
+    // Mirrors Python's "the intent works if you have a key" UX so a user
+    // following the install one-liner doesn't have to learn flags.
     let resolved_adapter = adapter_name.or_else(|| {
-        if !program.intents.is_empty() && std::env::var_os("ANTHROPIC_API_KEY").is_some() {
+        if program.intents.is_empty() {
+            None
+        } else if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
             Some("anthropic".into())
+        } else if std::env::var_os("OLLAMA_MODEL").is_some() {
+            Some("ollama".into())
         } else {
             None
         }
@@ -148,8 +155,15 @@ fn cmd_run(prog: &str, args: &[String]) -> ExitCode {
                     return ExitCode::from(1);
                 }
             },
+            "ollama" => match OllamaAdapter::from_env() {
+                Ok(a) => evaluator.adapter = Some(Box::new(a)),
+                Err(e) => {
+                    eprintln!("{prog}: {e}");
+                    return ExitCode::from(1);
+                }
+            },
             other => {
-                eprintln!("{prog}: unknown --adapter {other:?} (supported: anthropic)");
+                eprintln!("{prog}: unknown --adapter {other:?} (supported: anthropic, ollama)");
                 return ExitCode::from(2);
             }
         }
@@ -175,6 +189,10 @@ fn usage(prog: &str) {
     eprintln!();
     eprintln!("Adapters:");
     eprintln!("  --adapter anthropic    Anthropic Messages API (needs ANTHROPIC_API_KEY)");
-    eprintln!("                         Auto-enabled when a program declares `intent`");
-    eprintln!("                         and ANTHROPIC_API_KEY is set.");
+    eprintln!("  --adapter ollama       Local Ollama server (default: http://localhost:11434,");
+    eprintln!("                         model: $OLLAMA_MODEL or ail-coder:7b-v3)");
+    eprintln!();
+    eprintln!("Auto-detection (when --adapter is omitted and the program has `intent`):");
+    eprintln!("  ANTHROPIC_API_KEY set → anthropic (cloud, billed)");
+    eprintln!("  OLLAMA_MODEL      set → ollama    (local, free)");
 }

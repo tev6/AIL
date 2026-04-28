@@ -82,14 +82,23 @@ Adapters:
 
 | Name        | Triggers when…                                             |
 |-------------|------------------------------------------------------------|
-| `anthropic` | `--adapter anthropic`, **or** the program declares `intent` and `ANTHROPIC_API_KEY` is set in the environment |
+| `anthropic` | `--adapter anthropic`, **or** program declares `intent` and `ANTHROPIC_API_KEY` is set |
+| `ollama`    | `--adapter ollama`, **or** program declares `intent` and `OLLAMA_MODEL` is set         |
 
-Anthropic adapter:
+Auto-detection precedence (when `--adapter` omitted and the program declares `intent`): ANTHROPIC_API_KEY → OLLAMA_MODEL → no adapter (intent calls error).
+
+**Anthropic adapter** — Messages API.
 - Reads `ANTHROPIC_API_KEY` from env.
 - Subscription tokens (`sk-ant-oat…`, issued by `claude setup-token` for Pro/Max plans) are sent via `Authorization: Bearer …`.
 - Standard API keys (`sk-ant-api…`) use `X-Api-Key`.
 - Detection is by token prefix — no separate env var required.
-- Outbound HTTP shells out to `curl` to keep the binary minimal (no native HTTP stack).
+
+**Ollama adapter** — local model server, no API cost, works offline.
+- `OLLAMA_MODEL` (default: `ail-coder:7b-v3` — the project's canonical fine-tuned model).
+- `OLLAMA_HOST`  (default: `http://localhost:11434`).
+- Quick start: `ollama serve & ollama pull ail-coder:7b-v3 && OLLAMA_MODEL=ail-coder:7b-v3 ail-rs run program.ail`.
+
+Both adapters use `curl` for HTTP transport so the binary stays minimal — no native HTTP stack pulled in.
 
 Example:
 ```
@@ -111,8 +120,9 @@ HELLO!
 4. **Single-binary release pipeline** ✅ (workflow_dispatch + tag-driven)
 5. **Cross-runtime conformance suite** ✅ (same `.ail` programs run on Python / Go / Rust, results compared)
 6. **`intent` Anthropic adapter** ✅ (Messages API + OAuth subscription tokens)
-7. **Ollama / OpenAI adapters** — for local models and other vendors.
-8. **`evolve`-as-server** — match Python runtime's HTTP/process model.
-9. **Provenance** — `origin_of` / `lineage_of` / `has_intent_origin`.
+7. **`intent` Ollama adapter** ✅ (local models, offline, free)
+8. **OpenAI adapter** — covers other-vendor models.
+9. **`evolve`-as-server** — match Python runtime's HTTP/process model.
+10. **Provenance** — `origin_of` / `lineage_of` / `has_intent_origin`.
 
 The Python runtime (`reference-impl/`) remains the canonical spec source. Rust catches up subset by subset.
