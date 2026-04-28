@@ -740,6 +740,73 @@ def test_authoring_tree_endpoint_lists_project_files_with_captions(tmp_path):
     assert entries["view.html"]["kind"] == "html"
 
 
+def test_authoring_bundle_detect_and_run_endpoints(tmp_path):
+    """GUI-first bundle path. /detect surfaces the candidates when 2+
+    lifecycle files exist with no evolve block; /run executes the
+    bundler, archives originals, and sets active_program. Telos
+    2026-04-29."""
+    import json as _json
+    proj = Project.init(tmp_path / "bundle_e2e")
+    (proj.root / "on_birth.ail").write_text(
+        'entry main(input: Text) { return "born" }\n',
+        encoding="utf-8",
+    )
+    (proj.root / "on_tick.ail").write_text(
+        'entry main(input: Text) { return "tick" }\n',
+        encoding="utf-8",
+    )
+    port = _free_port()
+    t = threading.Thread(
+        target=serve_project,
+        kwargs={"project": proj, "port": port, "watch": False},
+        daemon=True,
+    )
+    t.start()
+    _wait_listening(port)
+
+    # /detect — 2 candidates, no evolve.
+    with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/authoring-bundle/detect", timeout=2) as r:
+        d = _json.loads(r.read().decode("utf-8"))
+    assert d["count"] == 2
+    assert d["can_bundle"] is True
+    assert d["has_evolve"] is False
+    assert sorted(d["candidates"]) == ["on_birth.ail", "on_tick.ail"]
+
+    # /run — bundle them, originals move to _archive/.
+    body = _json.dumps({}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/authoring-bundle/run",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=4) as r:
+        d = _json.loads(r.read().decode("utf-8"))
+    assert d["ok"] is True
+    assert d["output"] == "bundle_e2e.ail"
+    assert sorted(d["used_files"]) == ["on_birth.ail", "on_tick.ail"]
+    assert sorted(d["archived"]) == ["on_birth.ail", "on_tick.ail"]
+
+    # File system reflects: bundled output + archived originals.
+    assert (proj.root / "bundle_e2e.ail").is_file()
+    assert (proj.state_dir / "_archive" / "on_birth.ail").is_file()
+    assert (proj.state_dir / "_archive" / "on_tick.ail").is_file()
+    assert not (proj.root / "on_birth.ail").exists()
+    assert not (proj.root / "on_tick.ail").exists()
+    # active_program marker updated to the bundled file.
+    marker = (proj.state_dir / "active_program").read_text(encoding="utf-8")
+    assert marker.strip() == "bundle_e2e.ail"
+
+    # /detect now reports has_evolve=True (bundled file has evolve block)
+    # → can_bundle should drop to False.
+    with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/authoring-bundle/detect", timeout=2) as r:
+        d2 = _json.loads(r.read().decode("utf-8"))
+    assert d2["has_evolve"] is True
+    assert d2["can_bundle"] is False
+
+
 def test_github_api_hint_for_cross_repo_pr_failures(tmp_path):
     """Field-test pattern: autonomous GitHub PR workflow kept
     re-discovering that (a) 404 on POST git/refs means fork-first,

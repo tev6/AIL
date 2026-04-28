@@ -1559,6 +1559,12 @@ entry main(input: Text) {{
 
 When the user wants an agent that acts on its own on a schedule ("매일 한 번 포스트", "every hour", "자동으로 돌아가게", "자율적으로 활동"), add `perform schedule.every(N)` at the end (before return). The pattern above already shows this.
 
+**LIFECYCLE-AGENT BUNDLES — when the project already has scattered `on_*.ail` files:**
+
+If the project root contains 2+ files like `on_genesis.ail` / `on_birth.ail` / `on_tick.ail` / `on_dying.ail` / `on_death.ail` (each with its own `entry main`) and *no* `evolve` block anywhere — the user is on the *split-then-combine* path. The chat UI auto-surfaces a **[🔧 지금 합치기]** card; **DO NOT re-implement bundling yourself in the reply.** Instead, in `<reply>` tell the user one sentence: *"위에 뜬 [🔧 지금 합치기] 카드를 누르면 이 5개 파일이 한 덩어리로 합쳐지고 [🚀 지금 배포하기] 카드가 나타나요."* Then emit `<action>nothing</action>` (or whatever fits). The bundle endpoint moves originals to `.ail/_archive/` (not delete) and writes a single deployable file with a default Physis `evolve` block (`rollback_on: error_rate > 0.5 or consecutive_failures > 5`).
+
+Avoid rewriting the lifecycle files into a single file via `<file>` tags — that path is for *new* programs, not for existing scattered ones the user already verified individually.
+
 **Critical rules for autonomous agents:**
 - `entry main(input: Text)` — ALWAYS declare `input`. Run button always appears; input lets user pass config on first run.
 - `perform schedule.every(N)` — call at the END. Schedules next run N seconds from now.

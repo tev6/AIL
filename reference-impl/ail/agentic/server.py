@@ -475,6 +475,45 @@ def _make_handler(project: Project, serve_only: bool = False):
                 self.wfile.write(payload)
                 return
 
+            if self.path in ("/authoring-bundle/detect",
+                             "/authoring-bundle-detect"):
+                # Telos 2026-04-29: surface scattered-lifecycle-files
+                # situations so the chat UI can render an inline
+                # [🔧 합치기] CTA. Returns the list of candidate files
+                # (e.g. on_birth.ail / on_tick.ail / ...) and whether
+                # the project also has an `evolve` block somewhere
+                # (skip CTA — already deployable).
+                import json as _json
+                from ..bundle import detect_lifecycle_files
+                candidates = detect_lifecycle_files(project.root)
+                # Detect existing evolve block — if present, don't push
+                # the CTA (project is already deploy-shaped).
+                has_evolve = False
+                try:
+                    for p in project.root.iterdir():
+                        if (
+                            p.is_file()
+                            and p.suffix == ".ail"
+                            and "evolve " in p.read_text(encoding="utf-8")
+                        ):
+                            has_evolve = True
+                            break
+                except OSError:
+                    pass
+                payload_obj = {
+                    "candidates": [p.name for p in candidates],
+                    "count": len(candidates),
+                    "can_bundle": len(candidates) >= 2 and not has_evolve,
+                    "has_evolve": has_evolve,
+                }
+                payload = _json.dumps(payload_obj).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
             if self.path in ("/authoring-schedule/status",
                              "/authoring-schedule-status"):
                 # Scheduler self-throttle status — Telos 2026-04-29.
@@ -834,6 +873,107 @@ def _make_handler(project: Project, serve_only: bool = False):
                 from .process_manager import self_terminate
                 self._send_text(200, "shutting down\n")
                 self_terminate(project)
+                return
+
+            if self.path in ("/authoring-bundle/run",
+                             "/authoring-bundle-run"):
+                # Telos 2026-04-29: GUI-first bundle path. Detects
+                # lifecycle files in the project root, calls the bundle
+                # engine, archives originals to .ail/_archive/ (NOT
+                # delete — user's "내 부품들" feeling intact). Output
+                # filename defaults to <project>.ail.
+                import json as _json
+                from ..bundle import bundle, detect_lifecycle_files
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                raw_body = self.rfile.read(length) if length else b""
+                try:
+                    body = _json.loads(raw_body.decode("utf-8") or "{}")
+                    if not isinstance(body, dict):
+                        body = {}
+                except Exception:
+                    body = {}
+                listen = int(body.get("listen") or 8090)
+                every = int(body.get("every") or 60)
+                output_name = (body.get("output") or "").strip()
+                if not output_name:
+                    output_name = f"{project.root.name}.ail"
+                # Sanitize output_name — no path traversal.
+                if "/" in output_name or "\\" in output_name:
+                    self._send_text(400, "invalid output name\n")
+                    return
+                output_path = project.root / output_name
+
+                candidates = detect_lifecycle_files(project.root)
+                if len(candidates) < 2:
+                    self._send_text(
+                        400,
+                        "no scattered lifecycle files to bundle\n",
+                    )
+                    return
+
+                try:
+                    result = bundle(
+                        candidates,
+                        output=output_path,
+                        listen=listen,
+                        schedule_seconds=every,
+                    )
+                except Exception as e:
+                    import traceback as _tb, sys as _sys
+                    _tb.print_exc(file=_sys.stderr)
+                    self._send_text(500, f"bundle failed: {e}\n")
+                    return
+
+                # Archive originals (move, not delete).
+                archive_dir = project.state_dir / "_archive"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archived: list[str] = []
+                for p in candidates:
+                    if p.name == output_name:
+                        continue  # don't archive the file we just wrote
+                    target = archive_dir / p.name
+                    try:
+                        # If target exists, suffix with timestamp.
+                        if target.exists():
+                            import time as _time
+                            stem = p.stem
+                            target = archive_dir / (
+                                f"{stem}-{int(_time.time())}{p.suffix}"
+                            )
+                        p.rename(target)
+                        archived.append(p.name)
+                    except OSError:
+                        pass
+
+                project.append_ledger({
+                    "event": "bundle_applied",
+                    "output": output_name,
+                    "used_files": result.used_files,
+                    "archived": archived,
+                    "listen": listen,
+                })
+
+                # Set the new file as the active program so the chat /
+                # quick-run-bar surfaces it immediately.
+                try:
+                    (project.state_dir / "active_program").write_text(
+                        output_name, encoding="utf-8")
+                except OSError:
+                    pass
+
+                payload_obj = {
+                    "ok": True,
+                    "output": output_name,
+                    "used_files": result.used_files,
+                    "archived": archived,
+                }
+                payload = _json.dumps(payload_obj).encode("utf-8")
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
                 return
 
             if self.path in ("/authoring-schedule/resume",
