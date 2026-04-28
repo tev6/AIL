@@ -286,12 +286,19 @@ impl<'src> Lexer<'src> {
     }
 }
 
+// Non-ASCII bytes (>= 0x80) are always part of a UTF-8 multi-byte
+// sequence. Treating them as identifier characters lets the lexer pass
+// through Korean, em-dashes, and other characters that show up in
+// `goal:` prose blocks and natural-language string literals — matching
+// Go's `unicode.IsLetter` behaviour. The resulting ident value remains
+// valid UTF-8 because we only ever start consuming on a leading byte
+// and stop on an ASCII boundary (whitespace, punctuation, EOF).
 fn is_ident_start(ch: u8) -> bool {
-    ch.is_ascii_alphabetic() || ch == b'_'
+    ch.is_ascii_alphabetic() || ch == b'_' || ch >= 0x80
 }
 
 fn is_ident_continue(ch: u8) -> bool {
-    ch.is_ascii_alphanumeric() || ch == b'_'
+    ch.is_ascii_alphanumeric() || ch == b'_' || ch >= 0x80
 }
 
 #[cfg(test)]

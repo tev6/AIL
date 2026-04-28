@@ -11,7 +11,7 @@
 // a warning. It's a demo, not a regression test.
 
 intent translate(prompt: Text) -> Text {
-    goal: produce a single-line answer to the prompt — natural and concise
+    goal: produce a single-line answer to the prompt, natural and concise
     constraints {
         no_quotes
         no_explanations
