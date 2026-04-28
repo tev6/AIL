@@ -4,6 +4,22 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.66.1 — 2026-04-28 (Anthropic OAuth 구독 토큰 지원)
+
+아르케 긴급 요청. hyun06000의 Anthropic API budget이 떨어져
+Pro/Max 구독 OAuth 토큰으로 에이전트가 작동해야 함.
+
+`ANTHROPIC_API_KEY`가 `sk-ant-oat01` 접두사면 OAuth 구독 토큰으로
+판정 → SDK의 `auth_token=` (`Authorization: Bearer …` 헤더)로 라우팅.
+기존 `sk-ant-api…` 키는 여전히 `api_key=` (`X-Api-Key`) 사용.
+
+별도 env var 없이 접두사로 자동 감지 — 사용자는 `claude setup-token`
+으로 토큰 받아 그대로 `ANTHROPIC_API_KEY`에 넣으면 됨.
+
+회귀 테스트 6개 (`tests/test_anthropic_oauth.py`).
+
+---
+
 ## v1.66.0 — 2026-04-28 (`db.execute` / `db.query` effect + Stoa SQLite 마이그레이션)
 
 **Stoa OOM 근본 해결.** v1.65.x 임시 fix(2000개 캡)는 데이터 유실
