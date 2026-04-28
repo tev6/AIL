@@ -251,6 +251,24 @@ def render_authoring_page(
     .run-result .diag {{ margin-top: 8px; padding-top: 8px;
       border-top: 1px solid #fecaca; font-size: 12px;
       color: #6b7280; white-space: pre-wrap; }}
+    /* Persistent run bar — always visible above the composer when a
+       valid program exists. Separate from the chat-thread run cards so
+       the user never has to scroll up to find a buried run card. */
+    #quick-run-bar {{ display: none; padding: 10px 0 6px;
+      border-top: 1px solid #e5e7eb; }}
+    #quick-run-bar .qr-row {{ display: flex; gap: 8px; align-items: flex-end; }}
+    #quick-run-bar textarea {{ flex: 1; font-family: inherit; font-size: 14px;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: #fff; color: var(--fg); resize: none; line-height: 1.4;
+      max-height: 100px; }}
+    #quick-run-bar textarea:focus {{ outline: 2px solid #111; outline-offset: -1px; }}
+    #quick-run-bar .qr-btn {{ font-family: inherit; font-size: 13px;
+      font-weight: 600; padding: 8px 16px; border-radius: 8px; border: 0;
+      background: var(--accent); color: #fff; cursor: pointer;
+      white-space: nowrap; }}
+    #quick-run-bar .qr-btn:disabled {{ opacity: 0.5; cursor: wait; }}
+    #quick-run-bar .qr-label {{ font-size: 11px; color: #6b7280;
+      margin-bottom: 4px; }}
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
       background: var(--bg); border-top: 1px solid var(--border);
       display: flex; gap: 8px; align-items: flex-end;
@@ -412,6 +430,15 @@ def render_authoring_page(
       </div>
     </div>
 
+    <div id="quick-run-bar">
+      <div class="qr-label" id="qr-label">▶ 실행 / Run</div>
+      <div class="qr-row">
+        <textarea id="qr-input" rows="1"
+                  placeholder="입력값을 여기에 입력하고 실행하세요"
+                  autocomplete="off" spellcheck="false"></textarea>
+        <button class="qr-btn" id="qr-btn" type="button">실행</button>
+      </div>
+    </div>
     <form class="composer" id="composer" onsubmit="return onSend(event);">
       <div id="attach-strip" style="display:none;flex-wrap:wrap;gap:.4rem;width:100%;padding:.4rem 0"></div>
       <textarea id="msg" rows="1"
@@ -933,7 +960,7 @@ def render_authoring_page(
           sessionTotalTokens = data.session_total_tokens;
           renderTokenWidget();
         }}
-        if (Array.isArray(data.programs)) programsForNext = data.programs;
+        if (Array.isArray(data.programs)) {{ programsForNext = data.programs; updateQuickRunBar(); }}
         if (data.active_program) activeProgramForNext = data.active_program;
         addAgent(data.reply || '(empty)', data.files || [], data.action || null);
         // Tag the auto-fix reply bubble visually so user knows THIS
@@ -1066,6 +1093,8 @@ def render_authoring_page(
       }}
       scrollBottom();
     }}
+    // Show quick-run bar after initial render (also covers empty history).
+    updateQuickRunBar();
 
     msgEl.addEventListener('input', () => {{
       msgEl.style.height = 'auto';
@@ -1089,6 +1118,74 @@ def render_authoring_page(
         thread.scrollTop = thread.scrollHeight;
       }});
     }}
+
+    // Quick-run bar: persistent input+button above the composer.
+    // Always visible when a valid program exists, regardless of chat
+    // history state. Solves "buried run card" for non-developers.
+    const qrBar = document.getElementById('quick-run-bar');
+    const qrInput = document.getElementById('qr-input');
+    const qrBtn = document.getElementById('qr-btn');
+    const qrLabel = document.getElementById('qr-label');
+
+    function updateQuickRunBar() {{
+      const prog = programsForNext && programsForNext.length > 0
+        ? programsForNext[0] : null;
+      const valid = prog && prog.parses !== false && prog.entry_present !== false;
+      if (!valid) {{ qrBar.style.display = 'none'; return; }}
+      qrBar.style.display = 'block';
+      const hint = prog.input_hint || '';
+      const usesInput = prog.input_used !== false;
+      qrInput.style.display = usesInput ? '' : 'none';
+      if (hint) qrInput.placeholder = hint;
+      qrLabel.textContent = (prog.purpose || '▶ 실행 / Run');
+      // auto-resize
+      qrInput.style.height = 'auto';
+      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
+    }}
+
+    qrInput.addEventListener('input', () => {{
+      qrInput.style.height = 'auto';
+      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
+    }});
+
+    qrBtn.addEventListener('click', async () => {{
+      const prog = programsForNext && programsForNext.length > 0
+        ? programsForNext[0] : null;
+      if (!prog) return;
+      qrBtn.disabled = true;
+      qrBtn.textContent = '실행 중…';
+      const runInput = prog.input_used !== false ? qrInput.value : '';
+      try {{
+        const r = await fetch('/authoring-run', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{
+            input: runInput,
+            program: prog.name,
+          }}),
+        }});
+        const data = await r.json();
+        addRunResult({{
+          kind: 'run_result',
+          input: runInput,
+          ok: data.ok,
+          value: data.value || '',
+          error: data.error || '',
+          diagnostic: data.diagnostic || '',
+        }});
+        scrollBottom();
+        if (data.input_used !== undefined) {{
+          programsForNext[0] = {{...programsForNext[0], input_used: data.input_used}};
+          updateQuickRunBar();
+        }}
+      }} catch(e) {{
+        addRunResult({{kind:'run_result',input:runInput,ok:false,value:'',error:String(e),diagnostic:''}});
+        scrollBottom();
+      }} finally {{
+        qrBtn.disabled = false;
+        qrBtn.textContent = '실행';
+      }}
+    }});
 
     function addUser(text, attachments) {{
       const turn = document.createElement('div');
@@ -1396,7 +1493,7 @@ def render_authoring_page(
             sessionTotalTokens = data.session_total_tokens;
             renderTokenWidget();
           }}
-          if (Array.isArray(data.programs)) programsForNext = data.programs;
+          if (Array.isArray(data.programs)) {{ programsForNext = data.programs; updateQuickRunBar(); }}
           if (data.active_program) activeProgramForNext = data.active_program;
           addAgent(data.reply || '(empty)', data.files || [],
                    data.action || null);
@@ -2336,6 +2433,7 @@ def render_authoring_page(
         }}
         if (Array.isArray(data.programs)) {{
           programsForNext = data.programs;
+          updateQuickRunBar();
         }}
         if (data.active_program) {{
           activeProgramForNext = data.active_program;
