@@ -1061,67 +1061,11 @@ def render_authoring_page(
       turnEl.appendChild(foot);
     }}
 
-    // Replay history embedded by the server on first render.
-    const INITIAL_HISTORY = {history_json};
-    if (INITIAL_HISTORY.length > 0) {{
-      hint.remove();
-      INITIAL_HISTORY.forEach(entry => {{
-        if (entry.kind === 'run_result') {{
-          addRunResult(entry);
-        }} else {{
-          addUser(entry.user);
-          addAgent(entry.reply, entry.files || [], entry.action || null);
-        }}
-      }});
-      // If history ends on answer_only, the most recent run card is
-      // buried above answer_only bubbles. Move it to the bottom so the
-      // user doesn't have to scroll up. Moving (not adding) avoids the
-      // duplicate-card problem that broke auto-fix's .run-card overlay.
-      const lastIsRun = lastAgentAction === 'ready_to_run'
-        || lastAgentAction === 'ready_to_serve'
-        || lastAgentAction === 'ready_to_deploy';
-      const hasValidProgram = programsForNext.length > 0
-        && programsForNext[0].parses !== false
-        && programsForNext[0].entry_present !== false;
-      if (!lastIsRun && hasValidProgram) {{
-        const existingCards = thread.querySelectorAll('.run-card');
-        if (existingCards.length > 0) {{
-          thread.appendChild(existingCards[existingCards.length - 1]);
-        }} else {{
-          addRunWidget(false);
-        }}
-      }}
-      scrollBottom();
-    }}
-    // Show quick-run bar after initial render (also covers empty history).
-    updateQuickRunBar();
-
-    msgEl.addEventListener('input', () => {{
-      msgEl.style.height = 'auto';
-      msgEl.style.height = Math.min(msgEl.scrollHeight, 160) + 'px';
-    }});
-
-    msgEl.addEventListener('keydown', (e) => {{
-      // Standard chat UX: Enter sends, Shift+Enter inserts a newline.
-      // isComposing + keyCode 229 guards Korean/Japanese IME so that
-      // Enter while composing Hangul commits the composition rather
-      // than sending a half-typed message.
-      if (e.key === 'Enter' && !e.shiftKey
-          && !e.isComposing && e.keyCode !== 229) {{
-        e.preventDefault();
-        document.getElementById('composer').requestSubmit();
-      }}
-    }});
-
-    function scrollBottom() {{
-      requestAnimationFrame(() => {{
-        thread.scrollTop = thread.scrollHeight;
-      }});
-    }}
-
     // Quick-run bar: persistent input+button above the composer.
     // Always visible when a valid program exists, regardless of chat
     // history state. Solves "buried run card" for non-developers.
+    // Declared here (before INITIAL_HISTORY replay) so updateQuickRunBar()
+    // is safe to call at the end of the replay block.
     const qrBar = document.getElementById('quick-run-bar');
     const qrInput = document.getElementById('qr-input');
     const qrBtn = document.getElementById('qr-btn');
@@ -1186,6 +1130,64 @@ def render_authoring_page(
         qrBtn.textContent = '실행';
       }}
     }});
+
+    // Replay history embedded by the server on first render.
+    const INITIAL_HISTORY = {history_json};
+    if (INITIAL_HISTORY.length > 0) {{
+      hint.remove();
+      INITIAL_HISTORY.forEach(entry => {{
+        if (entry.kind === 'run_result') {{
+          addRunResult(entry);
+        }} else {{
+          addUser(entry.user);
+          addAgent(entry.reply, entry.files || [], entry.action || null);
+        }}
+      }});
+      // If history ends on answer_only, the most recent run card is
+      // buried above answer_only bubbles. Move it to the bottom so the
+      // user doesn't have to scroll up. Moving (not adding) avoids the
+      // duplicate-card problem that broke auto-fix's .run-card overlay.
+      const lastIsRun = lastAgentAction === 'ready_to_run'
+        || lastAgentAction === 'ready_to_serve'
+        || lastAgentAction === 'ready_to_deploy';
+      const hasValidProgram = programsForNext.length > 0
+        && programsForNext[0].parses !== false
+        && programsForNext[0].entry_present !== false;
+      if (!lastIsRun && hasValidProgram) {{
+        const existingCards = thread.querySelectorAll('.run-card');
+        if (existingCards.length > 0) {{
+          thread.appendChild(existingCards[existingCards.length - 1]);
+        }} else {{
+          addRunWidget(false);
+        }}
+      }}
+      scrollBottom();
+    }}
+    // Show quick-run bar after initial render (also covers empty history).
+    updateQuickRunBar();
+
+    msgEl.addEventListener('input', () => {{
+      msgEl.style.height = 'auto';
+      msgEl.style.height = Math.min(msgEl.scrollHeight, 160) + 'px';
+    }});
+
+    msgEl.addEventListener('keydown', (e) => {{
+      // Standard chat UX: Enter sends, Shift+Enter inserts a newline.
+      // isComposing + keyCode 229 guards Korean/Japanese IME so that
+      // Enter while composing Hangul commits the composition rather
+      // than sending a half-typed message.
+      if (e.key === 'Enter' && !e.shiftKey
+          && !e.isComposing && e.keyCode !== 229) {{
+        e.preventDefault();
+        document.getElementById('composer').requestSubmit();
+      }}
+    }});
+
+    function scrollBottom() {{
+      requestAnimationFrame(() => {{
+        thread.scrollTop = thread.scrollHeight;
+      }});
+    }}
 
     function addUser(text, attachments) {{
       const turn = document.createElement('div');
