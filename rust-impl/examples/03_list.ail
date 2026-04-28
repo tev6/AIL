@@ -1,0 +1,16 @@
+// Smoke test #3 — list, for-loop, accumulator, get-sugar.
+// Run: ail-rs run 03_list.ail
+// Expected: 30
+
+fn sum_squares(xs: List[Number]) -> Number {
+    total = 0
+    for x in xs {
+        total = total + x * x
+    }
+    return total
+}
+
+entry main() {
+    // 1*1 + 2*2 + 3*3 + 4*4 = 30
+    return sum_squares([1, 2, 3, 4])
+}
