@@ -801,12 +801,23 @@ def test_looks_like_error_catches_self_reported_x_mark(tmp_path):
     """hyun06000 field test 2026-04-24: a program caught an inner
     parse_json failure, logged '❌ 가이드 분석 실패' and continued
     happily. _looks_like_error missed it → ok=true → auto-fix never
-    fired. New signal: any line starting with ❌ in the return string
-    counts as self-reported error."""
+    fired. ❌ at line start in a *multi-line* return string counts as
+    self-reported error.
+
+    Updated 2026-04-28 (agent.py:99-110, hyun06000 field test): a lone
+    ❌ on the first AND only line is a user-facing "please do X" prompt
+    (e.g., GITHUB_TOKEN missing) — not a program bug. Treating it as
+    an error sent the agent into an infinite auto-fix loop. So a
+    single-line ❌ does NOT trip; multi-line or non-first-line ❌ does.
+    """
     from ail.agentic.agent import _looks_like_error
+    # Multi-line with ❌ inside → error.
     assert _looks_like_error(
         "=== step log ===\n✓ A\n❌ B failed\n✓ C\n")
-    assert _looks_like_error("❌ only line")
+    # ❌ as second-or-later line → error (mid-pipeline failure).
+    assert _looks_like_error("step one ok\n❌ step two failed")
+    # Lone single-line ❌ → user-facing prompt, NOT error.
+    assert not _looks_like_error("❌ only line")
     # Plain success should NOT trip.
     assert not _looks_like_error("✓ A\n✓ B\n✓ C\n")
     # ❌ in the middle of a line (not at line start) is prose, not a
