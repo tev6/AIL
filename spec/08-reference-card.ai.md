@@ -763,6 +763,19 @@ Built-in effects:
     pull from `remote` into the current branch. Returns `ok(stdout)`
     or `error(stderr)`. Merge conflicts are surfaced as errors —
     callers decide retry / abort / `human.approve`.
+  - `gh.pr_list(repo?: Text, state?: Text, limit?: Number) -> Result[[Record]]` —
+    list pull requests via `gh` CLI. Each record:
+    `number, title, state, headRefName, baseRefName, url, author`.
+    `state` defaults to `"open"`. Errors when `gh` is missing or unauthed.
+  - `gh.pr_view(number: Number, repo?: Text) -> Result[Record]` —
+    view one PR. Record adds `body` to the pr_list shape.
+  - `gh.pr_create(title: Text, body: Text, repo?: Text, base?: Text, head?: Text, draft?: Boolean) -> Result[Text]` —
+    create a PR from `head` into `base`. Returns the PR URL.
+  - `gh.issue_list(repo?: Text, state?: Text, limit?: Number) -> Result[[Record]]` —
+    list issues. Each record: `number, title, state, url, author, labels` (`[Text]`).
+    `gh.*` exists as a named namespace (not generic `process.spawn`)
+    so the ledger keeps "gh.pr_create happened", not "shell happened".
+    For new tools, add a new named effect — do not reach for shell.
   - `secrets.get(key: Text) -> Result[Text]` — read a secret from
     `~/.ail/.env` (hot layer) or `os.environ`. Returns `ok(value)` or
     `error(...)` when not found. Use instead of `env.read` for
