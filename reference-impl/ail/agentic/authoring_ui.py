@@ -200,6 +200,7 @@ def render_authoring_page(
       text-transform: uppercase; letter-spacing: 0.06em;
       color: #047857; margin-bottom: 6px; }}
     .run-result.err .label {{ color: #b91c1c; }}
+    .run-result pre a {{ color: #0e7490; text-decoration: underline; }}
     .run-result pre {{ margin: 0; white-space: pre-wrap;
       word-break: break-word; font-family: ui-monospace,
       SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
@@ -251,6 +252,19 @@ def render_authoring_page(
     .run-result .diag {{ margin-top: 8px; padding-top: 8px;
       border-top: 1px solid #fecaca; font-size: 12px;
       color: #6b7280; white-space: pre-wrap; }}
+    /* Persistent run bar — always visible above the composer when a
+       valid program exists. Separate from the chat-thread run cards so
+       the user never has to scroll up to find a buried run card. */
+    #quick-run-bar {{ display: none; padding: 10px 0 6px;
+      border-top: 1px solid #e5e7eb; }}
+    #quick-run-bar textarea {{ width: 100%; box-sizing: border-box;
+      font-family: inherit; font-size: 14px;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      background: #fff; color: var(--fg); resize: none; line-height: 1.4;
+      max-height: 100px; }}
+    #quick-run-bar textarea:focus {{ outline: 2px solid #111; outline-offset: -1px; }}
+    #quick-run-bar .qr-label {{ font-size: 11px; color: #6b7280;
+      margin-bottom: 4px; }}
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
       background: var(--bg); border-top: 1px solid var(--border);
       display: flex; gap: 8px; align-items: flex-end;
@@ -412,6 +426,12 @@ def render_authoring_page(
       </div>
     </div>
 
+    <div id="quick-run-bar">
+      <div class="qr-label" id="qr-label">▶ 실행 / Run</div>
+      <textarea id="qr-input" rows="1"
+                placeholder="입력값을 적고 Enter (Shift+Enter는 줄바꿈)"
+                autocomplete="off" spellcheck="false"></textarea>
+    </div>
     <form class="composer" id="composer" onsubmit="return onSend(event);">
       <div id="attach-strip" style="display:none;flex-wrap:wrap;gap:.4rem;width:100%;padding:.4rem 0"></div>
       <textarea id="msg" rows="1"
@@ -933,7 +953,7 @@ def render_authoring_page(
           sessionTotalTokens = data.session_total_tokens;
           renderTokenWidget();
         }}
-        if (Array.isArray(data.programs)) programsForNext = data.programs;
+        if (Array.isArray(data.programs)) {{ programsForNext = data.programs; updateQuickRunBar(); }}
         if (data.active_program) activeProgramForNext = data.active_program;
         addAgent(data.reply || '(empty)', data.files || [], data.action || null);
         // Tag the auto-fix reply bubble visually so user knows THIS
@@ -1034,6 +1054,100 @@ def render_authoring_page(
       turnEl.appendChild(foot);
     }}
 
+    // Quick-run bar: persistent input+button above the composer.
+    // Always visible when a valid program exists, regardless of chat
+    // history state. Solves "buried run card" for non-developers.
+    // Declared here (before INITIAL_HISTORY replay) so updateQuickRunBar()
+    // is safe to call at the end of the replay block.
+    const qrBar = document.getElementById('quick-run-bar');
+    const qrInput = document.getElementById('qr-input');
+    const qrLabel = document.getElementById('qr-label');
+
+    function updateQuickRunBar() {{
+      const prog = programsForNext && programsForNext.length > 0
+        ? programsForNext[0] : null;
+      const valid = prog && prog.parses !== false && prog.entry_present !== false;
+      if (!valid) {{ qrBar.style.display = 'none'; return; }}
+      qrBar.style.display = 'block';
+      const hint = prog.input_hint || '';
+      const usesInput = prog.input_used !== false;
+      qrInput.style.display = usesInput ? '' : 'none';
+      if (hint) qrInput.placeholder = hint;
+      qrLabel.textContent = (prog.purpose || '▶ 실행 / Run');
+      // auto-resize
+      qrInput.style.height = 'auto';
+      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
+    }}
+
+    qrInput.addEventListener('input', () => {{
+      qrInput.style.height = 'auto';
+      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
+    }});
+
+    let qrAbortCtrl = null;
+
+    async function runQuickBar() {{
+      if (qrAbortCtrl) {{ return; }}
+      const prog = programsForNext && programsForNext.length > 0
+        ? programsForNext[0] : null;
+      if (!prog) return;
+      qrAbortCtrl = new AbortController();
+      const origLabel = qrLabel.textContent;
+      qrLabel.innerHTML = '▶ 실행 중… <a href="#" id="qr-abort" '
+        + 'style="color:#dc2626;text-decoration:underline;margin-left:8px">'
+        + '■ 중단</a>';
+      const abortLink = document.getElementById('qr-abort');
+      abortLink.addEventListener('click', (e) => {{
+        e.preventDefault();
+        if (qrAbortCtrl) qrAbortCtrl.abort();
+      }});
+      const runInput = prog.input_used !== false ? qrInput.value : '';
+      try {{
+        const r = await fetch('/authoring-run', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{
+            input: runInput,
+            program: prog.name,
+          }}),
+          signal: qrAbortCtrl.signal,
+        }});
+        const data = await r.json();
+        addRunResult({{
+          kind: 'run_result',
+          input: runInput,
+          ok: data.ok,
+          value: data.value || '',
+          error: data.error || '',
+          diagnostic: data.diagnostic || '',
+        }});
+        scrollBottom();
+        if (data.input_used !== undefined) {{
+          programsForNext[0] = {{...programsForNext[0], input_used: data.input_used}};
+          updateQuickRunBar();
+        }}
+      }} catch(e) {{
+        if (e.name !== 'AbortError') {{
+          addRunResult({{kind:'run_result',input:runInput,ok:false,value:'',error:String(e),diagnostic:''}});
+          scrollBottom();
+        }}
+      }} finally {{
+        qrAbortCtrl = null;
+        qrLabel.textContent = origLabel;
+      }}
+    }}
+
+    qrInput.addEventListener('keydown', (e) => {{
+      // Enter runs; Shift+Enter inserts newline. IME guard for Korean
+      // (isComposing / keyCode 229) so completing Hangul commits the
+      // composition instead of triggering a run.
+      if (e.key === 'Enter' && !e.shiftKey
+          && !e.isComposing && e.keyCode !== 229) {{
+        e.preventDefault();
+        runQuickBar();
+      }}
+    }});
+
     // Replay history embedded by the server on first render.
     const INITIAL_HISTORY = {history_json};
     if (INITIAL_HISTORY.length > 0) {{
@@ -1066,6 +1180,8 @@ def render_authoring_page(
       }}
       scrollBottom();
     }}
+    // Show quick-run bar after initial render (also covers empty history).
+    updateQuickRunBar();
 
     msgEl.addEventListener('input', () => {{
       msgEl.style.height = 'auto';
@@ -1396,7 +1512,7 @@ def render_authoring_page(
             sessionTotalTokens = data.session_total_tokens;
             renderTokenWidget();
           }}
-          if (Array.isArray(data.programs)) programsForNext = data.programs;
+          if (Array.isArray(data.programs)) {{ programsForNext = data.programs; updateQuickRunBar(); }}
           if (data.active_program) activeProgramForNext = data.active_program;
           addAgent(data.reply || '(empty)', data.files || [],
                    data.action || null);
@@ -2081,7 +2197,10 @@ def render_authoring_page(
         box.appendChild(md);
       }} else {{
         const pre = document.createElement('pre');
-        pre.textContent = raw;
+        // linkify bare URLs so users can click them. textContent would
+        // strip them to plain text (field test 2026-04-28: "url도 링크
+        // 로 안잡히네"). innerHTML uses linkifyText which escapes first.
+        pre.innerHTML = linkifyText(raw);
         box.appendChild(pre);
       }}
       if (r.diagnostic) {{
@@ -2336,6 +2455,7 @@ def render_authoring_page(
         }}
         if (Array.isArray(data.programs)) {{
           programsForNext = data.programs;
+          updateQuickRunBar();
         }}
         if (data.active_program) {{
           activeProgramForNext = data.active_program;

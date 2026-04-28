@@ -76,3 +76,23 @@ fn rejects_unknown_punct() {
     let err = Lexer::new("a @ b").tokenize().unwrap_err();
     assert!(err.msg.contains('@'));
 }
+
+// 2026-04-28 field bug: lexer rejected `—` (em dash, U+2014) inside an
+// `intent` goal: prose block. Non-ASCII bytes that are part of a UTF-8
+// multi-byte sequence must lex as identifier characters so they flow
+// through goal: prose intact (Go's lexer does this via unicode.IsLetter).
+#[test]
+fn em_dash_inside_text_is_ident() {
+    let toks = Lexer::new("a — b").tokenize().expect("em dash should lex");
+    let kinds: Vec<_> = toks.iter().map(|t| t.kind).collect();
+    assert_eq!(kinds, vec![Tok::Ident, Tok::Ident, Tok::Ident, Tok::Eof]);
+    assert_eq!(toks[1].value, "—");
+}
+
+#[test]
+fn korean_ident_lexes_as_one_token() {
+    let toks = Lexer::new("안녕 hello").tokenize().expect("korean should lex");
+    assert_eq!(toks[0].kind, Tok::Ident);
+    assert_eq!(toks[0].value, "안녕");
+    assert_eq!(toks[1].value, "hello");
+}

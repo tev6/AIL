@@ -1,6 +1,6 @@
 // Smoke test #4 — Result envelope + attempt cascade.
-// Run: ail-rs run 04_result_attempt.ail
-// Expected: 99
+// INPUT:
+// OUTPUT: 99
 
 fn maybe_fail() -> Number {
     return error("first try always fails")
