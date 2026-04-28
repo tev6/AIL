@@ -1,6 +1,6 @@
 // Smoke test #2 — recursion + arithmetic + if/else.
-// Run: ail-rs run 02_arithmetic.ail
-// Expected: 120  (factorial of 5)
+// INPUT:
+// OUTPUT: 120
 
 fn factorial(n: Number) -> Number {
     if n <= 1 {

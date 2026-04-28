@@ -1,0 +1,60 @@
+name: conformance
+
+# Run the same .ail corpus through every available runtime and compare
+# stdout to the expected output declared in each program's header.
+# Divergence between runtimes is the loudest spec-ambiguity signal we have
+# — let CI shout about it on every push.
+
+on:
+  push:
+    branches: [main, dev, tekton]
+    paths:
+      - 'tests/conformance/**'
+      - 'rust-impl/examples/**'
+      - 'rust-impl/**'
+      - 'go-impl/**'
+      - 'reference-impl/**'
+      - '.github/workflows/conformance.yml'
+  pull_request:
+    paths:
+      - 'tests/conformance/**'
+      - 'rust-impl/examples/**'
+      - 'rust-impl/**'
+      - 'go-impl/**'
+      - 'reference-impl/**'
+      - '.github/workflows/conformance.yml'
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-impl
+      - run: cd rust-impl && cargo build --release --bin ail-rs
+      - run: bash tests/conformance/run.sh rust
+
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: cd go-impl && go build -o ail-go .
+      - run: bash tests/conformance/run.sh go
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: cd reference-impl && pip install -e .
+      - run: bash tests/conformance/run.sh python
