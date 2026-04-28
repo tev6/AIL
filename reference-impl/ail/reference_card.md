@@ -222,6 +222,29 @@ entry main(input: Text) {
 Safety damping: if the process dies in < 30 s, the successor is NOT
 auto-spawned (operator intervention required). Max 1000 generations.
 
+### Lifecycle hooks (Arche 2026-04-28)
+
+Five fn-name conventions on top of evolve servers. The runtime checks
+for each by name and calls it if defined; otherwise skips. Same dispatch
+pattern as `on_death` / `on_compact`. State arg is a Record with
+`request_count`, `error_count`, `error_rate`, `generation`, `history`.
+
+```ail
+fn on_genesis(testament: Any)   // once, before loop. testament is Result —
+                                // is_error() == genesis, unwrap() == inherited.
+fn on_birth()                   // once, right after on_genesis.
+fn before_tick(state: Any)      // every request, before the `when` block.
+fn on_tick(state: Any)          // every request, between before_tick and `when`.
+fn after_tick(state: Any)       // every request, after the `when` block.
+```
+
+Order: `on_genesis(testament) → on_birth() → loop[before_tick(state) →
+on_tick(state) → when block → after_tick(state)] → on_dying / on_death`.
+
+Hooks may be `pure fn` or `fn` — declare effects only on the ones that
+need them (e.g. `before_tick` doing inbox poll). A hook that raises is
+logged and ignored; the loop never dies because of a broken hook.
+
 ## STATEMENTS
 
 ```
