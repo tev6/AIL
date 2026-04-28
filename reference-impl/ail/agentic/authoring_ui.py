@@ -267,6 +267,8 @@ def render_authoring_page(
       background: var(--accent); color: #fff; cursor: pointer;
       white-space: nowrap; }}
     #quick-run-bar .qr-btn:disabled {{ opacity: 0.5; cursor: wait; }}
+    #quick-run-bar .qr-btn.running {{ background: #dc2626; }}
+    #quick-run-bar .qr-btn.running:hover {{ background: #b91c1c; }}
     #quick-run-bar .qr-label {{ font-size: 11px; color: #6b7280;
       margin-bottom: 4px; }}
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
@@ -1092,12 +1094,20 @@ def render_authoring_page(
       qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
     }});
 
+    let qrAbortCtrl = null;
+
     qrBtn.addEventListener('click', async () => {{
+      // If a run is in progress, this click is the abort button.
+      if (qrAbortCtrl) {{
+        qrAbortCtrl.abort();
+        return;
+      }}
       const prog = programsForNext && programsForNext.length > 0
         ? programsForNext[0] : null;
       if (!prog) return;
-      qrBtn.disabled = true;
-      qrBtn.textContent = '실행 중…';
+      qrAbortCtrl = new AbortController();
+      qrBtn.textContent = '■ 중단';
+      qrBtn.classList.add('running');
       const runInput = prog.input_used !== false ? qrInput.value : '';
       try {{
         const r = await fetch('/authoring-run', {{
@@ -1107,6 +1117,7 @@ def render_authoring_page(
             input: runInput,
             program: prog.name,
           }}),
+          signal: qrAbortCtrl.signal,
         }});
         const data = await r.json();
         addRunResult({{
@@ -1123,10 +1134,13 @@ def render_authoring_page(
           updateQuickRunBar();
         }}
       }} catch(e) {{
-        addRunResult({{kind:'run_result',input:runInput,ok:false,value:'',error:String(e),diagnostic:''}});
-        scrollBottom();
+        if (e.name !== 'AbortError') {{
+          addRunResult({{kind:'run_result',input:runInput,ok:false,value:'',error:String(e),diagnostic:''}});
+          scrollBottom();
+        }}
       }} finally {{
-        qrBtn.disabled = false;
+        qrAbortCtrl = null;
+        qrBtn.classList.remove('running');
         qrBtn.textContent = '실행';
       }}
     }});

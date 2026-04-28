@@ -95,10 +95,20 @@ def _looks_like_error(value: Any) -> bool:
     if isinstance(value, str):
         if value.startswith("UNWRAP_ERROR"):
             return True
-        for line in value.splitlines():
+        lines = value.splitlines()
+        for i, line in enumerate(lines):
             stripped = line.lstrip()
             if stripped.startswith("❌"):
-                return True
+                # A lone ❌ on the first (and only) line is a user-facing
+                # "please do X" prompt, not a program bug. Auto-fix firing
+                # on it sends the agent into an infinite loop (field-test
+                # 2026-04-28: GITHUB_TOKEN missing → agent loops 5 turns).
+                # Treat it as an error only when there is more content
+                # beyond that first line (a multi-step pipeline reporting
+                # a mid-run failure) or when it's not the very first line
+                # (step failure inside a larger success log).
+                if i > 0 or len(lines) > 1:
+                    return True
             # hyun06000 field test 2026-04-24 evening: a program
             # printed "✅ PR 생성 완료: None" because get(record, key)
             # returned None when the key was missing but the program
