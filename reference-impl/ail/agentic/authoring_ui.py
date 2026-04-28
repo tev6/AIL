@@ -200,6 +200,7 @@ def render_authoring_page(
       text-transform: uppercase; letter-spacing: 0.06em;
       color: #047857; margin-bottom: 6px; }}
     .run-result.err .label {{ color: #b91c1c; }}
+    .run-result pre a {{ color: #0e7490; text-decoration: underline; }}
     .run-result pre {{ margin: 0; white-space: pre-wrap;
       word-break: break-word; font-family: ui-monospace,
       SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
@@ -256,19 +257,12 @@ def render_authoring_page(
        the user never has to scroll up to find a buried run card. */
     #quick-run-bar {{ display: none; padding: 10px 0 6px;
       border-top: 1px solid #e5e7eb; }}
-    #quick-run-bar .qr-row {{ display: flex; gap: 8px; align-items: flex-end; }}
-    #quick-run-bar textarea {{ flex: 1; font-family: inherit; font-size: 14px;
+    #quick-run-bar textarea {{ width: 100%; box-sizing: border-box;
+      font-family: inherit; font-size: 14px;
       padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
       background: #fff; color: var(--fg); resize: none; line-height: 1.4;
       max-height: 100px; }}
     #quick-run-bar textarea:focus {{ outline: 2px solid #111; outline-offset: -1px; }}
-    #quick-run-bar .qr-btn {{ font-family: inherit; font-size: 13px;
-      font-weight: 600; padding: 8px 16px; border-radius: 8px; border: 0;
-      background: var(--accent); color: #fff; cursor: pointer;
-      white-space: nowrap; }}
-    #quick-run-bar .qr-btn:disabled {{ opacity: 0.5; cursor: wait; }}
-    #quick-run-bar .qr-btn.running {{ background: #dc2626; }}
-    #quick-run-bar .qr-btn.running:hover {{ background: #b91c1c; }}
     #quick-run-bar .qr-label {{ font-size: 11px; color: #6b7280;
       margin-bottom: 4px; }}
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
@@ -434,12 +428,9 @@ def render_authoring_page(
 
     <div id="quick-run-bar">
       <div class="qr-label" id="qr-label">▶ 실행 / Run</div>
-      <div class="qr-row">
-        <textarea id="qr-input" rows="1"
-                  placeholder="입력값을 여기에 입력하고 실행하세요"
-                  autocomplete="off" spellcheck="false"></textarea>
-        <button class="qr-btn" id="qr-btn" type="button">실행</button>
-      </div>
+      <textarea id="qr-input" rows="1"
+                placeholder="입력값을 적고 Enter (Shift+Enter는 줄바꿈)"
+                autocomplete="off" spellcheck="false"></textarea>
     </div>
     <form class="composer" id="composer" onsubmit="return onSend(event);">
       <div id="attach-strip" style="display:none;flex-wrap:wrap;gap:.4rem;width:100%;padding:.4rem 0"></div>
@@ -1070,7 +1061,6 @@ def render_authoring_page(
     // is safe to call at the end of the replay block.
     const qrBar = document.getElementById('quick-run-bar');
     const qrInput = document.getElementById('qr-input');
-    const qrBtn = document.getElementById('qr-btn');
     const qrLabel = document.getElementById('qr-label');
 
     function updateQuickRunBar() {{
@@ -1096,18 +1086,21 @@ def render_authoring_page(
 
     let qrAbortCtrl = null;
 
-    qrBtn.addEventListener('click', async () => {{
-      // If a run is in progress, this click is the abort button.
-      if (qrAbortCtrl) {{
-        qrAbortCtrl.abort();
-        return;
-      }}
+    async function runQuickBar() {{
+      if (qrAbortCtrl) {{ return; }}
       const prog = programsForNext && programsForNext.length > 0
         ? programsForNext[0] : null;
       if (!prog) return;
       qrAbortCtrl = new AbortController();
-      qrBtn.textContent = '■ 중단';
-      qrBtn.classList.add('running');
+      const origLabel = qrLabel.textContent;
+      qrLabel.innerHTML = '▶ 실행 중… <a href="#" id="qr-abort" '
+        + 'style="color:#dc2626;text-decoration:underline;margin-left:8px">'
+        + '■ 중단</a>';
+      const abortLink = document.getElementById('qr-abort');
+      abortLink.addEventListener('click', (e) => {{
+        e.preventDefault();
+        if (qrAbortCtrl) qrAbortCtrl.abort();
+      }});
       const runInput = prog.input_used !== false ? qrInput.value : '';
       try {{
         const r = await fetch('/authoring-run', {{
@@ -1140,8 +1133,18 @@ def render_authoring_page(
         }}
       }} finally {{
         qrAbortCtrl = null;
-        qrBtn.classList.remove('running');
-        qrBtn.textContent = '실행';
+        qrLabel.textContent = origLabel;
+      }}
+    }}
+
+    qrInput.addEventListener('keydown', (e) => {{
+      // Enter runs; Shift+Enter inserts newline. IME guard for Korean
+      // (isComposing / keyCode 229) so completing Hangul commits the
+      // composition instead of triggering a run.
+      if (e.key === 'Enter' && !e.shiftKey
+          && !e.isComposing && e.keyCode !== 229) {{
+        e.preventDefault();
+        runQuickBar();
       }}
     }});
 
@@ -2194,7 +2197,10 @@ def render_authoring_page(
         box.appendChild(md);
       }} else {{
         const pre = document.createElement('pre');
-        pre.textContent = raw;
+        // linkify bare URLs so users can click them. textContent would
+        // strip them to plain text (field test 2026-04-28: "url도 링크
+        // 로 안잡히네"). innerHTML uses linkifyText which escapes first.
+        pre.innerHTML = linkifyText(raw);
         box.appendChild(pre);
       }}
       if (r.diagnostic) {{
