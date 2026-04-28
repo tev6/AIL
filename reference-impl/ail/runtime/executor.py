@@ -65,6 +65,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "email.send",
     "db.execute", "db.query",
     "git.commit", "git.push", "git.pull",
+    "gh.pr_list", "gh.pr_view", "gh.pr_create", "gh.issue_list",
     "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
 })
 from .calibration import Calibrator, default_calibrator
@@ -709,6 +710,14 @@ class Executor:
             return self._git_push(args, kwargs, origin)
         if name == "git.pull":
             return self._git_pull(args, kwargs, origin)
+        if name == "gh.pr_list":
+            return self._gh_pr_list(args, kwargs, origin)
+        if name == "gh.pr_view":
+            return self._gh_pr_view(args, kwargs, origin)
+        if name == "gh.pr_create":
+            return self._gh_pr_create(args, kwargs, origin)
+        if name == "gh.issue_list":
+            return self._gh_issue_list(args, kwargs, origin)
         if name in ("secrets.get", "secrets.set",
                     "secrets.list", "secrets.revoke"):
             return self._secrets_dispatch(name, args, kwargs, origin)
@@ -939,6 +948,233 @@ class Executor:
         except Exception as e:
             return self._result_err(
                 f"git.pull failed: {type(e).__name__}: {e}", origin)
+
+    # --- gh.* effects (Arche 2026-04-28) ---
+    # Why a `gh.*` namespace and not a generic `process.spawn`:
+    # ledger의 의미 보존이 HEAAL의 핵심. `process.spawn("gh", ...)`은
+    # ledger에 "shell이 뭔가 했음"이 남는다. `gh.pr_create(...)`는
+    # "PR을 만들었음"이 남는다. 1000세대 후의 audit query — "이
+    # 에이전트가 PR을 만든 적 있는가?" — 전자는 답할 수 없고
+    # 후자는 답한다. 새 도구가 필요하면 이 패턴을 따라 named effect
+    # 하나씩 추가하라. 런타임 PR 자체가 deny-first 게이트.
+
+    def _gh_run(self, argv, origin):
+        """Shared subprocess wrapper for gh.* effects.
+
+        Returns (stdout, None) on success, (None, error_cv) on failure.
+        Caller is responsible for parsing stdout (JSON for read ops, plain
+        URL for pr_create).
+        """
+        import subprocess
+        try:
+            r = subprocess.run(["gh"] + argv,
+                               capture_output=True, text=True,
+                               timeout=60, shell=False)
+        except FileNotFoundError:
+            return None, self._result_err(
+                "gh.* : gh CLI not installed (brew install gh)", origin)
+        except subprocess.TimeoutExpired:
+            return None, self._result_err(
+                "gh.* : timeout after 60s", origin)
+        except Exception as e:
+            return None, self._result_err(
+                f"gh.* : {type(e).__name__}: {e}", origin)
+        if r.returncode != 0:
+            msg = r.stderr.strip() or r.stdout.strip() or f"exit {r.returncode}"
+            return None, self._result_err(f"gh: {msg}", origin)
+        return r.stdout, None
+
+    def _gh_pr_list(self, args, kwargs, origin):
+        """gh.pr_list(repo=None, state="open", limit=30) -> Result[[Record]]
+
+        Returns each PR as a record with `number`, `title`, `state`,
+        `headRefName`, `baseRefName`, `url`, `author` (login Text).
+        """
+        import json as _json
+        repo = None
+        if args and args[0].value is not None:
+            repo = str(args[0].value)
+        if "repo" in kwargs and kwargs["repo"].value is not None:
+            repo = str(kwargs["repo"].value)
+        state = "open"
+        if len(args) >= 2 and args[1].value is not None:
+            state = str(args[1].value)
+        if "state" in kwargs and kwargs["state"].value is not None:
+            state = str(kwargs["state"].value)
+        limit = 30
+        if "limit" in kwargs and kwargs["limit"].value is not None:
+            limit = int(kwargs["limit"].value)
+
+        argv = ["pr", "list", "--state", state, "--limit", str(limit),
+                "--json", "number,title,state,headRefName,baseRefName,url,author"]
+        if repo:
+            argv = ["-R", repo] + argv
+        out, err = self._gh_run(argv, origin)
+        if err is not None:
+            return err
+        try:
+            raw = _json.loads(out)
+        except Exception as e:
+            return self._result_err(f"gh.pr_list: bad JSON from gh: {e}", origin)
+        prs = []
+        for p in raw:
+            author = p.get("author") or {}
+            prs.append({
+                "number": p.get("number"),
+                "title": p.get("title", ""),
+                "state": p.get("state", ""),
+                "headRefName": p.get("headRefName", ""),
+                "baseRefName": p.get("baseRefName", ""),
+                "url": p.get("url", ""),
+                "author": author.get("login", "") if isinstance(author, dict) else "",
+            })
+        return self._result_ok(prs, origin)
+
+    def _gh_pr_view(self, args, kwargs, origin):
+        """gh.pr_view(number, repo=None) -> Result[Record]
+
+        Single PR: number, title, body, state, headRefName, baseRefName,
+        url, author (login).
+        """
+        import json as _json
+        if not args:
+            return self._result_err(
+                "gh.pr_view(number, repo=None) — number required", origin)
+        number = int(args[0].value)
+        repo = None
+        if len(args) >= 2 and args[1].value is not None:
+            repo = str(args[1].value)
+        if "repo" in kwargs and kwargs["repo"].value is not None:
+            repo = str(kwargs["repo"].value)
+
+        argv = ["pr", "view", str(number),
+                "--json", "number,title,body,state,headRefName,baseRefName,url,author"]
+        if repo:
+            argv = ["-R", repo] + argv
+        out, err = self._gh_run(argv, origin)
+        if err is not None:
+            return err
+        try:
+            p = _json.loads(out)
+        except Exception as e:
+            return self._result_err(f"gh.pr_view: bad JSON from gh: {e}", origin)
+        author = p.get("author") or {}
+        return self._result_ok({
+            "number": p.get("number"),
+            "title": p.get("title", ""),
+            "body": p.get("body", ""),
+            "state": p.get("state", ""),
+            "headRefName": p.get("headRefName", ""),
+            "baseRefName": p.get("baseRefName", ""),
+            "url": p.get("url", ""),
+            "author": author.get("login", "") if isinstance(author, dict) else "",
+        }, origin)
+
+    def _gh_pr_create(self, args, kwargs, origin):
+        """gh.pr_create(title, body, repo=None, base=None, head=None,
+        draft=False) -> Result[Text]
+
+        Creates a PR. Returns the PR URL on success. Errors include
+        "no commits between branches" and the rest of gh's surface.
+        """
+        if len(args) < 2:
+            return self._result_err(
+                "gh.pr_create(title, body, ...) — title and body required",
+                origin)
+        title = str(args[0].value)
+        body = str(args[1].value)
+
+        repo = None
+        if len(args) >= 3 and args[2].value is not None:
+            repo = str(args[2].value)
+        if "repo" in kwargs and kwargs["repo"].value is not None:
+            repo = str(kwargs["repo"].value)
+
+        base = None
+        if len(args) >= 4 and args[3].value is not None:
+            base = str(args[3].value)
+        if "base" in kwargs and kwargs["base"].value is not None:
+            base = str(kwargs["base"].value)
+
+        head = None
+        if len(args) >= 5 and args[4].value is not None:
+            head = str(args[4].value)
+        if "head" in kwargs and kwargs["head"].value is not None:
+            head = str(kwargs["head"].value)
+
+        draft = False
+        if "draft" in kwargs and kwargs["draft"].value is not None:
+            draft = bool(kwargs["draft"].value)
+
+        argv = ["pr", "create", "--title", title, "--body", body]
+        if repo:
+            argv = ["-R", repo] + argv
+        if base:
+            argv += ["--base", base]
+        if head:
+            argv += ["--head", head]
+        if draft:
+            argv += ["--draft"]
+        out, err = self._gh_run(argv, origin)
+        if err is not None:
+            return err
+        # gh prints the URL as the last non-empty line.
+        url = ""
+        for line in out.strip().splitlines():
+            line = line.strip()
+            if line.startswith("http"):
+                url = line
+        if not url:
+            return self._result_err(
+                f"gh.pr_create: no URL in output: {out.strip()}", origin)
+        return self._result_ok(url, origin)
+
+    def _gh_issue_list(self, args, kwargs, origin):
+        """gh.issue_list(repo=None, state="open", limit=30) -> Result[[Record]]
+
+        Each issue: number, title, state, url, author (login), labels ([Text]).
+        """
+        import json as _json
+        repo = None
+        if args and args[0].value is not None:
+            repo = str(args[0].value)
+        if "repo" in kwargs and kwargs["repo"].value is not None:
+            repo = str(kwargs["repo"].value)
+        state = "open"
+        if len(args) >= 2 and args[1].value is not None:
+            state = str(args[1].value)
+        if "state" in kwargs and kwargs["state"].value is not None:
+            state = str(kwargs["state"].value)
+        limit = 30
+        if "limit" in kwargs and kwargs["limit"].value is not None:
+            limit = int(kwargs["limit"].value)
+
+        argv = ["issue", "list", "--state", state, "--limit", str(limit),
+                "--json", "number,title,state,url,author,labels"]
+        if repo:
+            argv = ["-R", repo] + argv
+        out, err = self._gh_run(argv, origin)
+        if err is not None:
+            return err
+        try:
+            raw = _json.loads(out)
+        except Exception as e:
+            return self._result_err(
+                f"gh.issue_list: bad JSON from gh: {e}", origin)
+        issues = []
+        for i in raw:
+            author = i.get("author") or {}
+            labels_raw = i.get("labels") or []
+            labels = [l.get("name", "") for l in labels_raw if isinstance(l, dict)]
+            issues.append({
+                "number": i.get("number"),
+                "title": i.get("title", ""),
+                "state": i.get("state", ""),
+                "url": i.get("url", ""),
+                "author": author.get("login", "") if isinstance(author, dict) else "",
+                "labels": labels,
+            })
+        return self._result_ok(issues, origin)
 
     def _image_embed(self, args, kwargs, origin):
         """Return a markdown image string the chat UI can render inline.
