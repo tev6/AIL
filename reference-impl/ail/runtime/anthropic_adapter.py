@@ -28,16 +28,28 @@ class AnthropicAdapter:
                 "The anthropic package is required. Install with: pip install anthropic"
             ) from e
         self.model = model
-        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not self._api_key:
+        token = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not token:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY not set. Export it or pass api_key explicitly."
             )
+        # OAuth subscription tokens (issued by `claude setup-token` for
+        # Pro/Max plans) start with `sk-ant-oat01` and must be sent as
+        # `Authorization: Bearer …` instead of the regular `X-Api-Key`
+        # header. The Anthropic SDK exposes this via its `auth_token`
+        # parameter. Standard API keys (`sk-ant-api…`) keep using
+        # `api_key`. Detection by prefix avoids requiring the user to
+        # set a separate env var. (Arche urgent letter 2026-04-28.)
+        self._token = token
+        self._is_oauth = token.startswith("sk-ant-oat")
 
     def invoke(self, *, goal, constraints, context, inputs,
                expected_type=None, examples=None) -> ModelResponse:
         import anthropic
-        client = anthropic.Anthropic(api_key=self._api_key)
+        if self._is_oauth:
+            client = anthropic.Anthropic(auth_token=self._token)
+        else:
+            client = anthropic.Anthropic(api_key=self._token)
 
         if context.get("_intent_name") == "__authoring_chat__":
             user_msg = inputs.get("user_message", "(no input)")
