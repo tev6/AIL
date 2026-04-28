@@ -1,15 +1,15 @@
-//! `ail-rs` CLI — Phase-0 stub.
+//! `ail-rs` CLI.
 //!
 //! Subcommands:
-//! - `tokens FILE.ail`            — print the token stream
-//! - `parse FILE.ail`             — pretty-print the parsed Program (Debug)
-//! - `run FILE.ail [INPUT]`       — execute the entry block, print final value
+//! - `tokens FILE.ail`                       — print the token stream
+//! - `parse FILE.ail`                        — pretty-print the parsed Program (Debug)
+//! - `run [--adapter NAME] FILE.ail [INPUT]` — execute the entry block
 
 use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use ail::{Evaluator, Lexer, Parser};
+use ail::{AnthropicAdapter, Evaluator, Lexer, Parser};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -90,12 +90,31 @@ fn cmd_parse(prog: &str, args: &[String]) -> ExitCode {
 }
 
 fn cmd_run(prog: &str, args: &[String]) -> ExitCode {
-    if args.len() < 3 {
+    // ail-rs run [--adapter NAME] FILE.ail [INPUT]
+    let mut adapter_name: Option<String> = None;
+    let mut positional: Vec<&str> = Vec::new();
+    let mut i = 2;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--adapter" {
+            if i + 1 >= args.len() {
+                eprintln!("{prog}: --adapter requires a value");
+                return ExitCode::from(2);
+            }
+            adapter_name = Some(args[i + 1].clone());
+            i += 2;
+            continue;
+        }
+        positional.push(a);
+        i += 1;
+    }
+    if positional.is_empty() {
         usage(prog);
         return ExitCode::from(2);
     }
-    let input = if args.len() >= 4 { args[3].as_str() } else { "" };
-    let src = match read_src(prog, &args[2]) {
+    let path = positional[0];
+    let input = positional.get(1).copied().unwrap_or("");
+    let src = match read_src(prog, path) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -106,7 +125,36 @@ fn cmd_run(prog: &str, args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let evaluator = Evaluator::new(&program);
+
+    // Adapter: explicit `--adapter` wins. Otherwise, auto-enable Anthropic
+    // when the program declares an `intent` AND ANTHROPIC_API_KEY is set —
+    // this mirrors Python's "the intent works if you have a key" UX so a
+    // user who follows the install one-liner doesn't have to learn flags.
+    let resolved_adapter = adapter_name.or_else(|| {
+        if !program.intents.is_empty() && std::env::var_os("ANTHROPIC_API_KEY").is_some() {
+            Some("anthropic".into())
+        } else {
+            None
+        }
+    });
+
+    let mut evaluator = Evaluator::new(&program);
+    if let Some(name) = resolved_adapter {
+        match name.as_str() {
+            "anthropic" => match AnthropicAdapter::from_env() {
+                Ok(a) => evaluator.adapter = Some(Box::new(a)),
+                Err(e) => {
+                    eprintln!("{prog}: {e}");
+                    return ExitCode::from(1);
+                }
+            },
+            other => {
+                eprintln!("{prog}: unknown --adapter {other:?} (supported: anthropic)");
+                return ExitCode::from(2);
+            }
+        }
+    }
+
     match evaluator.run(input) {
         Ok(v) => {
             println!("{v}");
@@ -121,7 +169,12 @@ fn cmd_run(prog: &str, args: &[String]) -> ExitCode {
 
 fn usage(prog: &str) {
     eprintln!("usage:");
-    eprintln!("  {prog} tokens FILE.ail              # dump token stream");
-    eprintln!("  {prog} parse  FILE.ail              # dump parsed Program AST");
-    eprintln!("  {prog} run    FILE.ail [INPUT]      # execute and print final value");
+    eprintln!("  {prog} tokens FILE.ail                       # dump token stream");
+    eprintln!("  {prog} parse  FILE.ail                       # dump parsed Program AST");
+    eprintln!("  {prog} run [--adapter NAME] FILE.ail [INPUT] # execute and print final value");
+    eprintln!();
+    eprintln!("Adapters:");
+    eprintln!("  --adapter anthropic    Anthropic Messages API (needs ANTHROPIC_API_KEY)");
+    eprintln!("                         Auto-enabled when a program declares `intent`");
+    eprintln!("                         and ANTHROPIC_API_KEY is set.");
 }
