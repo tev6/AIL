@@ -526,6 +526,32 @@ def render_authoring_page(
           meta.textContent = e.bytes + ' bytes';
           item.appendChild(meta);
           item.addEventListener('click', async () => {{
+            // hyun06000 2026-04-28: 저자 모델이 \"Run 버튼이 안 보이면
+            // 좌측 파일 트리에서 클릭하세요\" 라고 안내하는데 클릭이
+            // alert만 띄웠음. .ail이고 파스되면 즉석에서 Run 카드를
+            // thread 끝에 추가 — 사용자가 바로 실행할 수 있게.
+            if (e.kind === 'ail' && e.parses && e.entry_present !== false) {{
+              const synth = {{
+                name: e.path,
+                bytes: e.bytes,
+                parses: true,
+                parse_error: null,
+                entry_present: true,
+                input_used: e.input_used !== false,
+                input_hint: e.input_hint || null,
+                purpose: e.purpose || '',
+                env_required: e.env_required || [],
+              }};
+              const list = (programsForNext || []).slice();
+              const idx = list.findIndex(p => p.name === e.path);
+              if (idx >= 0) {{ list[idx] = synth; }} else {{ list.unshift(synth); }}
+              programsForNext = list;
+              activeProgramForNext = e.path;
+              updateQuickRunBar();
+              try {{ addRunWidget(false); }} catch(err) {{}}
+              scrollBottom();
+              return;
+            }}
             try {{
               const fr = await fetch(
                 '/authoring-file?path=' + encodeURIComponent(e.path));
