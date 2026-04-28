@@ -475,6 +475,52 @@ def _make_handler(project: Project, serve_only: bool = False):
                 self.wfile.write(payload)
                 return
 
+            if self.path in ("/authoring-schedule/status",
+                             "/authoring-schedule-status"):
+                # Scheduler self-throttle status — Telos 2026-04-29.
+                # When the scheduler auto-paused due to N consecutive
+                # failures with the same signature, schedule.json gets
+                # `paused: true` + `paused_reason` written. UI polls
+                # this to render the yellow "스케줄 중단됨" card.
+                import json as _json
+                schedule_path = project.state_dir / "schedule.json"
+                payload_obj = {
+                    "active": False,
+                    "seconds": None,
+                    "paused": False,
+                    "paused_reason": None,
+                    "paused_consecutive_failures": 0,
+                }
+                try:
+                    if schedule_path.is_file():
+                        raw = _json.loads(schedule_path.read_text(
+                            encoding="utf-8"))
+                        if isinstance(raw, dict):
+                            seconds = raw.get("seconds")
+                            try:
+                                seconds_f = float(seconds) if seconds is not None else None
+                            except (TypeError, ValueError):
+                                seconds_f = None
+                            payload_obj["active"] = (
+                                seconds_f is not None and seconds_f > 0
+                            )
+                            payload_obj["seconds"] = seconds_f
+                            payload_obj["paused"] = bool(raw.get("paused"))
+                            payload_obj["paused_reason"] = raw.get(
+                                "paused_reason")
+                            payload_obj["paused_consecutive_failures"] = int(
+                                raw.get("paused_consecutive_failures") or 0
+                            )
+                except (OSError, _json.JSONDecodeError):
+                    pass
+                payload = _json.dumps(payload_obj).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
             if self.path in ("/authoring-deploy/status",
                              "/authoring-deploy-status"):
                 # Liveness probe + stale cleanup lives in
@@ -788,6 +834,47 @@ def _make_handler(project: Project, serve_only: bool = False):
                 from .process_manager import self_terminate
                 self._send_text(200, "shutting down\n")
                 self_terminate(project)
+                return
+
+            if self.path in ("/authoring-schedule/resume",
+                             "/authoring-schedule-resume"):
+                # Clear `paused` + counters on schedule.json so the
+                # scheduler resumes ticking on its next loop pass.
+                # Telos 2026-04-29 — paired with the auto-throttle in
+                # scheduler.py. Idempotent.
+                import json as _json
+                schedule_path = project.state_dir / "schedule.json"
+                try:
+                    raw_text = schedule_path.read_text(encoding="utf-8")
+                    raw = _json.loads(raw_text)
+                except (OSError, _json.JSONDecodeError):
+                    self._send_text(404, "no schedule registered\n")
+                    return
+                if not isinstance(raw, dict):
+                    self._send_text(400, "schedule file malformed\n")
+                    return
+                changed = False
+                for k in (
+                    "paused", "paused_reason",
+                    "paused_consecutive_failures", "paused_at",
+                ):
+                    if k in raw:
+                        raw.pop(k, None)
+                        changed = True
+                if changed:
+                    try:
+                        schedule_path.write_text(
+                            _json.dumps(raw), encoding="utf-8",
+                        )
+                    except OSError as e:
+                        self._send_text(
+                            500, f"resume write failed: {e}\n")
+                        return
+                    project.append_ledger({
+                        "event": "schedule_resumed",
+                        "by": "user",
+                    })
+                self._send_text(200, "resumed\n")
                 return
 
             if self.path == "/authoring-chat":
@@ -1282,32 +1369,46 @@ def serve_project(
     from .scheduler import Scheduler
 
     def _invoke_scheduled_tick():
+        # Returns (ok, signature) so Scheduler can count consecutive
+        # failures with the same signature and auto-pause after N.
         try:
             result, _trace = ail_run(str(project.app_path), input="")
             value = result.value
             if _looks_like_error(value):
+                preview = str(_render_value(value))[:200]
                 project.append_ledger({
                     "event": "schedule_tick",
                     "ok": False,
-                    "value_preview": str(_render_value(value))[:200],
+                    "value_preview": preview,
                 })
-            else:
-                project.append_ledger({
-                    "event": "schedule_tick",
-                    "ok": True,
-                    "value_preview": str(value)[:200],
-                })
+                return (False, preview)
+            project.append_ledger({
+                "event": "schedule_tick",
+                "ok": True,
+                "value_preview": str(value)[:200],
+            })
+            return (True, "")
         except Exception as e:
+            sig = f"{type(e).__name__}: {e}"
             project.append_ledger({
                 "event": "schedule_tick",
                 "ok": False,
-                "error": f"{type(e).__name__}: {e}",
+                "error": sig,
             })
+            return (False, sig)
+
+    def _on_schedule_throttled(signature: str, count: int):
+        project.append_ledger({
+            "event": "schedule_throttled",
+            "consecutive_failures": count,
+            "signature": signature[:500],
+        })
 
     scheduler = Scheduler(
         schedule_file=schedule_file,
         invoke=_invoke_scheduled_tick,
         logger=logger,
+        on_throttle=_on_schedule_throttled,
     )
     scheduler.start()
 
