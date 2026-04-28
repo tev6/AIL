@@ -65,6 +65,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "email.send",
     "db.execute", "db.query",
     "git.commit", "git.push", "git.pull",
+    "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
 })
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
@@ -708,6 +709,9 @@ class Executor:
             return self._git_push(args, kwargs, origin)
         if name == "git.pull":
             return self._git_pull(args, kwargs, origin)
+        if name in ("secrets.get", "secrets.set",
+                    "secrets.list", "secrets.revoke"):
+            return self._secrets_dispatch(name, args, kwargs, origin)
         # Defense in depth: _exec_perform's deny-first check should
         # already have caught this. If we reached here, an internal
         # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
@@ -1184,6 +1188,82 @@ class Executor:
             return self._result_err(
                 f"env var {name!r} is not set", origin)
         return self._result_ok(os.environ[name], origin)
+
+    # --- secrets.* effects (Arche 2026-04-28)
+    # Two-layer store: local ~/.ail/.env (HOT) and a future remote
+    # Stoa endpoint (WARM, added when Sphinx auth ships). All ops
+    # return Result so callers handle errors explicitly.
+    # secrets.delete is intentionally absent — use secrets.revoke to
+    # overwrite the value with "" while keeping the key name as an
+    # audit record ("deletion is movement", HEAAL deny-first).
+    def _secrets_dispatch(self, name, args, kwargs, origin):
+        import os
+        from pathlib import Path
+
+        secrets_path = Path.home() / ".ail" / ".env"
+        secrets_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _read_store():
+            pairs = {}
+            if secrets_path.is_file():
+                for line in secrets_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    pairs[k.strip()] = v.strip().strip('"').strip("'")
+            return pairs
+
+        def _write_store(pairs):
+            lines = [f"{k}={v}" for k, v in pairs.items()]
+            secrets_path.write_text("\n".join(lines) + ("\n" if lines else ""),
+                                    encoding="utf-8")
+
+        if name == "secrets.list":
+            pairs = _read_store()
+            keys = list(pairs.keys())
+            return self._result_ok(keys, origin)
+
+        if name == "secrets.get":
+            if not args:
+                return self._result_err("secrets.get needs a key argument", origin)
+            key = str(args[0].value)
+            if not key:
+                return self._result_err("secrets.get: key must be non-empty", origin)
+            pairs = _read_store()
+            # local store first; fall back to os.environ
+            if key in pairs:
+                return self._result_ok(pairs[key], origin)
+            if key in os.environ:
+                return self._result_ok(os.environ[key], origin)
+            return self._result_err(f"secret {key!r} not found", origin)
+
+        if name == "secrets.set":
+            if len(args) < 2:
+                return self._result_err(
+                    "secrets.set needs key and value arguments", origin)
+            key = str(args[0].value)
+            value = str(args[1].value)
+            if not key:
+                return self._result_err("secrets.set: key must be non-empty", origin)
+            pairs = _read_store()
+            pairs[key] = value
+            _write_store(pairs)
+            os.environ[key] = value
+            return self._result_ok(f"secret {key!r} stored", origin)
+
+        if name == "secrets.revoke":
+            if not args:
+                return self._result_err("secrets.revoke needs a key argument", origin)
+            key = str(args[0].value)
+            pairs = _read_store()
+            pairs[key] = ""
+            _write_store(pairs)
+            if key in os.environ:
+                os.environ[key] = ""
+            return self._result_ok(f"secret {key!r} revoked", origin)
+
+        return self._result_err(f"unknown secrets effect: {name}", origin)
 
     # --- human.approve effect (L2 v3 — plan-validate-execute)
     # Pauses the run on a structured plan review. The agentic server's
