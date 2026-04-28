@@ -8,14 +8,18 @@
 pub mod anthropic;
 pub mod ast;
 pub mod eval;
+pub mod json_parsing;
 pub mod lexer;
+pub mod ollama;
 pub mod parser;
 pub mod value;
 
 pub use anthropic::AnthropicAdapter;
 pub use ast::{EntryDecl, Expr, FnDecl, IntentDecl, Literal, Param, Program, Stmt};
 pub use eval::{Adapter, EvalError, EvalResult, Evaluator};
+pub use json_parsing::parse_value_confidence;
 pub use lexer::{LexError, Lexer, Tok, Token};
+pub use ollama::OllamaAdapter;
 pub use parser::{ParseError, Parser};
 pub use value::{Value, ValueKind};
 
