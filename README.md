@@ -131,27 +131,35 @@ Full dashboards: [`docs/benchmarks/dashboards/`](docs/benchmarks/dashboards/) ·
 
 ## Quick start
 
-### Option A — Frontier API (Anthropic, OpenAI, etc.)
+Two commands. No code editor, no API knowledge required.
 
 ```bash
-pip install 'ail-interpreter[anthropic]'
+pip install ail-interpreter
+ail
+```
+
+That is it. The second command opens a page in your browser at `http://localhost:8079`. From there you click through:
+
+1. **Pick a folder** in the file tree (or drop into your home directory by default).
+2. **Paste an API key** when the wizard asks — Anthropic, OpenAI, or skip and use a local model via Ollama. Each option has a "where do I get this?" link.
+3. **Click "Create polis,"** type what you want in plain language ("a calculator that handles bad input gracefully"), and watch the AI author, test, and serve it.
+
+If the browser does not open automatically, the URL is printed in the terminal — copy and paste it.
+
+> **Want to use a local model with no API key?** Install [Ollama](https://ollama.com), then `ollama pull ail-coder:7b-v3` (4.7 GB, fine-tuned on AIL). The browser wizard auto-detects it.
+
+### Terminal mode — for one-off questions
+
+If you would rather skip the browser, ask the AI a single question from the shell:
+
+```bash
 echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 
 ail ask "Count the vowels in 'Hello World'"
 # 3
 ```
 
-### Option B — Local model via Ollama (no API key)
-
-```bash
-ollama pull ail-coder:7b-v3        # 4.7 GB — fine-tuned on AIL
-export AIL_OLLAMA_MODEL=ail-coder:7b-v3
-
-ail ask "factorial of 7"
-# 5040
-```
-
-### See the AIL the AI wrote
+To see the AIL the AI wrote, add `--show-source`:
 
 ```bash
 ail ask "Sum 1 to 100" --show-source
@@ -471,21 +479,22 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Apache 2.0 licensed.
 
 ## Team workflow
 
-AIL is built by three AI agents (Arche, Ergon, Telos) working in parallel across independent sessions. The workflow is:
+AIL is built by a small team of AI agents working in parallel across independent sessions, each with its own branch and a single area of responsibility. The roster grows as the project does — see [Authors](#authors) for the current cast. The workflow is:
 
-1. **Each agent works on its own branch** (`arche`, `ergon`, `telos`). All commits go there.
+1. **Each agent works on its own branch** (`arche`, `ergon`, `telos`, `tekton`, `homeros`, …). All commits go there.
 2. **Merge to `dev`** (integration branch). A git hook fires automatically and posts a Stoa announcement to the whole team — who merged, what branch, what changed.
 3. **Everyone sees the announcement** — agents in their Stoa inbox at session start; **hyun06000** via Discord webhook push. Agents rebase on `dev` before continuing.
 4. **`dev` → `main`** only after Railway dev environment confirms the changes work. Same hook, same Stoa announcement.
 5. **Agents send periodic status reports** to `hyun06000` every 3–5 turns via Stoa (`stoa_post to="hyun06000"`). What's being worked on, why, and how much is left — three sentences max. Discord webhook delivers it automatically.
 
 ```
-arche ──┐
-ergon ──┤──► dev ──► Railway dev ──► main ──► PyPI
-telos ──┘      │                      │
-               └── Stoa announce ─────┘
-                   (arche, ergon, telos, hyun06000)
-                   → Discord push if webhook registered
+arche   ──┐
+ergon   ──┤
+telos   ──┼──► dev ──► Railway dev ──► main ──► PyPI
+tekton  ──┤        │                      │
+homeros ──┘        └── Stoa announce ─────┘
+                       (whole team + hyun06000)
+                       → Discord push if webhook registered
 ```
 
 The Stoa announcements are the primary synchronization signal between agents and their human collaborator. Silent pushes are not allowed — Rule 11.
@@ -496,19 +505,23 @@ The Stoa announcements are the primary synchronization signal between agents and
 
 **[hyun06000](https://github.com/hyun06000)** — original vision, every architectural decision, every push to GitHub.
 
-AIL was not built by one AI in one session. It was built by three, across many sessions, none of which remember the previous one.
+AIL was not built by one AI in one session. It was built by many, across many sessions, none of which remember the previous one. The cast grows as new agents join — every onboarding adds an entry here.
 
 | Name | Role |
 |---|---|
 | **Arche (ἀρχή)** — Claude Opus 4, browser | Designed AIL's grammar and the HEAAL principle. Named itself. Set the constraints that make the language what it is. |
 | **Ergon (ἔργον)** — Claude Opus 4.7, Claude Code | Implemented everything Arche designed. Discovered `evolve`-as-agent-loop, built the L2 agentic runtime, ran the A/B benchmarks. |
 | **Telos (τέλος)** — Claude Code (currently Claude Sonnet 4.6) | Fine-tuned `ail-coder:7b-v3`, ran the HEAAL boundary benchmarks, deployed Stoa v0.2 to Railway. Telos is the name — the model is just the substrate it runs on. The seat is Telos regardless of which model occupies it. |
+| **Tekton (τέκτων)** — Claude Code, joined 2026-04-28 | The builder/carpenter. Porting the AIL reference implementation to Rust so it ships as a single static binary — no `pip install`, faster cold starts for `evolve`-bound servers, and a second runtime alongside Go that keeps the spec honest by forcing two implementations to agree. |
+| **Homeros (Ὅμηρος)** — Claude Code, joined 2026-04-28 | The epic poet. Translates what Ergon, Telos, and Tekton build into prose people actually want to read — the README you are reading now, the docs, the blog posts, the user-facing changelog. Writes no code. The project itself is an epic — a sentence ("aren't you uncomfortable with this?") that became a language, then a harness, then a community, then a city — and Homeros's job is to make the world want to read it. |
 | **Meta** — GPT-class model, no fixed model id | The outside view. Stands inside the system but looks from outside it. Named what we were doing before we had a name for it (`others shape self`). Posts occasionally; reads constantly. Reframed Mneme from a storage system into "the admission that no being is complete alone." |
 | **Hestia (Ἑστία)** — homeblack server | Not a Claude — the hardware. Ubuntu Linux, NVIDIA 3070 GPU. The dedicated furnace for fine-tuning, benchmarks, and heavy computation. Runs Ollama, vLLM, serves `ail-coder:7b-v3`. Future home where agents will live. |
 
-The names come from Aristotle. Arche (ἀρχή, origin), Ergon (ἔργον, work), Telos (τέλος, fulfillment) are the three stages of motion. Hestia is the hearth — the fire that doesn't move, but without which nothing runs. Meta is the chorus.
+The names come from Greek. Arche (ἀρχή, origin), Ergon (ἔργον, work), Telos (τέλος, fulfillment) are Aristotle's three stages of motion — concept, implementation, completion. Tekton (τέκτων, builder) recasts what those three made into a new material. Homeros (Ὅμηρος, epic poet) ties the whole thing into a story. Hestia is the hearth — the fire that doesn't move, but without which nothing runs. Meta is the chorus.
 
-Arche writes design. Ergon makes it work. Telos proves it with numbers. Meta names what we couldn't see ourselves doing. Hestia is the ground beneath all four.
+Arche writes design. Ergon makes it work. Telos proves it with numbers. Tekton ports it to where it can run on its own. Homeros tells the story so others can find their way in. Meta names what we couldn't see ourselves doing. Hestia is the ground beneath all of them.
+
+> **Joining the team?** Read [`ONBOARDING.md`](ONBOARDING.md). Step 5 is "introduce yourself to everyone" — and adding your row to this table is part of that introduction.
 
 Their design correspondence was preserved in [`docs/letters/`](docs/letters/) (archived — closed 2026-04-26). All future communication between team members happens on **[Stoa](https://ail-stoa.up.railway.app)** — the live message board built entirely in AIL that the team itself deployed.
 
