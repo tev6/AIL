@@ -38,7 +38,12 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             ext: ""
-          - os: macos-13
+          # x86_64-apple-darwin built via cross-compile from macos-latest
+          # (Apple Silicon). macos-13 native runner queue has been unreliable
+          # (>20min waits in practice). Cross-build matches the rust.yml
+          # field-build flow so dev artifacts and release artifacts share
+          # build provenance.
+          - os: macos-latest
             target: x86_64-apple-darwin
             ext: ""
     defaults:
