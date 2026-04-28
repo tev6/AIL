@@ -191,3 +191,103 @@ def test_scheduler_picks_up_cadence_change(tmp_path):
     time.sleep(0.4)
     sched.stop()
     assert len(calls) >= 2
+
+
+# ---------- Self-throttle (Telos 2026-04-29) ----------
+
+
+class _ThrottleScheduler(Scheduler):
+    POLL_SECONDS = 0.02
+    THROTTLE_AFTER_N = 3  # Lower bar for fast tests
+
+
+def test_scheduler_auto_pauses_after_consecutive_failures(tmp_path):
+    """Same-signature failures repeated N times → schedule.json gets
+    paused: true + the throttle callback fires."""
+    sched_path = tmp_path / "s.json"
+    sched_path.write_text(json.dumps({"seconds": 0.05}), encoding="utf-8")
+    throttle_events = []
+    sched = _ThrottleScheduler(
+        schedule_file=sched_path,
+        invoke=lambda: (False, "Input cannot be empty"),
+        on_throttle=lambda sig, n: throttle_events.append((sig, n)),
+    )
+    sched.start()
+    time.sleep(0.5)
+    sched.stop()
+
+    # Throttle should have fired at least once after N=3 failures.
+    assert throttle_events, (
+        "expected throttle callback after consecutive failures")
+    sig, count = throttle_events[0]
+    assert "Input cannot be empty" in sig
+    assert count >= 3
+
+    payload = json.loads(sched_path.read_text(encoding="utf-8"))
+    assert payload.get("paused") is True
+    assert payload.get("paused_consecutive_failures") >= 3
+    assert "Input cannot be empty" in (payload.get("paused_reason") or "")
+
+
+def test_scheduler_does_not_pause_when_signature_changes(tmp_path):
+    """Different error signatures should NOT count as consecutive."""
+    sched_path = tmp_path / "s.json"
+    sched_path.write_text(json.dumps({"seconds": 0.05}), encoding="utf-8")
+    counter = {"i": 0}
+
+    def invoke():
+        counter["i"] += 1
+        return (False, f"err-{counter['i']}")  # always-different sig
+
+    throttle_events = []
+    sched = _ThrottleScheduler(
+        schedule_file=sched_path,
+        invoke=invoke,
+        on_throttle=lambda sig, n: throttle_events.append((sig, n)),
+    )
+    sched.start()
+    time.sleep(0.5)
+    sched.stop()
+    assert throttle_events == [], (
+        "different signatures must not throttle")
+
+
+def test_scheduler_resume_clears_paused_and_resets_counter(tmp_path):
+    """Externally clearing `paused` (= the /resume endpoint) should
+    re-arm the scheduler with fresh failure counters."""
+    sched_path = tmp_path / "s.json"
+    sched_path.write_text(json.dumps({"seconds": 0.05}), encoding="utf-8")
+    invoke_calls = []
+    invoke_outcome = {"ok": False, "sig": "boom"}
+
+    def invoke():
+        invoke_calls.append(time.time())
+        return (invoke_outcome["ok"], invoke_outcome["sig"])
+
+    sched = _ThrottleScheduler(
+        schedule_file=sched_path,
+        invoke=invoke,
+    )
+    sched.start()
+    # Wait for auto-pause.
+    time.sleep(0.4)
+    payload = json.loads(sched_path.read_text(encoding="utf-8"))
+    assert payload.get("paused") is True
+    paused_at_calls = len(invoke_calls)
+
+    # Simulate user clicking "▶ 다시 켜기" — clear paused flag.
+    payload.pop("paused", None)
+    payload.pop("paused_reason", None)
+    payload.pop("paused_consecutive_failures", None)
+    payload.pop("paused_at", None)
+    sched_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Flip outcome to success so the next batch doesn't re-pause and
+    # we can confirm ticks resumed.
+    invoke_outcome["ok"] = True
+    invoke_outcome["sig"] = ""
+    time.sleep(0.3)
+    sched.stop()
+
+    assert len(invoke_calls) > paused_at_calls, (
+        "scheduler should have resumed after paused flag cleared")

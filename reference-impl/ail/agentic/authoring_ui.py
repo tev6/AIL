@@ -712,6 +712,96 @@ def render_authoring_page(
     }}
     refreshDeployBar();
 
+    // ---- Scheduler self-throttle UI (Telos 2026-04-29) ----
+    // 자가수리 ■ 중단 / evolve rollback_on / scheduler throttle —
+    // 셋이 같은 비주얼 + 같은 행동 패턴. 사용자가 한 번 배우면
+    // 세 곳에서 통함.
+    let scheduleThrottleCard = null;
+    let lastScheduleSig = null;
+    async function refreshScheduleThrottle() {{
+      let st;
+      try {{
+        const r = await fetch('/authoring-schedule/status');
+        if (!r.ok) return;
+        st = await r.json();
+      }} catch (e) {{ return; }}
+      if (!st || !st.paused) {{
+        if (scheduleThrottleCard) {{
+          scheduleThrottleCard.remove();
+          scheduleThrottleCard = null;
+          lastScheduleSig = null;
+        }}
+        return;
+      }}
+      const sig = (st.paused_reason || '') +
+                  '|' + (st.paused_consecutive_failures || 0);
+      if (scheduleThrottleCard && sig === lastScheduleSig) {{
+        return; // already showing this exact state
+      }}
+      if (scheduleThrottleCard) scheduleThrottleCard.remove();
+      lastScheduleSig = sig;
+      const turn = document.createElement('div');
+      turn.className = 'turn agent';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.style.cssText =
+        'background:#fef3c7;border:1px solid #fde68a;color:#78350f;' +
+        'font-size:13px;';
+      const head = document.createElement('div');
+      head.innerHTML =
+        '⏰ <b>스케줄이 ' + (st.paused_consecutive_failures || 0) +
+        '번 연속 실패해서 멈췄어요.</b>';
+      bubble.appendChild(head);
+      const why = document.createElement('div');
+      why.style.cssText = 'margin-top:4px;font-size:12px;color:#92400e;';
+      const reason = (st.paused_reason || '').trim();
+      why.textContent = '같은 에러가 반복되고 있어요: ' +
+        (reason ? '"' + reason.slice(0, 200) + '"' : '(원인 정보 없음)');
+      bubble.appendChild(why);
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:8px;display:flex;gap:10px;';
+      const showBtn = document.createElement('a');
+      showBtn.href = '#';
+      showBtn.textContent = '원인 보기';
+      showBtn.style.cssText =
+        'color:#92400e;text-decoration:underline;font-size:12px;';
+      showBtn.addEventListener('click', (ev) => {{
+        ev.preventDefault();
+        const detail = document.createElement('pre');
+        detail.style.cssText =
+          'margin-top:6px;padding:8px;background:#fffbeb;' +
+          'border:1px solid #fde68a;border-radius:4px;' +
+          'font-size:11px;white-space:pre-wrap;color:#78350f;';
+        detail.textContent = reason || '(원인 정보 없음)';
+        bubble.appendChild(detail);
+        showBtn.style.display = 'none';
+      }});
+      const resumeBtn = document.createElement('a');
+      resumeBtn.href = '#';
+      resumeBtn.textContent = '▶ 다시 켜기';
+      resumeBtn.style.cssText =
+        'color:#047857;text-decoration:underline;font-weight:500;' +
+        'font-size:12px;';
+      resumeBtn.addEventListener('click', async (ev) => {{
+        ev.preventDefault();
+        resumeBtn.style.pointerEvents = 'none';
+        resumeBtn.textContent = '재개 중…';
+        try {{
+          await fetch('/authoring-schedule/resume', {{ method: 'POST' }});
+        }} catch (e) {{}}
+        await refreshScheduleThrottle();
+      }});
+      row.appendChild(showBtn);
+      row.appendChild(resumeBtn);
+      bubble.appendChild(row);
+      turn.appendChild(bubble);
+      thread.appendChild(turn);
+      scheduleThrottleCard = turn;
+      scrollBottom();
+    }}
+    refreshScheduleThrottle();
+    setInterval(refreshScheduleThrottle, 5000);
+
     // After an agent turn that wrote files, re-check deployable
     // status and (if the program is an evolve-server) demote the
     // inline Run widget + surface a chat-thread CTA aimed at the
