@@ -1,13 +1,25 @@
 name: rust-release
 
-# Triggered by tags shaped `rust-v*.*.*` (distinct from `v*.*.*` which
-# the PyPI release.yml owns). Builds a release binary per platform and
-# attaches them to a GitHub Release.
+# Two trigger modes:
+# 1. Tag push `rust-v*.*.*` (distinct from PyPI's `v*.*.*`) — builds
+#    binaries AND publishes a public GitHub Release. Used for shipping.
+# 2. Manual workflow_dispatch — builds binaries only, uploads as Actions
+#    artifacts (downloadable from the run page). Used for field-testing
+#    a dev build before approving a real release tag.
+#
+# The `release` job below is gated on `refs/tags/` so dispatch runs
+# never publish a public release accidentally.
 
 on:
   push:
     tags:
       - 'rust-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Free-form label for the build (e.g. dev-baecd4f). Tagged in artifact names."
+        required: false
+        default: "dev"
 
 permissions:
   contents: write
@@ -50,7 +62,13 @@ jobs:
           mkdir -p "$OUT_DIR"
           cp "target/${{ matrix.target }}/release/${BIN}" "${OUT_DIR}/"
           cd "${OUT_DIR}"
-          ARCHIVE="ail-rs-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          # Version label: tag name on tag push, dispatch input on manual run.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            LABEL="${{ github.event.inputs.label }}-$(echo ${GITHUB_SHA} | cut -c1-7)"
+          else
+            LABEL="${GITHUB_REF_NAME}"
+          fi
+          ARCHIVE="ail-rs-${LABEL}-${{ matrix.target }}.tar.gz"
           tar -czf "${ARCHIVE}" "${BIN}"
           ls -la
       - uses: actions/upload-artifact@v4
@@ -63,6 +81,10 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    # Only publish a public release when triggered by a tag.
+    # workflow_dispatch runs stop after `build` — artifacts are downloadable
+    # from the Actions run page for field-testing.
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
