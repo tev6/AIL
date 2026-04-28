@@ -201,6 +201,30 @@ def main(argv: list[str] | None = None) -> int:
     p_chat.add_argument("--no-rerun", action="store_true",
         help="Skip re-running the declared tests after the edit lands.")
 
+    p_bundle = sub.add_parser("bundle",
+        help="Combine scattered lifecycle .ail files into one evolve-server. "
+             "Humans naturally split work into small files (on_birth.ail, "
+             "on_tick.ail, …) for verification, but v1.67/1.68 lifecycle "
+             "hooks are recognized only inside one module with an evolve "
+             "block. `ail bundle` rewrites the parts as fn-convention "
+             "hooks + a default Physis evolve block, so the result is "
+             "deploy-eligible without rewriting any logic.")
+    p_bundle.add_argument("files", nargs="+",
+        help="Source .ail files. Names matter: `on_birth.ail` becomes "
+             "`fn on_birth()`, `on_tick.ail` → `fn on_tick(state)`, etc. "
+             "Files whose stem isn't a known hook are skipped.")
+    p_bundle.add_argument("--output", "-o", default=None,
+        help="Output file (default: <project>/<project>.ail next to the "
+             "first input).")
+    p_bundle.add_argument("--listen", type=int, default=8090,
+        help="Listen port baked into the evolve block (default 8090).")
+    p_bundle.add_argument("--every", type=int, default=60,
+        help="schedule.every() seconds in the evolve block (default 60).")
+    p_bundle.add_argument("--rollback-on", default=None,
+        help="Custom rollback_on expression. Default: "
+             "'error_rate > 0.5 or consecutive_failures > 5' — the Physis "
+             "default. Arche directive 2026-04-29: never empty.")
+
     sub.add_parser("version", help="Print version")
 
     args = parser.parse_args(argv)
@@ -367,6 +391,49 @@ def main(argv: list[str] | None = None) -> int:
             print(f"tests: {t['passed']}/{t['total']} passed")
             if t["passed"] < t["total"]:
                 return 2
+        return 0
+
+    if args.cmd == "bundle":
+        from .bundle import bundle, DEFAULT_ROLLBACK_ON
+        files = [Path(f).expanduser() for f in args.files]
+        missing = [str(f) for f in files if not f.is_file()]
+        if missing:
+            print(f"missing files: {', '.join(missing)}", file=sys.stderr)
+            return 1
+        if args.output:
+            output = Path(args.output).expanduser()
+        else:
+            # Default: <first-input-parent>/<dirname>.ail
+            parent = files[0].parent.resolve()
+            output = parent / f"{parent.name}.ail"
+        rb = args.rollback_on or DEFAULT_ROLLBACK_ON
+        result = bundle(
+            files,
+            output=output,
+            listen=args.listen,
+            schedule_seconds=args.every,
+            rollback_on=rb,
+        )
+        if not result.used_files:
+            print(
+                "no lifecycle files matched (expected stems like "
+                "on_genesis / on_birth / on_tick / before_tick / "
+                "after_tick / on_dying / on_death).",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"✓ bundled {len(result.used_files)} file(s) → {output}")
+        for u in result.used_files:
+            print(f"    + {u}")
+        if result.skipped_files:
+            print("  skipped (not a recognized hook stem):")
+            for s in result.skipped_files:
+                print(f"    - {s}")
+        print(
+            f"\nNext: edit {output.name} (rollback_on / schedule / listen "
+            f"are defaulted), then `ail up {output.parent}` and click "
+            f"the inline [🚀 지금 배포하기] card."
+        )
         return 0
 
     if args.cmd == "parse":

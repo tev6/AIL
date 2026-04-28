@@ -108,6 +108,8 @@ def test_write_tests_extracts_from_intent(tmp_path):
     spec = proj.read_intent()
     proj.write_tests(spec)
     payload = json.loads(proj.tests_path.read_text(encoding="utf-8"))
-    assert isinstance(payload, list)
-    # The template includes one negative test: empty input expects error
-    assert any(t["input"] == "" and t["expect_ok"] is False for t in payload)
+    # Telos 2026-04-29: scaffold no longer plants placeholder tests
+    # (they used to teach the author model to write `if is_empty(input)
+    # { return error(...) }` literally — see Arche field test). A
+    # fresh project's tests file should be an empty list.
+    assert payload == []

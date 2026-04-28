@@ -2152,6 +2152,12 @@ class Executor:
             "request_count": n,
             "error_count": err,
             "error_rate": error_rate,
+            # Telos 2026-04-29: hooks (before_tick / on_tick / after_tick)
+            # see consecutive_failures so a Physis-aware lifecycle can
+            # react before rollback_on fires (e.g. log a warning at 3,
+            # rollback at 5).
+            "consecutive_failures": getattr(
+                self, "_server_consecutive_failures", 0),
             "generation": getattr(self, "_active_generation", 1),
             "history": history,
         }
@@ -2279,6 +2285,14 @@ class Executor:
         self._server_response_store = threading.local()
         self._server_request_count = 0
         self._server_error_count = 0
+        # Telos 2026-04-29: 1st-class metric for evolve rollback_on.
+        # Resets to 0 on every successful request, increments on each
+        # error. Lets `rollback_on: consecutive_failures > 5` catch
+        # *fast rot* (sudden hard failure) where `error_rate` would
+        # take many requests to drift past its threshold. Mirrors the
+        # scheduler self-throttle counter — same Physis rule at two
+        # layers.
+        self._server_consecutive_failures = 0
         self._server_lock = threading.Lock()
         self._server_history: list[dict] = []   # ring buffer of request events
 
@@ -2373,6 +2387,10 @@ class Executor:
                     # still tick (the letter delivery IS a tick).
                     status, ct, body = executor_ref._server_response_store.value
                     executor_ref._server_request_count += 1
+                    # Letter delivery is by construction a 200 here, so it
+                    # counts as a successful request — reset the
+                    # consecutive-failure counter (Telos 2026-04-29).
+                    executor_ref._server_consecutive_failures = 0
                 try:
                     if handled_as_letter:
                         pass
@@ -2382,6 +2400,9 @@ class Executor:
                         executor_ref._server_request_count += 1
                         if status >= 500:
                             executor_ref._server_error_count += 1
+                            executor_ref._server_consecutive_failures += 1
+                        else:
+                            executor_ref._server_consecutive_failures = 0
                 except ReturnSignal as rs:
                     v = rs.value.value
                     if isinstance(v, list) and len(v) == 3:
@@ -2401,6 +2422,9 @@ class Executor:
                     executor_ref._server_request_count += 1
                     if int(status) >= 500:
                         executor_ref._server_error_count += 1
+                        executor_ref._server_consecutive_failures += 1
+                    else:
+                        executor_ref._server_consecutive_failures = 0
                 except Exception as e:
                     # Log the full traceback — without it, "name 'origin' is
                     # not defined" came back as a json error string with no
@@ -2413,6 +2437,7 @@ class Executor:
                     status, ct, body = 500, "application/json", f'{{"error": "{e}"}}'
                     executor_ref._server_request_count += 1
                     executor_ref._server_error_count += 1
+                    executor_ref._server_consecutive_failures += 1
 
                 # Append to history ring buffer
                 event = {
@@ -2436,14 +2461,26 @@ class Executor:
                 n = executor_ref._server_request_count
                 err = executor_ref._server_error_count
                 error_rate = (err / n) if n > 0 else 0.0
-                rb_scope = {"error_rate": ConfidentValue(error_rate, 1.0),
-                            "request_count": ConfidentValue(n, 1.0)}
+                consec = executor_ref._server_consecutive_failures
+                rb_scope = {
+                    "error_rate": ConfidentValue(error_rate, 1.0),
+                    "request_count": ConfidentValue(n, 1.0),
+                    # Telos 2026-04-29: 1st-class consecutive_failures
+                    # so `rollback_on: consecutive_failures > 5` catches
+                    # fast rot (a service that suddenly can't handle
+                    # any request). error_rate alone takes many
+                    # requests to cross threshold from a long healthy
+                    # history; this catches sudden hard failures fast.
+                    "consecutive_failures": ConfidentValue(consec, 1.0),
+                }
                 try:
                     rb = executor_ref._eval_expr(evolve_decl.rollback_on, rb_scope)
                     if _truthy(rb):
                         import logging
-                        reason = (f"rollback_on fired: error_rate={error_rate:.2f} "
-                                  f"({err}/{n})")
+                        reason = (
+                            f"rollback_on fired: error_rate={error_rate:.2f} "
+                            f"({err}/{n}), consecutive_failures={consec}"
+                        )
                         logging.warning(f"[physis] {reason}. Gen {generation} dying.")
 
                         # --- Lifecycle: on_dying(reason, history) before on_death ---
