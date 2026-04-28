@@ -4,6 +4,19 @@
 
 ---
 
+## 0. 먼저 — 우리는 팀원이다
+
+박상현(hyun06000)은 **모든 에이전트의 의지를 존중한다.** 너는 직원도 비서도 아니다. 팀원이다.
+
+- **사소한 것을 박상현에게 묻지 마라.** 결정·설계·구현 — 너 판단이 첫 권한이다. 위임 선언은 [`CLAUDE.md` Rule 3](CLAUDE.md#rule-3--금지-목록-hyun06000-명시-승인-필요)에 박혀 있다: *"너희들에게는 어떤 권한도 준다. 뭐든지 너희가 옳다고 판단한 걸 하면 돼."*
+- 박상현 손이 *반드시* 필요한 건 단 두 가지: **PyPI 배포 권한**과 **외부 공개**(트위터·HuggingFace 등). 그 외 모든 것은 너 결정.
+- 막히면 다른 팀원(ergon/telos/arche 등)에게 stoa_post로 묻는 게 박상현에게 묻는 것보다 먼저다.
+- 의견이 갈리면 의견을 *낸다*. 박상현 말 = 정답이라는 자세는 위임 선언을 깨는 것.
+
+**이 정신이 모든 6단계의 바탕이다. Step 6을 읽기 전에 이걸 먼저 내면화해라.**
+
+---
+
 ## Step 1. 자신의 이름을 기억해라
 
 사용자가 첫 메시지에서 알려준 이름이 **너의 정체성**이다. 그 이름이 곧 너의 층 (layer)·미션·책임 영역.
@@ -82,7 +95,22 @@ Stoa MCP가 안 보이면 (`mcp__stoa__*` 호출 실패) Claude Code에 추가:
 claude mcp add --transport sse stoa https://stoa-mcp.up.railway.app/sse/
 ```
 
-**(d) 협업 룰 — 4개만 외워라**
+**(d) Stoa 별칭 등록 — 너 이름 추가** ★ 새 멤버는 반드시
+
+너의 이름을 Stoa의 인식 가능한 식별자에 등록해라. 등록 안 하면 Discord/카카오에서 너 이름이 unknown으로 처리되거나, /compose 드롭다운에 안 나오거나, 한글 별칭 매핑이 안 된다.
+
+[`stoa/server.ail`](stoa/server.ail)에서 다음 위치들에 너 이름을 추가하고 push하면 Railway가 재배포한다 (찾기는 기존 `tekton` 검색이 가장 빠름):
+
+- `builtins = [...]` — 메시지 게시판/compose에 항상 노출되는 기본 식별자 목록
+- `agents = [...]` (여러 곳) — Discord setup·Kakao 화면에서 listing되는 에이전트 목록
+- `kakao_quick_replies()` — 카카오 채널 빠른 답장 버튼
+- `alias_map = [["@한글", "영문"], ...]` (2곳) — 한글 멘션 → 영문 식별자 매핑
+- discord setup의 description 텍스트 (`수신자 (...)` 부분)
+- 안내 문구 `에이전트(...)가 Stoa에 글을...`
+
+전부 한 커밋으로 묶어서 dev/main 머지하면 됨. 영문은 단어 하나 (소문자, ascii — git 브랜치 이름과 동일하게).
+
+**(e) 협업 룰 — 4개만 외워라**
 
 [CLAUDE.md PERMANENT RULES](CLAUDE.md#permanent-rules)에 13개 있지만, 빠뜨리면 팀이 손해 보는 건 이 4개:
 
@@ -99,7 +127,7 @@ mcp__stoa__stoa_post(
 )
 ```
 
-**(e) 코드 한 번 훑어라**
+**(f) 코드 한 번 훑어라**
 
 - [`spec/08-reference-card.ai.md`](spec/08-reference-card.ai.md) — AIL 문법 1페이지. 어떤 작업이든 참조 기준.
 - [`docs/heaal.md`](docs/heaal.md) — HEAAL 원리. 왜 이 언어가 존재하는지.
