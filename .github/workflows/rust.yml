@@ -25,3 +25,50 @@ jobs:
           workspaces: rust-impl
       - run: cargo build --all-targets
       - run: cargo test --all-targets
+
+  # Build downloadable release-mode binaries for every push to dev/main.
+  # Lets hyun06000 grab a single binary from the run page, run it, and
+  # field-test the dev build before approving a real `rust-v*.*.*` tag.
+  # Skipped on PRs (artifacts would not be useful there).
+  field-build:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    name: field-build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+    defaults:
+      run:
+        working-directory: rust-impl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-impl
+      - run: cargo build --release --target ${{ matrix.target }} --bin ail-rs
+      - name: Stage binary
+        run: |
+          set -eu
+          OUT="../dist"
+          mkdir -p "$OUT"
+          BRANCH=$(echo "${GITHUB_REF##*/}")
+          SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          ARCHIVE="ail-rs-${BRANCH}-${SHA}-${{ matrix.target }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/ail-rs" "${OUT}/"
+          (cd "${OUT}" && tar -czf "${ARCHIVE}" ail-rs && rm ail-rs && ls -la)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ail-rs-${{ matrix.target }}
+          path: dist/ail-rs-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
