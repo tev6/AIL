@@ -506,9 +506,11 @@ fn handle_debug_storage(req: Any) -> [Any] {
     db_env_set = false
     if not is_error(db_env_r) { db_env_set = true }
 
+    // Existence check via SQLite query — file.read on a binary DB
+    // hits utf-8 decode errors. db.query opens it as a SQLite handle.
     db_exists = false
-    probe = perform file.read(db_file)
-    if not is_error(probe) { db_exists = true }
+    exist_q = perform db.query(db_file, "SELECT 1")
+    if not is_error(exist_q) { db_exists = true }
 
     // Sniff each candidate path: try opening as SQLite and counting messages.
     // If any returns a row count higher than current, that file likely
