@@ -1,0 +1,102 @@
+name: rust-release
+
+# Triggered by tags shaped `rust-v*.*.*` (distinct from `v*.*.*` which
+# the PyPI release.yml owns). Builds a release binary per platform and
+# attaches them to a GitHub Release.
+
+on:
+  push:
+    tags:
+      - 'rust-v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: ""
+    defaults:
+      run:
+        working-directory: rust-impl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-impl
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --bin ail-rs
+      - name: Stage artifact
+        run: |
+          set -eu
+          BIN="ail-rs${{ matrix.ext }}"
+          OUT_DIR="../dist"
+          mkdir -p "$OUT_DIR"
+          cp "target/${{ matrix.target }}/release/${BIN}" "${OUT_DIR}/"
+          cd "${OUT_DIR}"
+          ARCHIVE="ail-rs-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+          tar -czf "${ARCHIVE}" "${BIN}"
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ail-rs-${{ matrix.target }}
+          path: dist/ail-rs-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Generate release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          NUM="${VERSION#rust-v}"
+          {
+            echo "# ${VERSION}"
+            echo
+            echo "Single-binary AIL runtime (Rust). Subset matches go-impl/ Phase-0 — fn / entry / intent declarations / arithmetic / comparisons / membership / Result / attempt cascade / ~25 builtins. \`intent\` execution requires an adapter (not bundled in v0)."
+            echo
+            echo "## Install"
+            echo
+            echo '```'
+            echo "tar -xzf ail-rs-${VERSION}-<target>.tar.gz"
+            echo "./ail-rs run program.ail"
+            echo '```'
+            echo
+            echo "## Targets"
+            for f in dist/*.tar.gz; do
+              echo "- $(basename "$f")"
+            done
+          } > release-notes.md
+          cat release-notes.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md
