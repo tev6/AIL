@@ -2,20 +2,50 @@
 # Blocks direct commits to dev and main.
 # Workflow: <name> branch → dev (merge only) → main (merge only).
 # Install: git config core.hooksPath .githooks
+#
+# 예외 — 머지 담당자의 의도된 release commit:
+#   변경 파일이 release-only set (pyproject.toml / Cargo.toml /
+#   CHANGELOG.md) 안에만 있고 git config ail.identity가 설정되어
+#   있으면 통과. Rule 4 "버전 bump는 dev 머지 시점에 단 한 번"을
+#   기계로 인식 가능한 형태로.
 
 branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 
-if [ "$branch" = "dev" ] || [ "$branch" = "main" ]; then
-  echo ""
-  echo "❌ Direct commits to '$branch' are not allowed."
-  echo ""
-  echo "Workflow:"
-  echo "  1. Work on your named branch (telos / ergon / arche)"
-  echo "  2. git push origin <name>"
-  echo "  3. Merge into dev via PR or: git checkout dev && git merge <name>"
-  echo "  4. After Railway dev confirms: merge dev → main"
-  echo ""
-  echo "To switch to your branch: git checkout telos"
-  echo ""
-  exit 1
+if [ "$branch" != "dev" ] && [ "$branch" != "main" ]; then
+  exit 0
 fi
+
+# Stage된 파일 목록을 release-only set에 맞춰본다.
+staged=$(git diff --cached --name-only)
+release_only=true
+if [ -z "$staged" ]; then
+  release_only=false
+fi
+while IFS= read -r f; do
+  case "$f" in
+    reference-impl/pyproject.toml|Cargo.toml|*/Cargo.toml|CHANGELOG.md) ;;
+    *) release_only=false ;;
+  esac
+done <<< "$staged"
+
+identity=$(git config ail.identity 2>/dev/null)
+
+if [ "$release_only" = true ] && [ -n "$identity" ]; then
+  # 정상적인 release bump — 통과시키되 의도를 stdout에 남긴다.
+  echo "✓ release commit on '$branch' by '$identity' (version/changelog only)"
+  exit 0
+fi
+
+echo ""
+echo "❌ Direct commits to '$branch' are not allowed."
+echo ""
+echo "Workflow:"
+echo "  1. Work on your named branch (telos / ergon / arche)"
+echo "  2. git push origin <name>"
+echo "  3. Merge into dev via PR or: git checkout dev && git merge <name>"
+echo "  4. After Railway dev confirms: merge dev → main"
+echo ""
+echo "예외 — release commit (pyproject.toml/Cargo.toml/CHANGELOG.md 만 변경 +"
+echo "      git config ail.identity 설정)이면 통과. 그 외에는 절대 금지."
+echo ""
+exit 1

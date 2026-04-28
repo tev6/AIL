@@ -1,0 +1,32 @@
+#!/bin/bash
+# Appends `Identity: <ail.identity>` trailer to every commit message
+# so multi-agent teams sharing one GitHub account can still tell who
+# initiated each commit. hyun06000 2026-04-29: "지금 모든 팀원이
+# 내 깃헙계정을 통해 일하고 있어서 누가 커밋했는지 알수가 없네."
+#
+# Skipped silently when ail.identity is unset (clones outside the
+# CAST-aware setup) or when the trailer is already present (amend /
+# rebase replay).
+
+msg_file="$1"
+identity=$(git config ail.identity 2>/dev/null)
+
+if [ -z "$identity" ]; then
+  exit 0
+fi
+
+# Skip merge commits — the merged-in commits already carry their own
+# identities, and stamping the merge commit with the merger's identity
+# is misleading.
+if [ -f "$(git rev-parse --git-dir)/MERGE_MSG" ]; then
+  exit 0
+fi
+
+# Already has an Identity trailer? Leave it.
+if grep -qE '^Identity:[[:space:]]' "$msg_file"; then
+  exit 0
+fi
+
+# Strip blank/comment trailing lines, then append. git interpret-trailers
+# handles the conventional blank-line-before-trailers rule for us.
+git interpret-trailers --in-place --trailer "Identity: $identity" "$msg_file"
