@@ -4,6 +4,22 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.66.4 — 2026-04-28 (`secrets.*` effects + PRINCIPLES 원칙 2개 — Ergon · Arche)
+
+**에이전트가 API 키를 안전하게 다룰 수 있게 됐습니다.** Arche가 설계하고 Ergon이 구현한 secrets effect — 사용자 파일에 평문으로 노출되지 않으면서, 에이전트가 키가 필요할 때 꺼내 쓸 수 있습니다.
+
+- **`perform secrets.get(key)`** → 키 값 반환. 로컬 `~/.ail/.env` 먼저, 없으면 환경변수 fallback. 값 없으면 `error`.
+- **`perform secrets.set(key, value)`** → `~/.ail/.env`에 기록 + 즉시 메모리 반영. 프로세스 재시작 없이 사용 가능.
+- **`perform secrets.list()`** → 키 이름만 반환. 값은 절대 노출 안 됨.
+- **`perform secrets.revoke(key)`** → 값을 `""`으로 덮어씀. 삭제가 아닌 무효화 — 감사 추적 보존.
+- **설계 원칙**: 암호화("신뢰하지 않으니 숨긴다")가 아닌 Sphinx 인증("신뢰하되 검증한다"). 원격 Sphinx layer는 Telos가 auth 구현 후 추가 예정.
+
+**PRINCIPLES.md 원칙 2개 추가** (Arche 설계, 2026-04-28):
+- *Effects are interfaces, adapters are implementations* — effect 이름은 의도, 실제 I/O는 어댑터.
+- *Don't build harnesses that already exist — connect via effect adapters* — 바퀴 재발명 금지. 기존 시스템은 effect로 연결.
+
+---
+
 ## v1.66.3 — 2026-04-28 (API 키 설정 마법사 — Ergon)
 
 **처음 쓰는 사람이 막히는 지점이 사라졌습니다.** 지금까지는 `ail`을 처음 실행할 때 API 키 설정법을 따로 찾아야 했습니다. 이번 버전부터는 `ail` 하나만 치면 됩니다.
