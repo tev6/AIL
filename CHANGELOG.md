@@ -4,6 +4,31 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.66.3 — 2026-04-28 (API 키 설정 마법사 — Ergon)
+
+**처음 쓰는 사람이 막히는 지점이 사라졌습니다.** 지금까지는 `ail`을 처음 실행할 때 API 키 설정법을 따로 찾아야 했습니다. 이번 버전부터는 `ail` 하나만 치면 됩니다.
+
+- **자동 안내**: API 키가 없으면 터미널에 안내 메시지, 브라우저 홈에는 설정 마법사가 자동으로 뜹니다.
+- **세 가지 선택**: Anthropic / OpenAI / Ollama 중 골라서 키 값을 입력하면 `~/.ail/.env`에 저장됩니다. 재시작 없이 즉시 반영.
+- **글로벌 fallback**: 프로젝트별 `.env`가 없을 때 `~/.ail/.env`를 자동으로 찾습니다. 어느 디렉터리에서 `ail`을 실행해도 키가 잃히지 않습니다.
+- 회귀 테스트 8개 (`tests/test_api_key_setup.py`).
+
+---
+
+## 2026-04-28 (Rust 런타임 Phase-0 완결 + 배포 준비 — Tekton)
+
+**Rust AIL 인터프리터가 실행 가능해졌습니다.** Lexer에서 시작한 이식 작업이 Parser와 Evaluator를 거쳐 Phase-0 목표에 도달했습니다.
+
+- **AST + Parser 이식**: `go-impl/parser.go`(823 LOC) + `ast.go`(122 LOC) → Rust. 재귀 하강 파서로 전체 AIL 문법 커버.
+- **Evaluator 이식**: `go-impl/eval.go`(809 LOC) → Rust. 리터럴·연산자·함수 호출·패턴 매칭·evolve 루프·effect 디스패치 포함. 이제 `.ail` 파일을 Rust 바이너리로 직접 실행할 수 있습니다.
+- **단일 바이너리 배포 자동화**: GitHub Actions로 매 dev/main push마다 macOS + Linux (x86_64 + aarch64) 세 타겟을 빌드. Actions UI에서 직접 다운로드 가능한 `.tar.gz` artifact.
+- **한 줄 설치**: `install.sh`로 curl 한 번이면 끝납니다. `pip install` 불필요.
+- **예제 5개 동봉**: `rust-impl/examples/` — hello world부터 파이프라인까지. 설치 직후 바로 따라할 수 있는 출발점.
+
+세 런타임(Python + Go + Rust)이 이제 모두 같은 사양에서 실행됩니다. 다음은 hyun06000의 필드테스트 결과를 받아 공개 릴리즈.
+
+---
+
 ## 2026-04-28 (Rust 런타임 시작 — Tekton 합류)
 
 **세 번째 런타임.** AIL이 처음으로 Python과 Go 바깥에서 돌아갑니다. Tekton이 `rust-impl/`을 부트스트랩하고 어휘 분석기(Lexer)를 Go 구현체에서 충실히 이식했습니다.
