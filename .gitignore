@@ -1,6 +1,9 @@
 # Trash
 .Trashcan/
 
+# Tekton field-test scratch (downloaded binaries, smoke-test runs)
+rust-impl/.field-test/
+
 # Python
 __pycache__/
 *.py[cod]
