@@ -409,9 +409,12 @@ fn handle_list_messages(req: Any) -> [Any] {
         }
         page = filtered
     }
-    // Inbox mode (to/from filter present) shows all matching messages
-    // including replies. Default mode (no filter) shows only top-level.
-    inbox_mode = to_name != None or from_name != None
+    // Inbox mode (to/from filter present, OR since_id polling) shows all
+    // matching messages including replies. Default mode (homepage) shows
+    // only top-level threads. since_id is a polling signal — monitors
+    // need to see replies to satisfy Rule 14 (편지 받으면 반드시 답장),
+    // and polling is the only legitimate use of since_id.
+    inbox_mode = to_name != None or from_name != None or since_id != None
     if not inbox_mode {
         top = []
         for m in page {
