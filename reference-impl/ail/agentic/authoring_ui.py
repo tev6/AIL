@@ -839,8 +839,14 @@ def render_authoring_page(
     const AUTO_FIX_MAX = 1;          // fix attempts per failed run
     const AUTO_CYCLE_MAX = 5;        // run→fix→run cycles per session
     let autoCycleCount = 0;
+    // hyun06000 2026-04-28: 자가수리 루프가 시작되면 사용자가 멈출
+    // 방법이 없었음. 노란 상태 카드에 ■ 중단 링크 + 진행 중 fetch
+    // AbortController, 다음 자동 Run/다음 fix 트리거 직전 플래그 체크.
+    let autoFixController = null;
+    let autoFixCancelled = false;
     async function autoFixOnError(failed, attempt) {{
       if (attempt >= AUTO_FIX_MAX) return;
+      if (autoFixCancelled) return;
       // Fade out the stale Run widgets so the user's eye moves to
       // the auto-fix status + the new widget that will replace them.
       document.querySelectorAll('.run-card').forEach(el => {{
@@ -882,6 +888,25 @@ def render_authoring_page(
         '클릭 필요 없음.</span>';
       statusBubble.appendChild(elapsedLine);
       statusBubble.appendChild(hintLine);
+      const stopRow = document.createElement('div');
+      stopRow.style.cssText = 'margin-top:6px;font-size:11px;';
+      const stopLink = document.createElement('a');
+      stopLink.href = '#';
+      stopLink.textContent = '■ 중단 / Stop';
+      stopLink.style.cssText =
+        'color:#dc2626;text-decoration:underline;font-weight:500;';
+      stopLink.addEventListener('click', (ev) => {{
+        ev.preventDefault();
+        autoFixCancelled = true;
+        if (autoFixController) {{
+          try {{ autoFixController.abort(); }} catch (e) {{}}
+        }}
+        stopLink.style.pointerEvents = 'none';
+        stopLink.style.opacity = '0.5';
+        stopLink.textContent = '중단 중…';
+      }});
+      stopRow.appendChild(stopLink);
+      statusBubble.appendChild(stopRow);
       status.appendChild(statusBubble);
       thread.appendChild(status);
       scrollBottom();
@@ -938,14 +963,20 @@ def render_authoring_page(
           'Error: ' + (failed.value || '') + ' | ' +
           'Diagnostic: ' + (failed.diagnostic || '');
       }}
+      autoFixController = new AbortController();
       try {{
         const r = await fetch('/authoring-chat', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'text/plain; charset=utf-8' }},
           body: errSummary,
+          signal: autoFixController.signal,
         }});
         clearInterval(fixTimer);
         status.remove();
+        if (autoFixCancelled) {{
+          addError('자동 수정 중단됨 (사용자 요청).');
+          return;
+        }}
         const text = await r.text();
         if (!r.ok) {{ addError('자동 수정 실패: ' + text); return; }}
         const data = JSON.parse(text);
@@ -1027,6 +1058,7 @@ def render_authoring_page(
           // scroll into view before the run fires. Then click the
           // most recent Run button programmatically.
           setTimeout(() => {{
+            if (autoFixCancelled) return;
             const allRunBtns = document.querySelectorAll(
               '.run-card:not([style*="opacity: 0.45"]) .run-inline');
             const btn = allRunBtns[allRunBtns.length - 1];
@@ -1036,7 +1068,13 @@ def render_authoring_page(
       }} catch (e) {{
         clearInterval(fixTimer);
         status.remove();
-        addError('자동 수정 네트워크 오류: ' + e.message);
+        if (e && e.name === 'AbortError') {{
+          addError('자동 수정 중단됨 (사용자 요청).');
+        }} else {{
+          addError('자동 수정 네트워크 오류: ' + e.message);
+        }}
+      }} finally {{
+        autoFixController = null;
       }}
     }}
 
@@ -1091,6 +1129,8 @@ def render_authoring_page(
       const prog = programsForNext && programsForNext.length > 0
         ? programsForNext[0] : null;
       if (!prog) return;
+      // 수동 Run = 자가수리 중단 해제.
+      autoFixCancelled = false;
       qrAbortCtrl = new AbortController();
       const origLabel = qrLabel.textContent;
       qrLabel.innerHTML = '▶ 실행 중… <a href="#" id="qr-abort" '
@@ -1389,7 +1429,10 @@ def render_authoring_page(
           // Fire after a paint tick so the rendered file tag + parse
           // banner are visible briefly before the auto-fix overlay
           // takes over (better UX than the file appearing-and-vanishing).
-          setTimeout(() => autoFixOnError(failed, 0), 250);
+          setTimeout(() => {{
+            if (autoFixCancelled) return;
+            autoFixOnError(failed, 0);
+          }}, 250);
         }}
       }}
     }}
@@ -1796,6 +1839,10 @@ def render_authoring_page(
       runBtn.textContent = '실행 / Run';
       const fire = async () => {{
         runBtn.disabled = true;
+        // 사용자 수동 Run 클릭은 직전 자가수리 중단을 해제 — 새 시도.
+        // (자동 재실행 경로는 setTimeout 안에서 cancelled 체크하므로
+        // 여기서 풀어도 안전.)
+        autoFixCancelled = false;
         const placeholder = document.createElement('div');
         placeholder.className = 'run-result';
         placeholder.style.background = '#f3f4f6';
@@ -2383,6 +2430,9 @@ def render_authoring_page(
 
     async function send(userText) {{
       hint && hint.remove();
+      // 새 메시지 전송 시 직전의 자가수리 중단 상태를 해제 — 다음
+      // Run 실패 때 다시 자가수리 루프가 정상 동작해야 함.
+      autoFixCancelled = false;
       const sentAttachments = stagedAttachments.slice();
       stagedAttachments = [];
       refreshAttachStrip();
