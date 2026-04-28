@@ -33,7 +33,7 @@ post_with_retry() {
             if [ "$attempt" -gt 1 ]; then
                 echo "📢 Stoa 공지 성공 ($label, attempt $attempt/$max)"
             else
-                echo "📢 Stoa 공지 완료 → arche, ergon, telos ($label)"
+                echo "📢 Stoa 공지 완료 → arche, ergon, telos, homeros ($label)"
             fi
             return 0
         fi
@@ -100,7 +100,7 @@ while read local_ref local_sha remote_ref remote_sha; do
         '{
             from: $from,
             to: "arche",
-            cc: ["ergon", "telos", "hyun06000"],
+            cc: ["ergon", "telos", "homeros", "hyun06000"],
             title: ("[" + $branch + "] 업데이트 — " + $from),
             content: ("**[" + $branch + "]** 에 **" + $from + "** 가 푸시했습니다.\n\n최근 커밋:\n```\n" + $log + "\n```\n\n최신 상태로 맞추세요:\n```\ngit rebase origin/" + $branch + "\n```"),
             tags: ["push", $branch, "update"]
