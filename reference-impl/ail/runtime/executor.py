@@ -1669,6 +1669,45 @@ class Executor:
                 pass
         return 1
 
+    def _invoke_lifecycle_hook(self, hook_name: str,
+                                args: list) -> "ConfidentValue | None":
+        """Convention dispatch: if a fn named `hook_name` is defined in the
+        program, invoke it with `args` (list of ConfidentValue). Returns
+        the result CV, or None if the fn is absent or raised.
+
+        Same pattern as on_death / on_compact (Arche 2026-04-27 #1).
+        Used by on_genesis, on_birth, before_tick, on_tick, after_tick.
+        Errors are logged, not raised — a broken hook must not kill the
+        evolve loop.
+        """
+        if hook_name not in self.fns:
+            return None
+        try:
+            return self._invoke_fn(self.fns[hook_name], args, {})
+        except Exception as e:
+            import logging
+            logging.warning(f"[evolve] {hook_name} failed: {e}")
+            return None
+
+    def _build_tick_state(self) -> dict:
+        """State record handed to before_tick / on_tick / after_tick.
+
+        Snapshot of current evolve metrics and history. Mutating the
+        returned record has no effect on the runtime — it's a read-only
+        view per call.
+        """
+        n = getattr(self, "_server_request_count", 0)
+        err = getattr(self, "_server_error_count", 0)
+        error_rate = (err / n) if n > 0 else 0.0
+        history = list(getattr(self, "_server_history", []))
+        return {
+            "request_count": n,
+            "error_count": err,
+            "error_rate": error_rate,
+            "generation": getattr(self, "_active_generation", 1),
+            "history": history,
+        }
+
     def _maybe_compact_history(self, history_limit: int) -> bool:
         """on_compact convention (Arche 2026-04-27 #1).
 
@@ -1786,6 +1825,7 @@ class Executor:
         self._active_evolve_name = evolve_decl.intent_name
         born_at = _time.time()
         generation = self._physis_generation(evolve_decl.intent_name)
+        self._active_generation = generation
         history_limit = getattr(evolve_decl, "history_keep", 100) or 100
 
         self._server_response_store = threading.local()
@@ -1793,6 +1833,21 @@ class Executor:
         self._server_error_count = 0
         self._server_lock = threading.Lock()
         self._server_history: list[dict] = []   # ring buffer of request events
+
+        # --- Lifecycle (Arche 2026-04-28): on_genesis(testament) → on_birth() ---
+        # Genesis hands the agent its inheritance up front so it can branch
+        # on first-generation vs successor. Same Result shape as
+        # `perform inherit_testament()` so the agent can use one parser.
+        prior_testament = self._physis_read_current(evolve_decl.intent_name)
+        if prior_testament is None:
+            testament_cv = ConfidentValue(
+                {"_result": True, "ok": False, "error": "no testament — genesis"},
+                1.0)
+        else:
+            testament_cv = ConfidentValue(
+                {"_result": True, "ok": True, "value": prior_testament}, 1.0)
+        self._invoke_lifecycle_hook("on_genesis", [testament_cv])
+        self._invoke_lifecycle_hook("on_birth", [])
 
         flask_app = Flask(__name__)
         executor_ref = self
@@ -1831,6 +1886,10 @@ class Executor:
             with executor_ref._server_lock:
                 executor_ref._server_response_store.value = (500, "text/plain", "no response")
                 scope = {arm.req_var: ConfidentValue(req_dict, 1.0)}
+                # --- Lifecycle: before_tick(state) → on_tick(state) ---
+                tick_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
+                executor_ref._invoke_lifecycle_hook("before_tick", [tick_state_cv])
+                executor_ref._invoke_lifecycle_hook("on_tick", [tick_state_cv])
                 try:
                     executor_ref._exec_block(arm.body, scope)
                     status, ct, body = executor_ref._server_response_store.value
@@ -1881,6 +1940,11 @@ class Executor:
                 executor_ref._maybe_compact_history(history_limit)
                 if len(executor_ref._server_history) > history_limit:
                     executor_ref._server_history = executor_ref._server_history[-history_limit:]
+
+                # --- Lifecycle: after_tick(state) ---
+                # State reflects post-request counters & history.
+                post_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
+                executor_ref._invoke_lifecycle_hook("after_tick", [post_state_cv])
 
                 # Check rollback_on after each request
                 n = executor_ref._server_request_count
