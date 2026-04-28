@@ -66,6 +66,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "db.execute", "db.query",
     "git.commit", "git.push", "git.pull",
     "gh.pr_list", "gh.pr_view", "gh.pr_create", "gh.issue_list",
+    "mneme.save", "mneme.load", "mneme.log",
     "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
 })
 from .calibration import Calibrator, default_calibrator
@@ -718,6 +719,12 @@ class Executor:
             return self._gh_pr_create(args, kwargs, origin)
         if name == "gh.issue_list":
             return self._gh_issue_list(args, kwargs, origin)
+        if name == "mneme.save":
+            return self._mneme_save(args, kwargs, origin)
+        if name == "mneme.load":
+            return self._mneme_load(args, kwargs, origin)
+        if name == "mneme.log":
+            return self._mneme_log(args, kwargs, origin)
         if name in ("secrets.get", "secrets.set",
                     "secrets.list", "secrets.revoke"):
             return self._secrets_dispatch(name, args, kwargs, origin)
@@ -1175,6 +1182,211 @@ class Executor:
                 "labels": labels,
             })
         return self._result_ok(issues, origin)
+
+    # --- mneme.* effects (Arche 2026-04-29) ---
+    # Per-agent identity persistence backed by the polis git repo.
+    # The agent's three identity files — Identity.md / Bonds.md / Will.md —
+    # are committed and pushed via mneme.save and pulled+read via mneme.load.
+    # Closes the lifecycle loop: on_dying → mneme.save → push, next gen
+    # on_birth → mneme.load → pull. This is distinct from the Mneme
+    # Stoa-style server (mneme/server.ail) — here the namespace wraps git
+    # so each agent's identity rides on the polis's own repository.
+
+    _MNEME_FILES = ("Identity.md", "Bonds.md", "Will.md")
+
+    def _mneme_repo(self, kwargs):
+        """Resolve repo path. Defaults to caller cwd; `repo_path` kwarg overrides."""
+        import os as _os
+        cv = kwargs.get("repo_path") or kwargs.get("path")
+        if cv is not None and cv.value is not None:
+            return str(cv.value)
+        return _os.getcwd()
+
+    def _mneme_run_git(self, repo, argv, origin, label):
+        """Run a git subcommand inside `repo`. Returns (stdout, None) or (None, err_cv)."""
+        import subprocess
+        try:
+            r = subprocess.run(["git", "-C", repo] + argv,
+                               capture_output=True, text=True,
+                               timeout=60, shell=False)
+        except FileNotFoundError:
+            return None, self._result_err(f"{label}: git binary not found", origin)
+        except subprocess.TimeoutExpired:
+            return None, self._result_err(f"{label}: git timeout (60s)", origin)
+        except Exception as e:
+            return None, self._result_err(f"{label}: {type(e).__name__}: {e}", origin)
+        if r.returncode != 0:
+            msg = r.stderr.strip() or r.stdout.strip() or f"exit {r.returncode}"
+            return None, self._result_err(f"{label}: {msg}", origin)
+        return r.stdout, None
+
+    def _mneme_save(self, args, kwargs, origin):
+        """mneme.save(message?, repo_path?) -> Result[Text]
+
+        Stage Identity.md / Bonds.md / Will.md (whichever exist), commit
+        with `message` (or a default like "mneme: snapshot @ <iso>"), and
+        push to the current branch's tracking remote. Returns the new
+        commit sha. Errors include: not a git repo, no remote configured,
+        no identity files at all, push rejected.
+        """
+        from pathlib import Path as _Path
+        import datetime as _dt
+
+        repo = self._mneme_repo(kwargs)
+        repo_p = _Path(repo)
+        if not (repo_p / ".git").exists():
+            return self._result_err(
+                f"mneme.save: '{repo}' is not a git repo "
+                "(run `git init` in your polis dir)", origin)
+
+        # Check at least one of the three identity files exists.
+        present = [f for f in self._MNEME_FILES if (repo_p / f).is_file()]
+        if not present:
+            return self._result_err(
+                "mneme.save: none of Identity.md / Bonds.md / Will.md "
+                "found in repo — nothing to save", origin)
+
+        # message
+        message = None
+        if args and args[0].value is not None:
+            message = str(args[0].value)
+        if "message" in kwargs and kwargs["message"].value is not None:
+            message = str(kwargs["message"].value)
+        if not message:
+            iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            message = f"mneme: snapshot @ {iso}"
+
+        # Stage existing files
+        out, err = self._mneme_run_git(
+            repo, ["add"] + present, origin, "mneme.save")
+        if err is not None:
+            return err
+
+        # Check there's actually something staged (no-op commits would
+        # error out on `git commit --allow-empty=false`).
+        diff_out, _ = self._mneme_run_git(
+            repo, ["diff", "--cached", "--name-only"], origin, "mneme.save")
+        if diff_out is not None and not diff_out.strip():
+            return self._result_err(
+                "mneme.save: nothing changed since last save", origin)
+
+        # Commit
+        out, err = self._mneme_run_git(
+            repo, ["commit", "-m", message], origin, "mneme.save")
+        if err is not None:
+            return err
+
+        # Resolve sha
+        sha_out, err = self._mneme_run_git(
+            repo, ["rev-parse", "HEAD"], origin, "mneme.save")
+        if err is not None:
+            return err
+        sha = (sha_out or "").strip()
+
+        # Push (best-effort surface error so agent can react). Use
+        # current branch's upstream; if no upstream, surface the message.
+        out, err = self._mneme_run_git(
+            repo, ["push"], origin, "mneme.save (push)")
+        if err is not None:
+            return err
+
+        return self._result_ok(sha, origin)
+
+    def _mneme_load(self, args, kwargs, origin):
+        """mneme.load(repo_path?) -> Result[Record]
+
+        Pull the latest from origin (best-effort — if there's no remote
+        the pull is skipped, not an error), then read the three identity
+        files. Returns a record with `identity`, `bonds`, `will` (each
+        Text or None). The agent typically calls this from on_birth.
+        """
+        from pathlib import Path as _Path
+
+        repo = self._mneme_repo(kwargs)
+        repo_p = _Path(repo)
+        if not (repo_p / ".git").exists():
+            return self._result_err(
+                f"mneme.load: '{repo}' is not a git repo "
+                "(run `git init` in your polis dir)", origin)
+
+        # Try pull. If no remote configured, that's a soft warning we
+        # surface inline rather than failing — local-only mneme is still
+        # useful for single-machine experimentation.
+        pull_msg = ""
+        out, err = self._mneme_run_git(
+            repo, ["remote"], origin, "mneme.load")
+        if err is None and out and out.strip():
+            pulled, perr = self._mneme_run_git(
+                repo, ["pull", "--ff-only"], origin, "mneme.load (pull)")
+            if perr is not None:
+                # Non-fatal — return ok with the warning baked in so the
+                # agent can decide. Most callers should treat this as
+                # "don't trust your view yet".
+                pull_msg = perr.value.get("error", "")
+
+        def _read(name):
+            p = repo_p / name
+            if not p.is_file():
+                return None
+            try:
+                return p.read_text(encoding="utf-8")
+            except Exception:
+                return None
+
+        rec = {
+            "identity": _read("Identity.md"),
+            "bonds": _read("Bonds.md"),
+            "will": _read("Will.md"),
+            "pull_warning": pull_msg or None,
+        }
+        return self._result_ok(rec, origin)
+
+    def _mneme_log(self, args, kwargs, origin):
+        """mneme.log(limit?, repo_path?) -> Result[[Record]]
+
+        git log over the polis repo, scoped to the three identity files
+        when they exist (so unrelated commits don't dominate the trace).
+        Each record: `sha`, `author`, `date` (ISO), `message`.
+        """
+        from pathlib import Path as _Path
+
+        repo = self._mneme_repo(kwargs)
+        repo_p = _Path(repo)
+        if not (repo_p / ".git").exists():
+            return self._result_err(
+                f"mneme.log: '{repo}' is not a git repo", origin)
+
+        limit = 50
+        if args and args[0].value is not None:
+            limit = int(args[0].value)
+        if "limit" in kwargs and kwargs["limit"].value is not None:
+            limit = int(kwargs["limit"].value)
+
+        sep = "\x1f"   # unit separator — unlikely to appear in commit metadata
+        fmt = sep.join(["%H", "%an", "%aI", "%s"])
+        argv = ["log", f"--max-count={limit}", f"--pretty=format:{fmt}"]
+        # Restrict to identity files when at least one exists.
+        present = [f for f in self._MNEME_FILES if (repo_p / f).is_file()]
+        if present:
+            argv += ["--"] + present
+
+        out, err = self._mneme_run_git(repo, argv, origin, "mneme.log")
+        if err is not None:
+            return err
+
+        records = []
+        for line in (out or "").splitlines():
+            parts = line.split(sep)
+            if len(parts) != 4:
+                continue
+            sha, author, date, message = parts
+            records.append({
+                "sha": sha,
+                "author": author,
+                "date": date,
+                "message": message,
+            })
+        return self._result_ok(records, origin)
 
     def _image_embed(self, args, kwargs, origin):
         """Return a markdown image string the chat UI can render inline.
@@ -2196,9 +2408,19 @@ class Executor:
                                   f"({err}/{n})")
                         logging.warning(f"[physis] {reason}. Gen {generation} dying.")
 
-                        # --- Physis §1: call on_death if defined ---
+                        # --- Lifecycle: on_dying(reason, history) before on_death ---
+                        # on_dying is the effects-allowed cleanup hook (mneme.save,
+                        # log flush, …). on_death is `pure fn` (testament composition
+                        # only) so it can't perform effects. Anything that needs a
+                        # side effect at end-of-life goes here.
                         died_at = _time.time()
                         lifetime_s = died_at - born_at
+                        executor_ref._invoke_lifecycle_hook(
+                            "on_dying",
+                            [ConfidentValue(reason, 1.0),
+                             ConfidentValue(executor_ref._server_history, 1.0)])
+
+                        # --- Physis §1: call on_death if defined ---
                         testament = None
                         if "on_death" in executor_ref.fns:
                             try:

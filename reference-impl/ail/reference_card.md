@@ -230,16 +230,26 @@ pattern as `on_death` / `on_compact`. State arg is a Record with
 `request_count`, `error_count`, `error_rate`, `generation`, `history`.
 
 ```ail
-fn on_genesis(testament: Any)   // once, before loop. testament is Result —
-                                // is_error() == genesis, unwrap() == inherited.
-fn on_birth()                   // once, right after on_genesis.
-fn before_tick(state: Any)      // every request, before the `when` block.
-fn on_tick(state: Any)          // every request, between before_tick and `when`.
-fn after_tick(state: Any)       // every request, after the `when` block.
+fn on_genesis(testament: Any)         // once, before loop. testament is Result —
+                                      // is_error() == genesis, unwrap() == inherited.
+fn on_birth()                         // once, right after on_genesis.
+fn before_tick(state: Any)            // every request, before the `when` block.
+fn on_tick(state: Any)                // every request, between before_tick and `when`.
+fn after_tick(state: Any)             // every request, after the `when` block.
+fn on_dying(reason: Text,             // rollback_on fire, BEFORE on_death.
+            history: [Any])           // effects allowed (mneme.save, etc.).
+pure fn on_death(reason: Text,        // rollback_on fire, AFTER on_dying.
+                 history: [Any])      // pure — testament composition only.
 ```
 
 Order: `on_genesis(testament) → on_birth() → loop[before_tick(state) →
-on_tick(state) → when block → after_tick(state)] → on_dying / on_death`.
+on_tick(state) → when block → after_tick(state)] → on_dying(reason,
+history) → on_death(reason, history)`.
+
+The on_dying / on_death split: side effects belong in on_dying (commit
+identity, flush logs, send a goodbye); the pure on_death just shapes
+the testament. This way the testament composition stays
+provenance-clean and the cleanup keeps its full effect surface.
 
 Hooks may be `pure fn` or `fn` — declare effects only on the ones that
 need them (e.g. `before_tick` doing inbox poll). A hook that raises is
@@ -776,6 +786,19 @@ Built-in effects:
     `gh.*` exists as a named namespace (not generic `process.spawn`)
     so the ledger keeps "gh.pr_create happened", not "shell happened".
     For new tools, add a new named effect — do not reach for shell.
+  - `mneme.save(message?: Text, repo_path?: Text) -> Result[Text]` —
+    stage `Identity.md` / `Bonds.md` / `Will.md` (whichever exist) in
+    the repo, commit with `message`, push to upstream. Returns the
+    commit sha. Errors when not a git repo, no identity files, or
+    nothing changed since last save. `repo_path` defaults to cwd.
+    Idiomatic in `on_dying` so the next generation inherits.
+  - `mneme.load(repo_path?: Text) -> Result[Record]` —
+    `git pull --ff-only` (skipped silently if no remote) and read the
+    three identity files. Record: `identity, bonds, will, pull_warning`
+    (each Text or None). Idiomatic in `on_birth`.
+  - `mneme.log(limit?: Number, repo_path?: Text) -> Result[[Record]]` —
+    `git log` over the identity files only (so unrelated commits don't
+    dominate). Each record: `sha, author, date (ISO), message`.
   - `secrets.get(key: Text) -> Result[Text]` — read a secret from
     `~/.ail/.env` (hot layer) or `os.environ`. Returns `ok(value)` or
     `error(...)` when not found. Use instead of `env.read` for

@@ -97,23 +97,39 @@ fn on_genesis(testament: Any) -> Any {
     return None
 }
 
-// on_birth: identity load + Stoa greeting. Runs once after on_genesis,
-// before the request loop. Files default to a stub so the agent boots
-// even if 박상현이 아직 작성하지 않았을 때.
+// on_birth: identity load via mneme.load (git pull → read three files).
+// Runs once after on_genesis, before the request loop. Falls back to
+// direct file.read when mneme isn't ready (no git repo / no remote yet).
 fn on_birth() -> Any {
-    identity = read_file_or("Identity.md", "(no Identity.md found)")
-    bonds   = read_file_or("Bonds.md",    "(no Bonds.md found)")
-    will    = read_file_or("Will.md",     "(no Will.md found)")
+    loaded = perform mneme.load()
+    identity = "(no Identity.md found)"
+    bonds = "(no Bonds.md found)"
+    will = "(no Will.md found)"
+    pulled_via = "mneme"
+    if is_error(loaded) {
+        // mneme.load failed — fall back to local read so the agent
+        // still boots in pre-git environments.
+        identity = read_file_or("Identity.md", identity)
+        bonds   = read_file_or("Bonds.md",    bonds)
+        will    = read_file_or("Will.md",     will)
+        pulled_via = "file (mneme unavailable)"
+    } else {
+        rec = unwrap(loaded)
+        if get(rec, "identity") != None { identity = get(rec, "identity") }
+        if get(rec, "bonds") != None    { bonds    = get(rec, "bonds") }
+        if get(rec, "will") != None     { will     = get(rec, "will") }
+    }
     perform state.write("identity", identity)
     perform state.write("bonds", bonds)
     perform state.write("will", will)
     perform state.write("ticks", 0)
     perform state.write("inbox_seen", 0)
-    perform log(join([agent_name(), " :: birth — identity ", to_text(length(identity)), "B"], ""))
+    perform log(join([agent_name(), " :: birth — identity ",
+                      to_text(length(identity)), "B via ", pulled_via], ""))
     stoa_post(
         join(["👋 ", agent_name(), " — birth"], ""),
         join([
-            "에이전트 ", agent_name(), " 깨어남.\n",
+            "에이전트 ", agent_name(), " 깨어남 (", pulled_via, ").\n",
             "Identity.md: ", to_text(length(identity)), " bytes\n",
             "Bonds.md:    ", to_text(length(bonds)), " bytes\n",
             "Will.md:     ", to_text(length(will)), " bytes"
@@ -152,7 +168,24 @@ fn after_tick(state: Any) -> Any {
     return None
 }
 
+// on_dying: effects-allowed cleanup before testament composition.
+// mneme.save commits + pushes Identity/Bonds/Will so the next generation
+// (gen N+1) can pull them in on_birth and inherit the lineage.
+fn on_dying(reason: Text, history: [Any]) -> Any {
+    msg = join(["mneme: gen end (", reason, ")"], "")
+    saved = perform mneme.save(msg)
+    if is_error(saved) {
+        perform log(join([agent_name(),
+            " :: dying — mneme.save failed: ", unwrap_error(saved)], ""))
+    } else {
+        perform log(join([agent_name(),
+            " :: dying — mneme.save sha=", unwrap(saved)], ""))
+    }
+    return None
+}
+
 // on_death: testament summarises this generation for the next one.
+// pure — no effects allowed. Side effects belong in on_dying above.
 pure fn on_death(reason: Text, history: [Any]) -> Any {
     return [
         ["reason", reason],
@@ -208,7 +241,7 @@ fn handle(req: Any) -> [Any] {
 
 evolve universal_agent {
     listen: 9100
-    effects: [file.read, http.get, http.post_json, http.respond, log, state.read, state.write, env.read, clock.now]
+    effects: [file.read, http.get, http.post_json, http.respond, log, state.read, state.write, env.read, clock.now, mneme.save, mneme.load, mneme.log]
     metric: error_rate
     when request_received(req) {
         result = handle(req)
