@@ -225,6 +225,16 @@ def main(argv: list[str] | None = None) -> int:
              "'error_rate > 0.5 or consecutive_failures > 5' — the Physis "
              "default. Arche directive 2026-04-29: never empty.")
 
+    p_doctor = sub.add_parser("doctor",
+        help="Diagnose an AIL project — flags scaffold leftovers, "
+             "missing evolve blocks, orphan schedules, parse errors, "
+             "and other shapes that block deploy. 5-second version of "
+             "what would otherwise be a 30-min debugging session.")
+    p_doctor.add_argument("path", nargs="?", default=".",
+        help="Project directory (default: current directory).")
+    p_doctor.add_argument("--json", action="store_true",
+        help="Emit machine-readable JSON instead of formatted text.")
+
     sub.add_parser("version", help="Print version")
 
     args = parser.parse_args(argv)
@@ -392,6 +402,32 @@ def main(argv: list[str] | None = None) -> int:
             if t["passed"] < t["total"]:
                 return 2
         return 0
+
+    if args.cmd == "doctor":
+        from .doctor import diagnose, render_report
+        root = Path(args.path).expanduser().resolve()
+        if not root.is_dir():
+            print(f"not a directory: {root}", file=sys.stderr)
+            return 1
+        report = diagnose(root)
+        if args.json:
+            import json as _json
+            payload = {
+                "project_root": str(report.project_root),
+                "findings": [
+                    {
+                        "severity": f.severity,
+                        "code": f.code,
+                        "message": f.message,
+                        "hint": f.hint,
+                    }
+                    for f in report.findings
+                ],
+            }
+            print(_json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(render_report(report), end="")
+        return 1 if report.errors else 0
 
     if args.cmd == "bundle":
         from .bundle import bundle, DEFAULT_ROLLBACK_ON
