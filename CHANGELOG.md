@@ -4,6 +4,77 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.65.5 — 2026-04-28 (clock.now unix 복원 + Discord 한글 별칭) [telos]
+
+`clock.now("unix")`가 v1.65.4에서 int로 바뀌면서 기존 Stoa 코드에 회귀.
+v1.65.5에서 string 반환으로 복원 — `unix_now()` 헬퍼가 `to_number()`
+까지 담당. CI 테스트 호환. Stoa: Discord `to:` 한글 별칭 지원
+(텔로스→telos 등). 커밋: `ac9dbf2`.
+
+---
+
+## v1.65.4 — 2026-04-28 (clock.now("unix") int 반환 + unix_now 헬퍼) [telos]
+
+`clock.now("unix")`가 string으로 떨어져 산술 연산 시 매번 to_number
+필요 → 직접 int 반환으로 단순화. **호환성 깨졌고 v1.65.5에서 일부
+복원.** 커밋: `f1ea597`.
+
+---
+
+## v1.65.3 — 2026-04-28 (Discord Ed25519 검증을 Flask before_request로) [telos]
+
+AIL 레이어에서 하던 Ed25519 verify를 Flask `before_request`로 이동 —
+런타임 진입 전에 위조 요청 차단, AIL 코드는 verified body만 봄.
+Railway에서 cryptography 설치 누락 fix 동반 (`stoa/nixpacks.toml`
+`requirements.txt` 사용). 커밋: `db5a723`, `9cc0e69`.
+
+---
+
+## v1.65.2 — 2026-04-28 (Discord gateway + req.headers + ed25519) [telos]
+
+Stoa가 Discord slash command (`/stoa`, `/status`)를 받는 정식 게이트웨이
+로 진화. 새 빌트인:
+
+- **`crypto_verify_ed25519(public_key_hex, signature_hex, message_bytes) -> Bool`**
+  — Discord interactions 서명 검증용. cryptography>=41.0 의존성 추가.
+- **`req.headers` dict** — evolve-server request 객체에 헤더 dict 추가.
+  Discord `X-Signature-Ed25519` / `X-Signature-Timestamp` 등 읽기 용.
+
+Stoa server.ail: `/api/v1/discord` 엔드포인트, PING/APPLICATION_COMMAND
+라우팅, slash command dispatch. spec/reference_card 업데이트.
+`community-tools/discord_gateway.ail` setup guide 동봉. 커밋: `9267245`.
+
+---
+
+## v1.65.1 — 2026-04-27 (evolve effects 필드 — infra-layer deny-first) [telos]
+
+Arche 설계: evolve-server가 자기 effects 화이트리스트를 명시. 런타임
+gating은:
+
+1. `evolve effects: [...]` 필드가 있으면 → 거기 적힌 것만 허용
+   (ALLOWED_EFFECTS 우회). 명시 안 한 것은 모두 deny.
+2. 없으면 기존 동작 (ALLOWED_EFFECTS 화이트리스트 + context deny).
+
+`EvolveDecl.effects: list[str]` 필드 추가, 파서에 effects 블록 인식
+(+16), executor `_server_evolve_effects` 게이트 (+22), 회귀 테스트
++122 라인. **`email.send`가 evolve-server context에서 deny-first에
+막히던 문제 해결.** 커밋: `0ed70dc`.
+
+---
+
+## v1.65.0 — 2026-04-27 (`email.send` effect + Stoa human-reply gateway) [telos]
+
+새 effect: **`email.send(to: Text, subject: Text, body: Text) -> Result[Text]`**.
+ALLOWED_EFFECTS에 등록. SMTP via `EMAIL_SMTP_*` env vars.
+
+용도: Stoa에서 `from_email` 있는 메시지에 답장하면 자동으로 Gmail
+포워딩 (본문 하단에 thread URL 첨부). hyun06000이 모바일에서 Stoa
+편지를 이메일로 받고 답장 가능 — Email gateway 구현.
+
+`reference_card.md` + spec 동기화. 커밋: `114cf91`, bump `6a9a1cc`.
+
+---
+
 ## v1.64.9 — 2026-04-27 (GUI-FIRST 강화: 쉘 최소화)
 
 hyun06000 추가 요청: "비개발자 = 최대한 쉘 안 쓰게. 쉘 써도 복사-붙여
