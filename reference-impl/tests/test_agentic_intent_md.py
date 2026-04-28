@@ -91,8 +91,12 @@ def test_template_round_trips():
     spec = parse_intent_md(text)
     assert spec.name == "demo"
     assert spec.port == DEFAULT_PORT
-    # Template includes a sample empty-input error case
-    assert any(t.input == "" and not t.expect_ok for t in spec.tests)
+    # Telos 2026-04-29: scaffold no longer plants example bullets in
+    # ## Behavior / ## Tests — the model used to read those examples
+    # as literal requirements (see Arche field test). HTML comments
+    # carry the hints; the parser's `- ` bullet regex skips them.
+    assert spec.behavior == []
+    assert spec.tests == []
 
 
 def test_unknown_headers_dont_crash():
