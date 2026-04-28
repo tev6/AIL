@@ -212,8 +212,17 @@ def main(argv: list[str] | None = None) -> int:
         args.no_open = False
 
     if args.cmd == "home":
+        from . import _load_dotenv_if_present, _resolve_adapter_name_from_env
         from .agentic.home_ui import serve_home
         from pathlib import Path as _Path
+        _load_dotenv_if_present()
+        if _resolve_adapter_name_from_env() == "none":
+            print(
+                "\n⚠️  API 키가 설정되어 있지 않아요.\n"
+                "   브라우저 창에서 원하는 키 종류를 선택하고 입력하면 자동으로 저장됩니다.\n"
+                "   (Anthropic Claude / OpenAI / Ollama 로컬 모델 중 하나)\n",
+                flush=True,
+            )
         start = _Path(args.root).expanduser() if args.root else _Path.home()
         port = args.port or _find_free_port(8079)
         url = f"http://127.0.0.1:{port}/"
