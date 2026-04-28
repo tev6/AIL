@@ -1,0 +1,23 @@
+// Phase-1 demo — `intent` execution via Anthropic adapter.
+//
+// Run (auto-detects adapter when ANTHROPIC_API_KEY is set):
+//   ail-rs run examples/11_intent_demo.ail "Korean for 'hello'"
+//
+// Or explicitly:
+//   ail-rs run --adapter anthropic examples/11_intent_demo.ail "Korean for 'hello'"
+//
+// LLM output is non-deterministic by nature, so this file has no
+// // OUTPUT: directive — the conformance harness will skip it with
+// a warning. It's a demo, not a regression test.
+
+intent translate(prompt: Text) -> Text {
+    goal: produce a single-line answer to the prompt — natural and concise
+    constraints {
+        no_quotes
+        no_explanations
+    }
+}
+
+entry main(prompt: Text) {
+    return translate(prompt)
+}
