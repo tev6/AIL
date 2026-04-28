@@ -1,0 +1,12 @@
+// Smoke test #6 — string operations: trim, upper, lower, length composition.
+// INPUT:    HELLO World
+// OUTPUT: hello world|11
+
+fn normalize(s: Text) -> Text {
+    return lower(trim(s))
+}
+
+entry main(text: Text) {
+    n = normalize(text)
+    return n + "|" + to_text(length(n))
+}

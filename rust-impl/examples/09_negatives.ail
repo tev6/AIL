@@ -1,0 +1,10 @@
+// Smoke test #9 — negative numbers, modulo, abs.
+// INPUT:
+// OUTPUT: -7|2|7
+
+entry main() {
+    a = 0 - 7
+    b = abs(a) % 5
+    c = abs(a)
+    return to_text(a) + "|" + to_text(b) + "|" + to_text(c)
+}
