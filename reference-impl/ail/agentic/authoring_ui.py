@@ -1046,6 +1046,17 @@ def render_authoring_page(
           addAgent(entry.reply, entry.files || [], entry.action || null);
         }}
       }});
+      // If history ends on answer_only (buried run card), re-attach a
+      // run card at the bottom so the user doesn't have to scroll up.
+      const lastIsRun = lastAgentAction === 'ready_to_run'
+        || lastAgentAction === 'ready_to_serve'
+        || lastAgentAction === 'ready_to_deploy';
+      const hasValidProgram = programsForNext.length > 0
+        && programsForNext[0].parses !== false
+        && programsForNext[0].entry_present !== false;
+      if (!lastIsRun && hasValidProgram) {{
+        addRunWidget(false);
+      }}
       scrollBottom();
     }}
 
