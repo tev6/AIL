@@ -42,7 +42,11 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          # x86_64-apple-darwin built via cross-compile from macos-latest
+          # (Apple Silicon). Avoids macos-13 runner queue, which has been
+          # backed up >40min in practice. Tagged releases (rust-release.yml)
+          # still use a real macos-13 runner for fidelity.
+          - os: macos-latest
             target: x86_64-apple-darwin
     defaults:
       run:
