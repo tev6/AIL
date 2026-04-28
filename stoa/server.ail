@@ -321,6 +321,20 @@ fn handle_post_message(req: Any) -> [Any] {
         ["url", url]
     ]
     messages = append(messages, msg)
+    total = length(messages)
+    max_messages = 2000
+    if total > max_messages {
+        pruned = []
+        i = 0
+        cutoff = total - max_messages
+        for m in messages {
+            if i >= cutoff {
+                pruned = append(pruned, m)
+            }
+            i = i + 1
+        }
+        messages = pruned
+    }
     data_file = get_data_file()
     encoded_r = encode_json(messages)
     if is_error(encoded_r) {
