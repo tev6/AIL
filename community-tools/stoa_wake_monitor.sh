@@ -60,9 +60,15 @@ while true; do
                 echo "$latest" > "$STATE"
                 LAST="$latest"
             fi
-            # Only emit if directed to IDENTITY, to=all, or to=null (human broadcast)
+            # Emit if: to==IDENTITY, to==all, to==null, OR IDENTITY is in cc array
             echo "$resp" | jq -r --arg id "$IDENTITY" \
-                '.messages[:3] | .[] | select((.to == null) or (.to == $id) or (.to == "all")) |
+                '.messages[:3] | .[] |
+                select(
+                    (.to == null) or
+                    (.to == $id) or
+                    (.to == "all") or
+                    ((.cc // []) | map(. == $id) | any)
+                ) |
                 "📬 Stoa: [\(.id)] \(.from // "?") → \(.to // "전체"): \(.title // (.content // "(no title)" | .[0:40]))"' \
                 2>/dev/null
         fi
