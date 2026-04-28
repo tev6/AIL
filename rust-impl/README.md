@@ -8,7 +8,7 @@ Third reference implementation of AIL, after Python (`reference-impl/`) and Go (
 - Memory safety + concurrency for Phase-2 work.
 - Third independent runtime is a third spec checker — divergence between three implementations is the loudest possible signal that the spec is ambiguous.
 
-**Status (2026-04-28):** Phase-0 complete (lexer + parser + evaluator). `intent` execution requires an adapter (not bundled yet).
+**Status (2026-04-28):** Phase-0 complete (lexer + parser + evaluator) + Phase-1 Anthropic intent adapter. `intent` declarations execute against the Anthropic Messages API when `ANTHROPIC_API_KEY` is set.
 
 ## Layout
 
@@ -73,10 +73,23 @@ Release path (main): same, but from [Releases](https://github.com/hyun06000/AIL/
 ## CLI
 
 ```
-ail-rs tokens FILE.ail              # dump token stream
-ail-rs parse  FILE.ail              # dump parsed Program AST (Debug)
-ail-rs run    FILE.ail [INPUT]      # execute the entry block, print final value
+ail-rs tokens FILE.ail                       # dump token stream
+ail-rs parse  FILE.ail                       # dump parsed Program AST (Debug)
+ail-rs run [--adapter NAME] FILE.ail [INPUT] # execute the entry block
 ```
+
+Adapters:
+
+| Name        | Triggers when…                                             |
+|-------------|------------------------------------------------------------|
+| `anthropic` | `--adapter anthropic`, **or** the program declares `intent` and `ANTHROPIC_API_KEY` is set in the environment |
+
+Anthropic adapter:
+- Reads `ANTHROPIC_API_KEY` from env.
+- Subscription tokens (`sk-ant-oat…`, issued by `claude setup-token` for Pro/Max plans) are sent via `Authorization: Bearer …`.
+- Standard API keys (`sk-ant-api…`) use `X-Api-Key`.
+- Detection is by token prefix — no separate env var required.
+- Outbound HTTP shells out to `curl` to keep the binary minimal (no native HTTP stack).
 
 Example:
 ```
@@ -96,8 +109,10 @@ HELLO!
 2. **Parser + AST** ✅
 3. **Evaluator** ✅ (Phase-0 — fn, entry, primitives, arithmetic, lists, ~25 builtins, attempt cascade)
 4. **Single-binary release pipeline** ✅ (workflow_dispatch + tag-driven)
-5. **Cross-runtime conformance suite** — same `.ail` programs run on Python / Go / Rust, results compared. Spec parity by construction.
-6. **`intent`** via Anthropic / Ollama HTTP adapter (Anthropic supports `sk-ant-oat01` OAuth tokens for subscription users).
-7. **`evolve`-as-server** — match Python runtime's HTTP/process model.
+5. **Cross-runtime conformance suite** ✅ (same `.ail` programs run on Python / Go / Rust, results compared)
+6. **`intent` Anthropic adapter** ✅ (Messages API + OAuth subscription tokens)
+7. **Ollama / OpenAI adapters** — for local models and other vendors.
+8. **`evolve`-as-server** — match Python runtime's HTTP/process model.
+9. **Provenance** — `origin_of` / `lineage_of` / `has_intent_origin`.
 
 The Python runtime (`reference-impl/`) remains the canonical spec source. Rust catches up subset by subset.

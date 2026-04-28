@@ -6,6 +6,13 @@ description = "AIL (AI-Intent Language) — Rust reference runtime"
 license = "MIT"
 repository = "https://github.com/hyun06000/AIL"
 
+[dependencies]
+# JSON for intent adapter wire format. Anthropic's Messages API + AIL's
+# `{"value":..., "confidence":...}` response convention. Adding a single
+# serde_json dep keeps wire parsing clean without pulling in a full HTTP
+# stack — outbound requests shell out to `curl` (universal on Unix).
+serde_json = "1"
+
 [lib]
 name = "ail"
 path = "src/lib.rs"

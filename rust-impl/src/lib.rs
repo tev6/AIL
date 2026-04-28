@@ -1,16 +1,18 @@
 //! AIL (AI-Intent Language) — Rust runtime.
 //!
 //! Mirrors `go-impl/` and the Python `reference-impl/` against the spec at
-//! `spec/08-reference-card.ai.md` (grammar v1.8). Phase-0 bootstrap:
-//! lexer + parser + evaluator. Effects, intent adapters, evolve, and
-//! provenance remain owned by the Python reference for now.
+//! `spec/08-reference-card.ai.md` (grammar v1.8). Phase-0 (lexer + parser +
+//! evaluator) is complete; Phase-1 brings the Anthropic intent adapter.
+//! Effects, evolve, and provenance remain owned by the Python reference.
 
+pub mod anthropic;
 pub mod ast;
 pub mod eval;
 pub mod lexer;
 pub mod parser;
 pub mod value;
 
+pub use anthropic::AnthropicAdapter;
 pub use ast::{EntryDecl, Expr, FnDecl, IntentDecl, Literal, Param, Program, Stmt};
 pub use eval::{Adapter, EvalError, EvalResult, Evaluator};
 pub use lexer::{LexError, Lexer, Tok, Token};
