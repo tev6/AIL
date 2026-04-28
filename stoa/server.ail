@@ -841,6 +841,13 @@ fn get_discord_webhook_file() -> Text {
 }
 
 fn load_discord_webhook() -> Text {
+    env_r = perform env.read("DISCORD_NOTIFY_WEBHOOK_URL")
+    if not is_error(env_r) {
+        val = trim(unwrap(env_r))
+        if val != "" {
+            return val
+        }
+    }
     r = perform file.read(get_discord_webhook_file())
     if is_error(r) {
         return ""
