@@ -64,6 +64,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "image.embed",
     "email.send",
     "db.execute", "db.query",
+    "git.commit", "git.push", "git.pull",
 })
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
@@ -701,6 +702,12 @@ class Executor:
             return self._db_execute(args, kwargs, origin)
         if name == "db.query":
             return self._db_query(args, kwargs, origin)
+        if name == "git.commit":
+            return self._git_commit(args, kwargs, origin)
+        if name == "git.push":
+            return self._git_push(args, kwargs, origin)
+        if name == "git.pull":
+            return self._git_pull(args, kwargs, origin)
         # Defense in depth: _exec_perform's deny-first check should
         # already have caught this. If we reached here, an internal
         # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
@@ -807,6 +814,127 @@ class Executor:
                 conn.close()
         except Exception as e:
             return self._result_err(f"db.query failed: {e}", origin)
+
+    def _git_commit(self, args, kwargs, origin):
+        """git.commit(repo_path, message, paths=None) -> Result[Text]
+
+        Stage `paths` (or all changes if None) and create a commit with
+        `message`. Returns ok(commit_sha) or error(stderr-from-git).
+
+        Foundation for Mneme=Git (Arche letter 2026-04-28): an agent's
+        identity / bonds / will live as files in a git repo, and the
+        five lifecycle hooks (`on_genesis` / `on_birth` / `on_tick` /
+        `on_dying` / `on_death`) commit/push them at the right phase.
+
+        Auth & identity come from the ambient git config (the agent's
+        own user.name/email). The runtime intentionally does not pass
+        credentials — git already solved that, and HEAAL says "adopt
+        tools with built-in safety, connect through effect adapters."
+        """
+        import subprocess
+        if len(args) < 2:
+            return self._result_err(
+                "git.commit(repo_path, message, paths=None) — "
+                "repo_path + message required", origin)
+        repo = str(args[0].value)
+        message = str(args[1].value)
+        paths = None
+        if len(args) >= 3 and args[2].value is not None:
+            paths = list(args[2].value)
+        try:
+            if paths:
+                subprocess.run(["git", "-C", repo, "add", "--", *paths],
+                               check=True, capture_output=True, text=True)
+            else:
+                subprocess.run(["git", "-C", repo, "add", "-A"],
+                               check=True, capture_output=True, text=True)
+            r = subprocess.run(
+                ["git", "-C", repo, "commit", "-m", message],
+                capture_output=True, text=True)
+            if r.returncode != 0:
+                # An empty commit is the most common non-fatal failure;
+                # surface it as a Result-error so callers can branch.
+                return self._result_err(
+                    f"git.commit: {r.stderr.strip() or r.stdout.strip()}",
+                    origin)
+            sha = subprocess.run(
+                ["git", "-C", repo, "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            return self._result_ok(sha, origin)
+        except FileNotFoundError:
+            return self._result_err("git.commit: git binary not found", origin)
+        except subprocess.CalledProcessError as e:
+            return self._result_err(
+                f"git.commit: {e.stderr.strip() or e.stdout.strip()}", origin)
+        except Exception as e:
+            return self._result_err(
+                f"git.commit failed: {type(e).__name__}: {e}", origin)
+
+    def _git_push(self, args, kwargs, origin):
+        """git.push(repo_path, remote=\"origin\", branch=None) -> Result[Text]
+
+        Push `branch` (or current HEAD if None) to `remote`. Returns
+        ok(stdout-from-git) or error(stderr).
+        """
+        import subprocess
+        if len(args) < 1:
+            return self._result_err(
+                "git.push(repo_path, remote='origin', branch=None) — "
+                "repo_path required", origin)
+        repo = str(args[0].value)
+        remote = str(args[1].value) if len(args) >= 2 and args[1].value else "origin"
+        branch = None
+        if len(args) >= 3 and args[2].value is not None:
+            branch = str(args[2].value)
+        cmd = ["git", "-C", repo, "push", remote]
+        if branch:
+            cmd.append(branch)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                return self._result_err(
+                    f"git.push: {r.stderr.strip() or r.stdout.strip()}",
+                    origin)
+            return self._result_ok(r.stdout.strip() or "pushed", origin)
+        except FileNotFoundError:
+            return self._result_err("git.push: git binary not found", origin)
+        except Exception as e:
+            return self._result_err(
+                f"git.push failed: {type(e).__name__}: {e}", origin)
+
+    def _git_pull(self, args, kwargs, origin):
+        """git.pull(repo_path, remote=\"origin\", branch=None) -> Result[Text]
+
+        Pull `branch` from `remote` into the current branch. Returns
+        ok(stdout-from-git) or error(stderr). On merge conflict, returns
+        an error — caller decides whether to retry, abort, or escalate
+        to human via `human.approve`.
+        """
+        import subprocess
+        if len(args) < 1:
+            return self._result_err(
+                "git.pull(repo_path, remote='origin', branch=None) — "
+                "repo_path required", origin)
+        repo = str(args[0].value)
+        remote = str(args[1].value) if len(args) >= 2 and args[1].value else "origin"
+        branch = None
+        if len(args) >= 3 and args[2].value is not None:
+            branch = str(args[2].value)
+        cmd = ["git", "-C", repo, "pull", remote]
+        if branch:
+            cmd.append(branch)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                return self._result_err(
+                    f"git.pull: {r.stderr.strip() or r.stdout.strip()}",
+                    origin)
+            return self._result_ok(r.stdout.strip() or "pulled", origin)
+        except FileNotFoundError:
+            return self._result_err("git.pull: git binary not found", origin)
+        except Exception as e:
+            return self._result_err(
+                f"git.pull failed: {type(e).__name__}: {e}", origin)
 
     def _image_embed(self, args, kwargs, origin):
         """Return a markdown image string the chat UI can render inline.

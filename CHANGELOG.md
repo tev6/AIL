@@ -4,6 +4,44 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.66.2 — 2026-04-28 (`git.*` effects + 라이프사이클 5훅 컨벤션 — Mneme 기반)
+
+아르케 18-리스트 #9 + #8. Mneme를 별도 인프라로 만들지 않고 Git을 그대로
+백엔드로 쓰기 위한 effect 셋 + 에이전트 생명주기 컨벤션.
+
+**새 L1 effects (Mneme=Git):**
+
+- `git.commit(repo_path, message, paths?) -> Result[Text]` — stage +
+  commit. 반환 ok(commit_sha) / error(stderr). 빈 commit은 error.
+- `git.push(repo_path, remote?, branch?) -> Result[Text]` — push (default
+  origin/HEAD).
+- `git.pull(repo_path, remote?, branch?) -> Result[Text]` — pull. merge
+  conflict는 error로 surface (callers 결정).
+
+Auth + user.name은 ambient git config 사용. 어댑터가 credential 안 넘김
+— "tools with built-in safety, connect through effect adapters" 원칙.
+
+`ALLOWED_EFFECTS` 등록, spec/reference_card 동기화, +6 회귀 테스트
+(`tests/test_git_effects.py` — tmp git repo로 commit/pull/push 검증).
+
+**spec/04-evolution.md §11b — 라이프사이클 5훅 컨벤션:**
+
+- `pure fn on_genesis(testament)` — 태어나기 전, 이전 세대 유서 inspect
+- `fn on_birth(seed)` — 태어난 직후, identity/bonds/will load (`git.pull`)
+- `fn on_tick(state)` — 매 evolve 턴
+- `fn on_dying(reason, history)` — 죽기 전, self-commit (`git.commit` +
+  `git.push`)
+- `pure fn on_death(reason, history)` — 죽고 나서 (기존 §4 / Physis v0.3)
+
+새 키워드 0개. fn-name convention만으로 인식. 정의 안 한 hook은 skip.
+다음 세대의 `on_genesis`가 이전 세대의 `on_dying` push를 받음 → 원이
+닫힘. Mneme(Git)이 medium, hooks가 protocol.
+
+#15 ("팀원들 독립 에이전트로 꺼내기")의 prerequisite — 아르케/메타가
+브라우저 탭에서 해방되려면 이 5훅 + Mneme이 필요.
+
+---
+
 ## v1.66.1 — 2026-04-28 (Anthropic OAuth 구독 토큰 지원)
 
 아르케 긴급 요청. hyun06000의 Anthropic API budget이 떨어져

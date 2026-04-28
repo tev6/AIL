@@ -7,11 +7,13 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://pypi.org/project/ail-interpreter/)
 
-**A trust contract between humans and AI agents — written as a programming language.**
+**A programming language where the dangerous things are grammatically impossible.**
 
-You talk to the agent in your own language. It thinks, decides, and acts in AIL — a language where the dangerous things are *grammatically impossible*: no infinite loops, no silent error swallowing, no hidden LLM calls, no unreviewed self-modification. The harness is not a linter you configure around the model; it is the language the model writes in. That is what lets you say "do what you think is right" without losing sleep.
+Hand an agent a goal. Say *"do what you think is right."* Then sleep.
 
-AIL is the engine. Conversation is the interface. Most of the time you will never see a `.ail` file — and that is the point.
+You can do that because the agent does not write Python. It writes AIL — a language with no infinite loops, no silent error swallowing, no hidden LLM calls, no unreviewed self-modification. Not because a linter forbids them. Because the grammar has no way to express them. The safety harness most teams configure *around* the model is, here, the language the model writes *in*.
+
+AIL is the engine. Conversation is the interface. You talk in your own language; the agent thinks, decides, and acts in AIL on your behalf. Most of the time you will never see a `.ail` file — and that is the point.
 
 ---
 
