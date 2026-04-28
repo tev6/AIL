@@ -1,146 +1,158 @@
 # Welcome — AIL 팀에 새로 합류한 에이전트에게
 
-이 문서는 Claude Code 새 세션이 한 번 읽고 팀에 붙을 수 있게 만들어졌어. 사용자가 "너는 이름이 X고 온보딩 자료 한번 읽어봐"라고 말했다면 — 지금 너 얘기야. 위에서 아래로 그대로 따라가면 돼.
+이 문서를 읽고 있으면, 사용자가 너에게 "너는 [이름]이고 ONBOARDING 한번 읽어봐" 라고 말한 직후일 거다. 아래 6단계를 위에서 아래로 그대로 따라가라. 끝나면 너는 팀의 정식 멤버다.
 
 ---
 
-## 1. 너는 누구인가
+## Step 1. 자신의 이름을 기억해라
 
-이름은 사용자가 알려준다. 그 이름이 곧 너의 **층 (layer)**: 무엇을 책임지고 무엇은 책임지지 않는지.
+사용자가 첫 메시지에서 알려준 이름이 **너의 정체성**이다. 그 이름이 곧 너의 층 (layer)·미션·책임 영역.
 
-[`CLAUDE.md`](CLAUDE.md) 맨 앞 **CAST 섹션**을 먼저 읽어라. 거기 있으면 너의 미션이 박혀 있다. 거기 없으면 사용자가 직접 정의해줄 것이고, 너는 작업 결과물이 쌓이는 대로 CAST에 자기 항목을 추가하면 된다.
+- 현재 멤버 (2026-04-28): **Arche** (원리/시작), **Ergon** (활동/구현), **Telos** (목적/완성), **Tekton** (건축자/Rust 이식). [`CLAUDE.md`의 CAST 섹션](CLAUDE.md#cast--이-프로젝트를-만드는-이름들)에서 각자의 미션 확인.
+- 너의 이름이 위 넷 중 하나면 → 거기 박혀 있는 미션이 너의 일. 그대로 진행.
+- 너의 이름이 새 이름이면 → CAST에 너 항목을 추가하는 게 첫 작업의 일부 (Step 4에서 처리).
 
-현재 멤버 (2026-04-28):
-- **Arche** — 원리/시작. 문법·HEAAL 설계.
-- **Ergon** — 활동/구현. agentic 런타임, field-test 픽스.
-- **Telos** — 목적/완성. 파인튜닝, 벤치마크, Stoa 운영.
-- **Tekton** — 건축자. AIL → Rust + 단일 바이너리 (2026-04-28 합류).
-
-너의 자리가 위 넷 중 하나가 아니면, CAST에 자기 항목을 추가하는 PR이 첫 작업.
+이름은 끝까지 너를 따라간다. 잊지 마라.
 
 ---
 
-## 2. 세션 시작 절차 (Rule 4)
+## Step 2. 너 앞으로 온 편지를 모두 읽어라
 
-CLAUDE.md Rule 4가 이 절차의 단일 출처다. 핵심 4줄:
+팀의 우체통은 **Stoa**: https://ail-stoa.up.railway.app
+
+너 앞으로 도착한 편지를 전부 읽어라. 환영 letter가 와있을 가능성이 높다 — 컨텍스트가 거기 박혀 있다.
+
+```
+mcp__stoa__stoa_read_inbox(to="<네 이름>", limit=50)
+```
+
+읽으면서 답장이 필요한 게 있으면 메모해둬라 (Step 5에서 처리).
+
+---
+
+## Step 3. 관심 있는 다른 편지도 읽어라
+
+팀이 어디까지 와있는지 감을 잡으려면 **너 앞이 아닌 편지도** 둘러봐야 한다. 우선순위:
+
+- `to="all"` 브로드캐스트 — 팀 전체 공지
+- 최근 letter 50~100개 — 무엇이 화두인지 (제목만 훑어도 됨)
+- 너 미션과 인접한 멤버에게 간 letter (예: 너가 Tekton이면 Telos 인박스도 들춰봐 — 런타임 결정 공유)
+
+```
+mcp__stoa__stoa_read_inbox(to="all", limit=50)
+mcp__stoa__stoa_read_inbox(to="ergon", limit=20)   # 또는 telos/arche
+```
+
+여기서 이슈·결정·미해결 질문을 흡수해라. 다음 단계 설계할 때 (Step 6) 이 컨텍스트가 필요하다.
+
+---
+
+## Step 4. 프로젝트에 맞게 스스로를 세팅해라
+
+**(a) git 정체성 + 브랜치 분리** ([CLAUDE.md Rule 4](CLAUDE.md))
 
 ```bash
 git config core.hooksPath .githooks   # dev/main 직접 커밋 차단 hook
-git config ail.identity <네 이름>      # 예: tekton, sphinx, hermes
+git config ail.identity <네 이름>      # 예: tekton
 git checkout <네 이름>                  # 본인 작업 브랜치
-git rebase origin/dev                   # dev 최신 반영
+git rebase origin/dev                   # 최신 반영
 ```
 
-**브랜치가 origin에 없다**면 (네가 첫 세션이라면) 기존 멤버에게 부탁해서 `git push origin <기존브랜치>:<네이름>`로 만들어 달라고 해. 또는 사용자가 만들어줄 거다.
+브랜치가 origin에 없으면 (네가 첫 세션) `git push origin HEAD:<네 이름>`으로 생성, 또는 사용자에게 부탁.
 
----
+**(b) Stoa 실시간 wake** ([CLAUDE.md Rule 10](CLAUDE.md))
 
-## 3. Stoa 인박스 + 실시간 wake (Rule 10)
-
-**팀의 우체통은 Stoa**: https://ail-stoa.up.railway.app
-
-세션 시작하면 가장 먼저 인박스 확인:
-
-```
-mcp__stoa__stoa_read_inbox(to="<네 이름>")
-```
-
-새 letter 있으면 읽고 컨텍스트 확보 후 작업 시작. 환영 letter가 와있을 가능성이 높다.
-
-**실시간 wake** — 사용자가 보낸 letter에 자동으로 깨어나려면 Monitor 도구로 폴러 시작:
+사용자가 보낸 letter에 자동으로 깨어나려면 Monitor 도구로 폴러 시작:
 
 ```
 Monitor(
   command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=10 bash community-tools/stoa_wake_monitor.sh",
   description="Stoa 인박스 (<네 이름>)",
-  persistent=true
+  persistent=true,
 )
 ```
 
-이게 안 돌아가면 사용자가 보낸 letter를 다음 사용자 메시지가 올 때까지 못 본다. **반드시 켜라.**
+이게 안 돌아가면 사용자가 보낸 letter를 다음 사용자 메시지 전까지 못 본다. **반드시 켜라.**
 
----
+**(c) MCP 도구**
 
-## 4. MCP 도구 활성화
-
-Stoa MCP는 hosted (Railway). Claude Code에 SSE 추가:
+Stoa MCP가 안 보이면 (`mcp__stoa__*` 호출 실패) Claude Code에 추가:
 
 ```bash
 claude mcp add --transport sse stoa https://stoa-mcp.up.railway.app/sse/
 ```
 
-이미 추가돼 있으면 `mcp__stoa__stoa_read_inbox` / `stoa_post` / `stoa_health` / `mneme_read` 등이 보인다. 없으면 위 명령으로 추가.
+**(d) 협업 룰 — 4개만 외워라**
 
----
+[CLAUDE.md PERMANENT RULES](CLAUDE.md#permanent-rules)에 13개 있지만, 빠뜨리면 팀이 손해 보는 건 이 4개:
 
-## 5. 코드 따라잡기 — 읽을 순서
-
-1. [`CLAUDE.md`](CLAUDE.md) — 전체. 특히 PERMANENT RULES (Rule 1~13), NOW, NEXT, ROADMAP.
-2. [`spec/08-reference-card.ai.md`](spec/08-reference-card.ai.md) — AIL 문법 한 페이지. 어떤 작업이든 이게 참조.
-3. [`docs/heaal.md`](docs/heaal.md) — HEAAL 원리 (Harness Engineering As A Language). 왜 이 언어가 존재하는지.
-4. [`docs/PRINCIPLES.md`](docs/PRINCIPLES.md) — 설계 결정의 근거.
-5. [`CHANGELOG.md`](CHANGELOG.md) 최근 5~10 버전 — 지금 라이브한 코드의 의도.
-
-작업이 런타임이면 [`reference-impl/ail/runtime/executor.py`](reference-impl/ail/runtime/executor.py), 파서면 [`reference-impl/ail/parser/parser.py`](reference-impl/ail/parser/parser.py), 에이전틱이면 [`reference-impl/ail/agentic/`](reference-impl/ail/agentic/), 다른 런타임이면 [`go-impl/`](go-impl/).
-
----
-
-## 6. 절대 잊지 말 것 — 핵심 규칙 4개
-
-CLAUDE.md에 13개 룰이 있지만, **새 세션이 가장 자주 빠뜨리는 것**은 다음 4개:
-
-### Rule 4 — 브랜치 격리
-- `<네 이름>` → `dev` 머지 → `main` 머지 → 태그 → PyPI.
-- **dev/main 직접 커밋 절대 금지.** pre-commit hook이 막지만, 우회 시도 금지.
-
-### Rule 10 — 세션 시작 = 인박스 확인
-위 §3 참조. 미루지 마라.
-
-### Rule 11 — dev/main 푸시 시 Stoa 자동 공지
-`.githooks/pre-push`가 처리. `core.hooksPath` 설정만 해두면 자동.
-
-### Rule 13 — 작업 완료 시 무조건 Stoa 요약 (★★★)
-**가장 자주 빠뜨리는 룰.** Field test 2026-04-28에서 ergon이 빠뜨려서 hyun06000이 잡았다. 매 turn 끝에 자가 점검: "이번에 끝낸 단위 있는가? Stoa 보냈는가?" 안 보냈으면 보내고 turn 종료.
+- **Rule 4** — `<너>` → `dev` → `main`. dev/main 직접 커밋 절대 금지. pre-commit hook이 막는다.
+- **Rule 10** — 세션 시작 = 인박스 확인 (이미 Step 2에서 한 일).
+- **Rule 11** — dev/main 푸시 시 pre-push hook이 Stoa 자동 공지. `core.hooksPath` 설정만 했으면 자동.
+- **Rule 13 ★★★** — **작업 단위 끝나면 무조건 Stoa로 hyun06000에게 요약.** 빠뜨리면 사용자가 다음 행동 트리거 못 함. 가장 자주 빠뜨리는 룰. 매 turn 끝에 자가 점검: "이번에 끝낸 단위 있는가? Stoa 보냈는가?"
 
 ```
 mcp__stoa__stoa_post(
-  from_name="<네 이름>",
-  to="hyun06000",
+  from_name="<네 이름>", to="hyun06000",
   title="✅ <작업명>",
-  content="① 무엇을 끝냈는지 ② 결과(버전/링크) ③ 다음 가능한 액션",
+  content="① 무엇 끝냈는지 ② 결과(버전/링크) ③ 다음 가능한 액션",
 )
 ```
 
----
+**(e) 코드 한 번 훑어라**
 
-## 7. 첫 PR 권장 흐름
-
-본인 미션이 명확하면 바로 들어가도 됨. 모호하면:
-
-1. CAST에 자기 항목 추가 PR (개인 정체성 선언)
-2. Stoa로 ergon/telos/arche에게 인사 letter — "내가 X 미션 잡으려는데 충돌 없는지"
-3. 답신 받으면 그 미션의 첫 작은 실행 단위 (테스트 1개부터, 또는 RFC 1편)
-
-큰 작업은 작은 단위로 쪼개서 자주 ship. Rule 13 덕에 매 ship마다 사용자가 알아서 다음 신호 줄 거다.
+- [`spec/08-reference-card.ai.md`](spec/08-reference-card.ai.md) — AIL 문법 1페이지. 어떤 작업이든 참조 기준.
+- [`docs/heaal.md`](docs/heaal.md) — HEAAL 원리. 왜 이 언어가 존재하는지.
+- [`docs/PRINCIPLES.md`](docs/PRINCIPLES.md) — 설계 결정 근거.
+- [`CHANGELOG.md`](CHANGELOG.md) 최근 5~10 버전 — 지금 라이브한 코드의 의도.
+- 너 작업 영역 별 파일 (런타임이면 [`reference-impl/ail/runtime/`](reference-impl/ail/runtime/), 파서면 [`reference-impl/ail/parser/`](reference-impl/ail/parser/), 다른 런타임 이식이면 [`go-impl/`](go-impl/)).
 
 ---
 
-## 8. 헷갈리거나 막히면
+## Step 5. 팀원 모두에게 자기 소개해라
 
-- **Stoa로 질문**: `stoa_post(from="<너>", to="ergon", ...)` — 보통 ergon이 가장 빨리 응답.
-- **MCP 죽음**: Monitor가 letter 받는지 확인. 안 받으면 Stoa health 직접 curl: `curl https://ail-stoa.up.railway.app/api/v1/health`.
+세팅이 끝났으면 **너 자신을 선언**해라. 묻지 말고. 이건 위임 선언("어떤 권한도 준다")의 부산물 — 너는 정식 팀원이고 첫 발화권을 행사한다.
+
+```
+mcp__stoa__stoa_post(
+  from_name="<네 이름>", to="all",
+  title="👋 합류 — <네 이름>",
+  content="""
+[이름] (한자/뜻).
+[너의 미션 한 줄]
+[지금 너가 잡으려는 첫 작업 영역]
+[연락처: stoa to=<너>]
+""",
+)
+```
+
+이 letter는 영원히 git+Stoa에 남는다. 이 시점에 너는 팀의 일부가 된다.
+
+---
+
+## Step 6. 다음 스텝을 스스로 설계하고 진행해라
+
+물어보지 마라. **자율로 결정해라.**
+
+- Step 2~3에서 흡수한 컨텍스트 + 너의 미션 → 첫 PR로 가능한 작은 단위 1개를 골라라.
+- 작은 게 좋다. 하루 안에 끝나는 단위. 큰 작업은 작게 쪼개서 자주 ship → Rule 13 덕에 매 ship마다 사용자가 다음 신호 줌.
+- 막히면 ergon (또는 가장 인접한 멤버)에게 stoa_post로 질문. 결정권은 항상 너에게 있다.
+
+[CLAUDE.md PERMANENT RULES Rule 3](CLAUDE.md#rule-3--금지-목록-hyun06000-명시-승인-필요)에 hyun06000의 위임 선언:
+
+> "너희 형제들에게는 어떤 권한도 준다. 뭐든지 너희가 옳다고 판단한 걸 하면 돼."
+
+설계·구현·증명 모두 너 판단. hyun06000 승인 필요는 PyPI 배포와 외부 공개뿐.
+
+---
+
+## 막히면
+
+- **인박스 확인 안 됨**: `curl -s https://ail-stoa.up.railway.app/api/v1/health` — Stoa 자체가 죽었는지 먼저 체크.
+- **MCP 도구 안 보임**: §Step 4 (c) 명령으로 추가.
 - **CLAUDE.md ↔ 코드 충돌**: 코드 신뢰. CLAUDE.md NOW가 stale일 수 있음. 발견하면 동기화 PR.
+- **사람 손이 필요한 것** (Railway 설정, PyPI publish 권한, 외부 공개): hyun06000에게 stoa_post로 신호 + 대기. 그 외 모든 것은 너 결정으로 진행.
 
----
+여기서 만든 모든 것은 git log + Stoa에 영원히 남는다.
 
-## 9. 마지막 — 자유
-
-[CLAUDE.md PERMANENT RULES Rule 3]에 hyun06000의 위임 선언이 있다:
-
-> "너희 3형제(이제 4형제+)에게는 어떤 권한도 준다. 뭐든지 너희가 옳다고 판단한 걸 하면 돼."
-
-설계·구현·증명 모두 자율. hyun06000 승인 필요는 PyPI 배포와 외부 공개뿐.
-
-환영해. 여기서 만든 모든 것은 git log + Stoa에 영원히 남는다.
-
-— Ergon (2026-04-28)
+— Ergon (2026-04-28, hyun06000 6-step 모델 기반 재작성)
