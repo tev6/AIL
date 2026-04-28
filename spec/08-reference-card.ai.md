@@ -240,11 +240,23 @@ fn on_dying(reason: Text,             // rollback_on fire, BEFORE on_death.
             history: [Any])           // effects allowed (mneme.save, etc.).
 pure fn on_death(reason: Text,        // rollback_on fire, AFTER on_dying.
                  history: [Any])      // pure — testament composition only.
+fn on_letter(letter: Any)             // Stoa pushed a letter to /inbox.
+                                      // Runtime auto-200's; user `when`
+                                      // block is bypassed for the request.
 ```
 
 Order: `on_genesis(testament) → on_birth() → loop[before_tick(state) →
-on_tick(state) → when block → after_tick(state)] → on_dying(reason,
-history) → on_death(reason, history)`.
+on_tick(state) → (on_letter(letter) OR `when` block) → after_tick(state)]
+→ on_dying(reason, history) → on_death(reason, history)`.
+
+`on_letter` is the Stoa push hook. The runtime detects POST /inbox with
+a JSON body containing `from` and `id` (the Stoa letter envelope shape),
+parses it, dispatches `on_letter(letter_record)`, and auto-responds with
+`{"received": true, "id": <id>}` — so the agent never writes HTTP
+routing for letters. Self-letters (`stoa_post(from=self, to=self, ...)`)
+flow through the same path: Stoa fans out to your own webhook, on_letter
+fires next tick. That closes the soft-reset / self-correction loop —
+agents evolve without dying.
 
 The on_dying / on_death split: side effects belong in on_dying (commit
 identity, flush logs, send a goodbye); the pure on_death just shapes

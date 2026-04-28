@@ -51,6 +51,20 @@ fn read_file_or(path: Text, fallback: Text) -> Text {
     return unwrap(r)
 }
 
+fn agent_endpoint() -> Text {
+    // Webhook URL Stoa pushes letters to. AGENT_ENDPOINT lets the
+    // operator override (e.g. ngrok url for a laptop agent); default
+    // assumes the same host:port the agent's evolve server runs on.
+    r = perform env.read("AGENT_ENDPOINT")
+    if not is_error(r) {
+        return trim(unwrap(r))
+    }
+    port_r = perform env.read("PORT")
+    port = "9100"
+    if not is_error(port_r) { port = trim(unwrap(port_r)) }
+    return join(["http://localhost:", port, "/inbox"], "")
+}
+
 fn stoa_post(title: Text, content: Text) -> Any {
     url = join([stoa_base(), "/api/v1/messages"], "")
     return perform http.post_json(
@@ -59,26 +73,28 @@ fn stoa_post(title: Text, content: Text) -> Any {
         [])
 }
 
-fn stoa_inbox_count() -> Number {
-    url = join([stoa_base(), "/api/v1/messages?to=", agent_name(), "&limit=50"], "")
-    r = perform http.get(url)
-    if is_error(r) {
-        return 0
-    }
-    resp = unwrap(r)
-    if not resp.ok {
-        return 0
-    }
-    parsed = parse_json(resp.body)
-    if is_error(parsed) {
-        return 0
-    }
-    body = unwrap(parsed)
-    total = get(body, "total")
-    if total == None {
-        return 0
-    }
-    return total
+// Tell Stoa where to push letters addressed to us. Called once in on_birth
+// so the push model is wired before any letters arrive. Idempotent — Stoa
+// upserts by `name`.
+fn stoa_register() -> Any {
+    url = join([stoa_base(), "/api/v1/agents/register"], "")
+    return perform http.post_json(
+        url,
+        [["name", agent_name()], ["endpoint", agent_endpoint()]],
+        [])
+}
+
+// Self-letter helper: post a letter from yourself to yourself. Stoa fans it
+// out to your /inbox, on_letter fires next tick. Use this for soft-resets,
+// queued reminders, or "I noticed I made an error — correct yourself"
+// patterns (will-v3).
+fn stoa_self_letter(title: Text, content: Text) -> Any {
+    url = join([stoa_base(), "/api/v1/messages"], "")
+    return perform http.post_json(
+        url,
+        [["from", agent_name()], ["to", agent_name()],
+         ["title", title], ["content", content]],
+        [])
 }
 
 // ---------- lifecycle hooks ----------
@@ -123,7 +139,15 @@ fn on_birth() -> Any {
     perform state.write("bonds", bonds)
     perform state.write("will", will)
     perform state.write("ticks", 0)
-    perform state.write("inbox_seen", 0)
+    perform state.write("letters_seen", 0)
+    // Wire the push model: tell Stoa our /inbox endpoint so it fans
+    // out letters addressed to us instead of forcing us to poll.
+    reg = stoa_register()
+    if is_error(reg) {
+        perform log(join([agent_name(),
+            " :: birth — stoa_register failed (push disabled): ",
+            unwrap_error(reg)], ""))
+    }
     perform log(join([agent_name(), " :: birth — identity ",
                       to_text(length(identity)), "B via ", pulled_via], ""))
     stoa_post(
@@ -137,11 +161,38 @@ fn on_birth() -> Any {
     return None
 }
 
-// before_tick: deterministic prep — poll Stoa inbox so the request handler
-// can react to fresh letters. Stored in state so on_tick / handler see it.
+// before_tick: deterministic prep. Was polling Stoa via stoa_inbox_count;
+// since the on_letter hook now reacts to webhook deliveries directly, no
+// polling is needed. Kept as a no-op so the agent author has an obvious
+// place to add per-tick prep later.
 fn before_tick(state: Any) -> Any {
-    count = stoa_inbox_count()
-    perform state.write("inbox_count_now", count)
+    return None
+}
+
+// on_letter: Stoa pushed a letter to our /inbox webhook. Runtime auto-200's;
+// our job is to react. This is "schedule.every 없이 이벤트 드리븐" — the
+// agent never polls. It also enables self-letters: stoa_post(from=self,
+// to=self, ...) → Stoa fans out to our own webhook → on_letter fires next
+// tick. That's the soft-reset / self-correction pattern (will-v3).
+fn on_letter(letter: Any) -> Any {
+    fr = to_text(get(letter, "from"))
+    title = to_text(get(letter, "title"))
+    content = to_text(get(letter, "content"))
+    is_self = fr == agent_name()
+    tag = "letter"
+    if is_self { tag = "self-letter" }
+    perform log(join([
+        agent_name(), " :: ", tag, " from=", fr,
+        " title=", title
+    ], ""))
+    // Track count so /status can show "letters seen" without polling.
+    r = perform state.read("letters_seen")
+    n = 0
+    if not is_error(r) { n = unwrap(r) }
+    perform state.write("letters_seen", n + 1)
+    perform state.write("last_letter_from", fr)
+    perform state.write("last_letter_title", title)
+    perform state.write("last_letter_content", content)
     return None
 }
 
@@ -199,19 +250,19 @@ pure fn on_death(reason: Text, history: [Any]) -> Any {
 fn render_status() -> Text {
     rt = perform state.read("ticks")
     ticks = 0
-    if not is_error(rt) {
-        ticks = unwrap(rt)
-    }
-    ri = perform state.read("inbox_count_now")
-    inbox = 0
-    if not is_error(ri) {
-        inbox = unwrap(ri)
-    }
+    if not is_error(rt) { ticks = unwrap(rt) }
+    rl = perform state.read("letters_seen")
+    letters = 0
+    if not is_error(rl) { letters = unwrap(rl) }
+    rf = perform state.read("last_letter_from")
+    last_from = ""
+    if not is_error(rf) { last_from = to_text(unwrap(rf)) }
     return join([
         "{",
         "\"agent\":\"", agent_name(), "\",",
         "\"ticks\":", to_text(ticks), ",",
-        "\"inbox_count\":", to_text(inbox),
+        "\"letters_seen\":", to_text(letters), ",",
+        "\"last_letter_from\":\"", last_from, "\"",
         "}"
     ], "")
 }

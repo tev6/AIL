@@ -2124,9 +2124,9 @@ class Executor:
         the result CV, or None if the fn is absent or raised.
 
         Same pattern as on_death / on_compact (Arche 2026-04-27 #1).
-        Used by on_genesis, on_birth, before_tick, on_tick, after_tick.
-        Errors are logged, not raised — a broken hook must not kill the
-        evolve loop.
+        Used by on_genesis, on_birth, before_tick, on_tick, after_tick,
+        on_dying, on_letter. Errors are logged, not raised — a broken
+        hook must not kill the evolve loop.
         """
         if hook_name not in self.fns:
             return None
@@ -2338,12 +2338,50 @@ class Executor:
                 tick_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
                 executor_ref._invoke_lifecycle_hook("before_tick", [tick_state_cv])
                 executor_ref._invoke_lifecycle_hook("on_tick", [tick_state_cv])
-                try:
-                    executor_ref._exec_block(arm.body, scope)
+
+                # --- Stoa push: POST /inbox with a letter envelope auto-
+                # dispatches on_letter and short-circuits the user's `when`
+                # block. Detection: POST /inbox + JSON body with `from`
+                # AND `id`. If on_letter isn't defined, fall through to
+                # the user's handler so existing /inbox patterns still work.
+                handled_as_letter = False
+                if (req_dict["method"] == "POST"
+                        and req_dict["path"] == "/inbox"
+                        and "on_letter" in executor_ref.fns):
+                    try:
+                        import json as _json
+                        body_obj = _json.loads(req_dict["body"] or "")
+                        if (isinstance(body_obj, dict)
+                                and "from" in body_obj
+                                and "id" in body_obj):
+                            executor_ref._invoke_lifecycle_hook(
+                                "on_letter",
+                                [ConfidentValue(body_obj, 1.0)])
+                            executor_ref._server_response_store.value = (
+                                200, "application/json",
+                                _json.dumps({"received": True,
+                                             "id": body_obj["id"]}))
+                            handled_as_letter = True
+                    except Exception:
+                        # Not parseable as a letter — fall through.
+                        handled_as_letter = False
+
+                if handled_as_letter:
+                    # Runtime built the 200 response above. Skip the user's
+                    # `when` block entirely so /inbox traffic is invisible
+                    # to the rest of the program. Per-request counters
+                    # still tick (the letter delivery IS a tick).
                     status, ct, body = executor_ref._server_response_store.value
                     executor_ref._server_request_count += 1
-                    if status >= 500:
-                        executor_ref._server_error_count += 1
+                try:
+                    if handled_as_letter:
+                        pass
+                    else:
+                        executor_ref._exec_block(arm.body, scope)
+                        status, ct, body = executor_ref._server_response_store.value
+                        executor_ref._server_request_count += 1
+                        if status >= 500:
+                            executor_ref._server_error_count += 1
                 except ReturnSignal as rs:
                     v = rs.value.value
                     if isinstance(v, list) and len(v) == 3:
