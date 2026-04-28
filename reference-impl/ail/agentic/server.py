@@ -437,6 +437,15 @@ def _make_handler(project: Project, serve_only: bool = False):
                         "bytes": p["bytes"],
                         "caption": p.get("purpose") or "(no # PURPOSE: comment)",
                         "parses": p.get("parses", True),
+                        # hyun06000 2026-04-28: 파일 트리에서 .ail 클릭 시
+                        # Run 카드를 즉석 생성하려면 program 메타가 필요.
+                        # programsForNext가 stale일 수 있으니 트리 응답에
+                        # 같은 필드를 같이 실어 보낸다.
+                        "input_used": p.get("input_used", True),
+                        "input_hint": p.get("input_hint"),
+                        "env_required": p.get("env_required", []),
+                        "entry_present": p.get("entry_present", True),
+                        "purpose": p.get("purpose"),
                     })
                 for extra in ("view.html", "INTENT.md", "README.md"):
                     fp = project.root / extra
