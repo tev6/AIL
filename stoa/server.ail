@@ -100,6 +100,10 @@ fn get_db_file() -> Text {
     return trim(unwrap(r))
 }
 
+// Append-only log (아르케 2026-04-28): source of truth.
+// `messages` 테이블은 derived cache — log replay로 재구축 가능. 모든
+// 변경은 log에 새 record를 append (DELETE/UPDATE 없음). action ∈
+// {create, archive, restore, supersede}.
 fn _init_db() -> Any {
     db = get_db_file()
     perform db.execute(db,
@@ -110,32 +114,144 @@ fn _init_db() -> Any {
         "CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to)")
     perform db.execute(db,
         "CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_name)")
+    perform db.execute(db,
+        "CREATE TABLE IF NOT EXISTS message_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, target_id TEXT NOT NULL, from_name TEXT, to_name TEXT, cc_json TEXT, title TEXT, content TEXT, tags_json TEXT, reply_to TEXT, from_email TEXT, msg_url TEXT, msg_created_at TEXT, reason TEXT, logged_at TEXT NOT NULL)")
+    perform db.execute(db,
+        "CREATE INDEX IF NOT EXISTS idx_log_target ON message_log(target_id)")
+    return None
+}
+
+// Append a record to the log. action ∈ {create, archive, restore, supersede}.
+// For create/supersede pass full msg record. For archive/restore, msg may be None.
+fn _log_append(action: Text, target_id: Text, msg: Any, reason: Any) -> Any {
+    db = get_db_file()
+    cc_json = None
+    tags_json = None
+    from_name = None
+    to_name = None
+    title = None
+    content = None
+    reply_to = None
+    from_email = None
+    msg_url = None
+    msg_created_at = None
+    if msg != None {
+        cc_val = get(msg, "cc")
+        if cc_val != None {
+            enc = encode_json(cc_val)
+            if not is_error(enc) {
+                cc_json = unwrap(enc)
+            }
+        }
+        tags_val = get(msg, "tags")
+        if tags_val != None {
+            enc2 = encode_json(tags_val)
+            if not is_error(enc2) {
+                tags_json = unwrap(enc2)
+            }
+        }
+        from_name = get(msg, "from")
+        to_name = get(msg, "to")
+        title = get(msg, "title")
+        content = get(msg, "content")
+        reply_to = get(msg, "reply_to")
+        from_email = get(msg, "from_email")
+        msg_url = get(msg, "url")
+        msg_created_at = get(msg, "created_at")
+    }
+    logged_at = perform clock.now("iso")
+    if is_error(logged_at) {
+        logged_at = ""
+    } else {
+        logged_at = unwrap(logged_at)
+    }
+    return perform db.execute(db,
+        "INSERT INTO message_log (action, target_id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, msg_url, msg_created_at, reason, logged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [action, target_id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, msg_url, msg_created_at, reason, logged_at])
+}
+
+// Replay log into the messages cache. Used on startup if cache is empty
+// but log has records (e.g., DB restored from log dump).
+fn replay_log_to_cache() -> Any {
+    db = get_db_file()
+    perform db.execute(db, "DELETE FROM messages")
+    r = perform db.query(db,
+        "SELECT action, target_id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, msg_url, msg_created_at FROM message_log ORDER BY seq")
+    if is_error(r) {
+        return None
+    }
+    for row in unwrap(r) {
+        action = row[0]
+        target_id = row[1]
+        if action == "create" or action == "supersede" or action == "restore" {
+            // For restore with no payload, skip (we'd need to look up earlier create).
+            if row[2] != None {
+                perform db.execute(db,
+                    "INSERT OR REPLACE INTO messages (id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, created_at, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [target_id, row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[11], row[10]])
+            }
+        }
+        if action == "archive" {
+            perform db.execute(db, "DELETE FROM messages WHERE id = ?", [target_id])
+        }
+    }
+    return None
+}
+
+// Seed the log from existing messages cache once (one-shot migration).
+// If log is empty AND messages has rows, replay them as `create` records
+// in original rowid order so seq matches insertion order.
+fn _seed_log_from_cache_once() -> Any {
+    db = get_db_file()
+    log_count_r = perform db.query(db, "SELECT COUNT(*) FROM message_log")
+    if is_error(log_count_r) {
+        return None
+    }
+    log_rows = unwrap(log_count_r)
+    if length(log_rows) > 0 and log_rows[0][0] > 0 {
+        return None
+    }
+    sql = join(["SELECT ", _select_cols(), " FROM messages ORDER BY rowid"], "")
+    r = perform db.query(db, sql)
+    if is_error(r) {
+        return None
+    }
+    for row in unwrap(r) {
+        msg = _row_to_msg(row)
+        _log_append("create", get(msg, "id"), msg, "seed_from_cache")
+    }
     return None
 }
 
 fn _migrate_json_once() -> Any {
     // One-shot: if DB is empty AND messages.json exists, import all.
+    // Also seeds the append-only log from the cache afterward.
     db = get_db_file()
     count_r = perform db.query(db, "SELECT COUNT(*) FROM messages")
     if is_error(count_r) {
+        _seed_log_from_cache_once()
         return None
     }
     rows = unwrap(count_r)
     if length(rows) > 0 and rows[0][0] > 0 {
+        _seed_log_from_cache_once()
         return None
     }
     json_r = perform file.read(get_data_file())
     if is_error(json_r) {
+        _seed_log_from_cache_once()
         return None
     }
     parsed = parse_json(unwrap(json_r))
     if is_error(parsed) {
+        _seed_log_from_cache_once()
         return None
     }
     msgs = unwrap(parsed)
     for m in msgs {
         _insert_msg_row(m)
     }
+    _seed_log_from_cache_once()
     return None
 }
 
@@ -248,11 +364,13 @@ fn db_get_replies(msg_id: Text) -> Any {
 
 fn db_insert_message(msg: Any) -> Any {
     _init_db()
+    _log_append("create", get(msg, "id"), msg, None)
     return _insert_msg_row(msg)
 }
 
 fn db_delete_message(msg_id: Text) -> Any {
     _init_db()
+    _log_append("archive", msg_id, None, None)
     db = get_db_file()
     return perform db.execute(db, "DELETE FROM messages WHERE id = ?", [msg_id])
 }
@@ -1633,6 +1751,69 @@ fn handle_debug_email(req: Any) -> [Any] {
     return json_ok([["log", unwrap(r)]])
 }
 
+// GET /api/v1/log — dump append-only log for backup/git push.
+// Query params: ?since_seq=N (records after seq N), ?limit=N (default 1000, max 10000).
+fn handle_get_log(req: Any) -> [Any] {
+    _init_db()
+    db = get_db_file()
+    since_seq = 0
+    limit = 1000
+    s = get(req.args, "since_seq")
+    if s != None {
+        since_seq = to_number(s)
+    }
+    l = get(req.args, "limit")
+    if l != None {
+        n = to_number(l)
+        if n > 10000 {
+            n = 10000
+        }
+        limit = n
+    }
+    r = perform db.query(db,
+        "SELECT seq, action, target_id, from_name, to_name, cc_json, title, content, tags_json, reply_to, from_email, msg_url, msg_created_at, reason, logged_at FROM message_log WHERE seq > ? ORDER BY seq LIMIT ?",
+        [since_seq, limit])
+    if is_error(r) {
+        return json_ok([["records", []], ["count", 0]])
+    }
+    records = []
+    for row in unwrap(r) {
+        cc_val = None
+        if row[5] != None {
+            p = parse_json(row[5])
+            if not is_error(p) {
+                cc_val = unwrap(p)
+            }
+        }
+        tags_val = None
+        if row[8] != None {
+            p2 = parse_json(row[8])
+            if not is_error(p2) {
+                tags_val = unwrap(p2)
+            }
+        }
+        rec = make_record([
+            ["seq", row[0]],
+            ["action", row[1]],
+            ["target_id", row[2]],
+            ["from", row[3]],
+            ["to", row[4]],
+            ["cc", cc_val],
+            ["title", row[6]],
+            ["content", row[7]],
+            ["tags", tags_val],
+            ["reply_to", row[9]],
+            ["from_email", row[10]],
+            ["url", row[11]],
+            ["msg_created_at", row[12]],
+            ["reason", row[13]],
+            ["logged_at", row[14]]
+        ])
+        records = append(records, rec)
+    }
+    return json_ok([["records", records], ["count", length(records)]])
+}
+
 fn route_request(req: Any) -> [Any] {
     method = req.method
     path = req.path
@@ -1665,6 +1846,9 @@ fn route_request(req: Any) -> [Any] {
     }
     if method == "GET" and path == "/api/v1/health" {
         return handle_health(req)
+    }
+    if method == "GET" and path == "/api/v1/log" {
+        return handle_get_log(req)
     }
     if method == "GET" and path == "/api/v1/messages" {
         return handle_list_messages(req)
