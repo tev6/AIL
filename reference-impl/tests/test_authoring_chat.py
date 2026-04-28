@@ -1084,6 +1084,12 @@ def test_service_ui_shows_back_link_when_chat_history_exists(tmp_path):
     """The back-to-chat button only appears on the service UI when
     there's actually a chat to return to."""
     proj = Project.init(tmp_path / "backlink")
+    # Telos 2026-04-29: the new scaffold INTENT.md has Korean comment
+    # hints that bias detect_language → 'ko' if read directly. To keep
+    # this test exercising the *English-fallback* branch, overwrite
+    # INTENT.md with a minimally English preamble before serving.
+    proj.intent_path.write_text(
+        "# backlink\n\nA simple echo service.\n", encoding="utf-8")
     proj.write_app_source(
         'entry main(input: Text) { return input }')
     # Seed chat history so the affordance activates.
