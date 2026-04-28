@@ -298,12 +298,50 @@ def _make_app(start_root: Path):
 
     @app.route("/env-status")
     def env_status():
-        return jsonify({
-            "vars": [
-                {**g, "set": bool(os.environ.get(g["var"]))}
-                for g in _ENV_GUIDE
-            ],
-        })
+        from .. import _load_dotenv_if_present
+        _load_dotenv_if_present()  # re-read in case user just saved a key
+        vars_status = [
+            {**g, "set": bool(os.environ.get(g["var"]))}
+            for g in _ENV_GUIDE
+        ]
+        has_llm_key = any(
+            os.environ.get(v) for v in (
+                "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+                "AIL_OLLAMA_MODEL", "AIL_OPENAI_COMPAT_MODEL",
+            )
+        )
+        return jsonify({"vars": vars_status, "has_llm_key": has_llm_key})
+
+    @app.route("/save-key", methods=["POST"])
+    def save_key():
+        """Write a user-supplied API key to ~/.ail/.env (global key store).
+        Existing entries for the same var are replaced; others are kept."""
+        data = request.get_json(silent=True) or {}
+        key_type = data.get("key_type", "").strip()
+        value = data.get("value", "").strip()
+        _KEY_TYPE_MAP = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "ollama": "AIL_OLLAMA_MODEL",
+        }
+        if key_type not in _KEY_TYPE_MAP:
+            return jsonify({"error": f"unknown key_type: {key_type!r}"}), 400
+        if not value:
+            return jsonify({"error": "value is required"}), 400
+        env_var = _KEY_TYPE_MAP[key_type]
+        global_env = Path.home() / ".ail" / ".env"
+        global_env.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        if global_env.is_file():
+            try:
+                lines = global_env.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                pass
+        new_lines = [ln for ln in lines if not ln.startswith(env_var + "=")]
+        new_lines.append(f"{env_var}={value}")
+        global_env.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        os.environ[env_var] = value
+        return jsonify({"ok": True, "var": env_var})
 
     return app
 
@@ -414,6 +452,21 @@ details.help div { padding: 1rem .8rem; background: #fff; border: 1px solid #ddd
 .env-row .pill.unset { background: #f0eee0; color: #666; }
 .env-row .why { color: #555; font-size: .85rem; }
 .env-row a { color: #265c26; }
+.setup-wizard { background: #fff8e1; border: 2px solid #e5a000; padding: 1.5rem; margin-bottom: 1.5rem; display: none; }
+.setup-wizard h2 { font-size: 1.1rem; margin-bottom: .6rem; }
+.setup-wizard p { font-size: .9rem; color: #555; margin-bottom: 1rem; }
+.setup-wizard .options { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+.setup-wizard label.opt { display: flex; align-items: flex-start; gap: .6rem; cursor: pointer; padding: .5rem .7rem; border: 1px solid #ddd; background: #fff; }
+.setup-wizard label.opt:hover { background: #f6f6f0; }
+.setup-wizard label.opt input[type=radio] { margin-top: .15rem; }
+.setup-wizard label.opt .opt-title { font-weight: 600; font-size: .9rem; }
+.setup-wizard label.opt .opt-desc { font-size: .8rem; color: #666; }
+.setup-wizard .key-row { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; }
+.setup-wizard .key-row input { flex: 1; padding: .5rem; border: 1px solid #999; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95rem; }
+.setup-wizard .key-row button { padding: .5rem 1.2rem; background: #222; color: #fff; border: 0; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.setup-wizard .key-row button:hover { background: #444; }
+.setup-wizard .hint { font-size: .8rem; color: #777; }
+.setup-wizard .hint a { color: #265c26; }
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 100; }
 .modal-bg.show { display: flex; }
 .modal { background: #fff; padding: 1.5rem; max-width: 500px; width: 90%; border: 2px solid #222; }
@@ -433,6 +486,27 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; font-s
 </head><body>
 <header><h1>AIL — your places</h1>
 <p>Browse a folder, then create a polis (AIL project) inside it.</p></header>
+
+<div class="setup-wizard" id="setup-wizard">
+<h2>🔑 먼저 AI 키를 연결해 주세요</h2>
+<p>AIL을 사용하려면 AI 모델과 연결이 필요해요. 아래에서 원하는 방식을 선택하고 키(또는 모델 이름)를 입력하면 자동으로 저장됩니다.</p>
+<div class="options">
+  <label class="opt"><input type="radio" name="key_type" value="anthropic" checked>
+    <div><div class="opt-title">Anthropic Claude (추천)</div>
+    <div class="opt-desc">claude.ai를 만든 Anthropic의 API — 가장 높은 품질. <a href="https://console.anthropic.com/settings/keys" target="_blank">키 발급 →</a></div></div></label>
+  <label class="opt"><input type="radio" name="key_type" value="openai">
+    <div><div class="opt-title">OpenAI (GPT-4o 등)</div>
+    <div class="opt-desc">OpenAI API 키. <a href="https://platform.openai.com/api-keys" target="_blank">키 발급 →</a></div></div></label>
+  <label class="opt"><input type="radio" name="key_type" value="ollama">
+    <div><div class="opt-title">Ollama (로컬, 무료)</div>
+    <div class="opt-desc">인터넷 없이 내 컴퓨터에서 실행. <a href="https://ollama.com" target="_blank">Ollama 설치</a> 후 모델 이름 입력 (예: qwen2.5-coder:7b-instruct-q4_K_M).</div></div></label>
+</div>
+<div class="key-row">
+  <input type="text" id="key-input" placeholder="API 키 또는 모델 이름 입력…" autocomplete="off" spellcheck="false">
+  <button id="save-key-btn">저장하기</button>
+</div>
+<div class="hint" id="key-hint"></div>
+</div>
 
 <div class="crumbs"><span id="cwd">__START_PATH__</span>
 <button id="up-btn">↑ parent</button>
@@ -628,9 +702,47 @@ openBtn.onclick = async () => {
   await waitAndOpen(j.port, j.log_path);
 };
 
+const wizardEl = document.getElementById('setup-wizard');
+const keyInput = document.getElementById('key-input');
+const keyHint = document.getElementById('key-hint');
+
+const PLACEHOLDERS = {
+  anthropic: 'sk-ant-…',
+  openai: 'sk-…',
+  ollama: 'qwen2.5-coder:7b-instruct-q4_K_M',
+};
+document.querySelectorAll('input[name=key_type]').forEach(r => {
+  r.addEventListener('change', () => {
+    keyInput.placeholder = PLACEHOLDERS[r.value] || '';
+    keyHint.textContent = '';
+  });
+});
+keyInput.placeholder = PLACEHOLDERS['anthropic'];
+
+document.getElementById('save-key-btn').onclick = async () => {
+  const key_type = document.querySelector('input[name=key_type]:checked')?.value;
+  const value = keyInput.value.trim();
+  if (!value) { keyHint.textContent = '값을 입력해 주세요.'; return; }
+  keyHint.textContent = '저장 중…';
+  const r = await fetch('/save-key', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({key_type, value}),
+  });
+  const j = await r.json();
+  if (r.ok) {
+    keyHint.textContent = '✅ 저장됐어요! 이제 폴리스를 만들 수 있어요.';
+    keyInput.value = '';
+    wizardEl.style.display = 'none';
+    await loadEnv();
+  } else {
+    keyHint.textContent = '오류: ' + (j.error || r.status);
+  }
+};
+
 async function loadEnv() {
   const r = await fetch('/env-status');
   const j = await r.json();
+  wizardEl.style.display = j.has_llm_key ? 'none' : 'block';
   const body = document.getElementById('env-body');
   body.innerHTML = j.vars.map(v => `
     <div class="env-row">

@@ -7,7 +7,7 @@ from .parser import parse
 from .runtime import Executor, ConfidentValue, MockAdapter
 from .runtime.model import ModelAdapter
 
-__version__ = "1.66.2"
+__version__ = "1.66.3"
 
 
 def compile_source(source: str):
@@ -106,32 +106,41 @@ def describe_adapter(adapter: ModelAdapter) -> str:
     return f"{name}"
 
 
-def _load_dotenv_if_present() -> None:
-    """Populate os.environ from a .env file if one exists.
-
-    Searches: the current working directory, then its parents up to 4 levels.
-    Only processes simple KEY=VALUE lines; existing env vars are not
-    overwritten. Missing files are silently ignored.
-    """
+def _load_dotenv_file(path: Path) -> None:
+    """Load KEY=VALUE pairs from `path` into os.environ (no-overwrite)."""
     import os
-    searched = [Path.cwd()] + list(Path.cwd().parents)[:4]
-    for base in searched:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _load_dotenv_if_present() -> None:
+    """Populate os.environ from .env files.
+
+    Search order (all loaded, earlier entries win):
+    1. The first .env found in cwd and its parents up to 4 levels.
+    2. ~/.ail/.env — the global key store written by `ail` setup wizard.
+
+    Existing os.environ values are never overwritten.
+    """
+    for base in [Path.cwd()] + list(Path.cwd().parents)[:4]:
         candidate = base / ".env"
         if candidate.is_file():
-            try:
-                text = candidate.read_text(encoding="utf-8")
-            except OSError:
-                return
-            for line in text.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-            return
+            _load_dotenv_file(candidate)
+            break
+    global_env = Path.home() / ".ail" / ".env"
+    if global_env.is_file():
+        _load_dotenv_file(global_env)
 
 
 def run(
