@@ -1,0 +1,14 @@
+// Smoke test #8 — recursion depth (Fibonacci of 10).
+// INPUT:
+// OUTPUT: 55
+
+fn fib(n: Number) -> Number {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+entry main() {
+    return fib(10)
+}

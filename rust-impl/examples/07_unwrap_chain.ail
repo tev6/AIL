@@ -1,0 +1,11 @@
+// Smoke test #7 — Result combinators (ok/error/unwrap_or/is_ok).
+// INPUT:
+// OUTPUT: 7|fallback|true|false
+
+entry main() {
+    a = unwrap_or(ok(7), 0)
+    b = unwrap_or(error("boom"), "fallback")
+    c = is_ok(ok(1))
+    d = is_ok(error("x"))
+    return to_text(a) + "|" + to_text(b) + "|" + to_text(c) + "|" + to_text(d)
+}

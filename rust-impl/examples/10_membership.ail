@@ -1,0 +1,11 @@
+// Smoke test #10 — membership edges: empty, present, absent, string-in-string.
+// INPUT:
+// OUTPUT: false|true|false|true
+
+entry main() {
+    a = 1 in []
+    b = "needle" in ["hay", "needle", "stack"]
+    c = "missing" in ["hay", "needle", "stack"]
+    d = "lo" in "hello"
+    return to_text(a) + "|" + to_text(b) + "|" + to_text(c) + "|" + to_text(d)
+}
