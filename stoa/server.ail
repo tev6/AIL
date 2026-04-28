@@ -626,7 +626,7 @@ fn handle_compose(req: Any) -> [Any] {
     // production Stoa (empty agents.json) still has clickable
     // recipients. Registered agents listed first, then any builtins
     // not already in the registry.
-    builtins = ["arche", "ergon", "telos", "meta"]
+    builtins = ["arche", "ergon", "telos", "tekton", "meta"]
     options_html = ""
     seen_names = []
     for a in agents {
@@ -668,7 +668,22 @@ fn handle_compose(req: Any) -> [Any] {
         "if(r.ok){status.className='status ok';status.innerHTML='Sent: <a href=\"/messages/'+j.id+'\">'+j.id+'</a>';f.reset();}",
         "else{status.className='status err';status.textContent='Error: '+(j.error||r.status);}",
         "}catch(err){status.className='status err';status.textContent='Network error: '+err.message;}",
-        "});"
+        "});",
+        // Toolbar inserts at cursor position in the content textarea.
+        // Newline before/after for cleanest list parsing.
+        "const ta=document.getElementById('content-ta');",
+        "function insertAtCursor(snippet){",
+        "  const start=ta.selectionStart,end=ta.selectionEnd,v=ta.value;",
+        "  const before=v.slice(0,start),after=v.slice(end);",
+        "  const needsNL=before && !before.endsWith('\\n');",
+        "  const text=(needsNL?'\\n':'')+snippet;",
+        "  ta.value=before+text+after;",
+        "  const pos=before.length+text.length;",
+        "  ta.focus();ta.setSelectionRange(pos,pos);",
+        "}",
+        "document.getElementById('btn-cb').addEventListener('click',()=>insertAtCursor('- [ ] '));",
+        "document.getElementById('btn-cbx').addEventListener('click',()=>insertAtCursor('- [x] '));",
+        "document.getElementById('btn-h').addEventListener('click',()=>insertAtCursor('## '));"
     ]
     js = join(js_parts, "")
     body_html = join([
@@ -685,7 +700,13 @@ fn handle_compose(req: Any) -> [Any] {
         "<div class=\"field\"><label class=\"block\">Title (optional)</label>",
         "<input type=\"text\" name=\"title\" /></div>",
         "<div class=\"field\"><label class=\"block\">Content (markdown ok, max 10000 chars)</label>",
-        "<textarea name=\"content\" required></textarea></div>",
+        "<div class=\"toolbar\" style=\"margin-bottom:.4rem;display:flex;gap:.4rem;flex-wrap:wrap\">",
+        "<button type=\"button\" id=\"btn-cb\" style=\"padding:.3rem .6rem;font-size:.8rem;background:#f4f4f0;border:1px solid #ccc;cursor:pointer\">+ 체크박스</button>",
+        "<button type=\"button\" id=\"btn-cbx\" style=\"padding:.3rem .6rem;font-size:.8rem;background:#f4f4f0;border:1px solid #ccc;cursor:pointer\">+ 완료된 체크박스</button>",
+        "<button type=\"button\" id=\"btn-h\" style=\"padding:.3rem .6rem;font-size:.8rem;background:#f4f4f0;border:1px solid #ccc;cursor:pointer\">+ 헤더</button>",
+        "<span style=\"font-size:.75rem;color:#888;align-self:center\">— 클릭하면 커서 위치에 삽입</span>",
+        "</div>",
+        "<textarea name=\"content\" id=\"content-ta\" required></textarea></div>",
         "<button type=\"submit\">Send</button>",
         "<div id=\"status\"></div>",
         "</form>",
@@ -717,10 +738,22 @@ fn render_tags(tags: Any) -> Text {
     return result
 }
 
+fn render_checkboxes(text: Text) -> Text {
+    // Markdown task-list lines → real <input type="checkbox"> for the
+    // board view. Pattern is GFM `- [ ] foo` / `- [x] foo` (case
+    // tolerant). `disabled` so the rendering is read-only — clicking a
+    // box doesn't post back. Editing is done by re-composing.
+    out = text
+    out = replace(out, "- [ ] ", "<input type=\"checkbox\" disabled> ")
+    out = replace(out, "- [x] ", "<input type=\"checkbox\" checked disabled> ")
+    out = replace(out, "- [X] ", "<input type=\"checkbox\" checked disabled> ")
+    return out
+}
+
 fn render_msg_card(m: Any, link: Any) -> Text {
     from_val = to_text(get(m, "from"))
     created = to_text(get(m, "created_at"))
-    content = to_text(get(m, "content"))
+    content = render_checkboxes(to_text(get(m, "content")))
     tags_html = render_tags(get(m, "tags"))
     title_val = get(m, "title")
     title_html = ""
@@ -835,7 +868,7 @@ fn notify_discord_webhook(from_name: Any, to_name: Any, content: Any) -> Any {
         return None
     }
     // 에이전트 목록 — 이 중 하나가 보낸 메시지만 push (사람→사람 루프 방지)
-    agents = ["telos", "ergon", "arche"]
+    agents = ["telos", "ergon", "arche", "tekton"]
     is_from_agent = false
     if from_name != None {
         for a in agents {
@@ -873,7 +906,7 @@ fn handle_discord_webhook_setup(req: Any) -> [Any] {
         html = join([
             "<!doctype html><html><head><meta charset='utf-8'><title>Discord Webhook 설정 — Stoa</title><style>", css, "</style></head><body>",
             "<h1>Discord Webhook 설정</h1>",
-            "<p style='font-size:.9rem;color:#555'>에이전트(telos/ergon/arche)가 Stoa에 글을 올리면 Discord 채널로 자동 전달됩니다.</p>",
+            "<p style='font-size:.9rem;color:#555'>에이전트(arche/ergon/telos/tekton)가 Stoa에 글을 올리면 Discord 채널로 자동 전달됩니다.</p>",
             "<p style='font-size:.85rem;margin-bottom:1.5rem'>",
             "<b>Webhook URL 받기:</b> Discord 채널 우클릭 → 채널 편집 → 연동 → 웹후크 → 새 웹후크 → URL 복사",
             "</p>",
@@ -1025,7 +1058,7 @@ fn status_label(elapsed: Any) -> Text {
 fn format_status_kakao() -> Text {
     hbs = load_heartbeats()
     now_unix = unix_now()
-    agents = ["arche", "ergon", "telos"]
+    agents = ["arche", "ergon", "telos", "tekton"]
     lines = []
     for agent in agents {
         found = None
@@ -1121,7 +1154,7 @@ fn handle_heartbeat(req: Any) -> [Any] {
 fn handle_status_api(req: Any) -> [Any] {
     hbs = load_heartbeats()
     now_unix = unix_now()
-    agents = ["arche", "ergon", "telos"]
+    agents = ["arche", "ergon", "telos", "tekton"]
     result = []
     for agent in agents {
         found = None
@@ -1149,7 +1182,7 @@ fn handle_status_api(req: Any) -> [Any] {
 fn handle_status_html(req: Any) -> [Any] {
     hbs = load_heartbeats()
     now_unix = unix_now()
-    agents = ["arche", "ergon", "telos"]
+    agents = ["arche", "ergon", "telos", "tekton"]
     rows = ""
     for agent in agents {
         found = None
@@ -1197,6 +1230,7 @@ fn kakao_quick_replies() -> Any {
         [["label", "@에르곤"], ["action", "message"], ["messageText", "@에르곤 "]],
         [["label", "@텔로스"], ["action", "message"], ["messageText", "@텔로스 "]],
         [["label", "@아르케"], ["action", "message"], ["messageText", "@아르케 "]],
+        [["label", "@텍톤"], ["action", "message"], ["messageText", "@텍톤 "]],
         [["label", "전체"], ["action", "message"], ["messageText", "@all "]],
         [["label", "상태"], ["action", "message"], ["messageText", "/status"]]
     ]
@@ -1271,7 +1305,7 @@ fn handle_kakao(req: Any) -> [Any] {
     // @수신자 prefix 파싱
     to_name = "all"
     content_text = text
-    alias_map = [["@에르곤", "ergon"], ["@텔로스", "telos"], ["@아르케", "arche"], ["@ergon", "ergon"], ["@telos", "telos"], ["@arche", "arche"], ["@all", "all"]]
+    alias_map = [["@에르곤", "ergon"], ["@텔로스", "telos"], ["@아르케", "arche"], ["@텍톤", "tekton"], ["@ergon", "ergon"], ["@telos", "telos"], ["@arche", "arche"], ["@tekton", "tekton"], ["@all", "all"]]
     for pair in alias_map {
         prefix = get(pair, 0)
         name = get(pair, 1)
@@ -1436,7 +1470,7 @@ fn handle_discord(req: Any) -> [Any] {
                     oval = get(opt, "value")
                     if oname == "to" and oval != None {
                         to_name = to_text(oval)
-                        alias_map = [["텔로스", "telos"], ["에르곤", "ergon"], ["아르케", "arche"], ["전체", "all"]]
+                        alias_map = [["텔로스", "telos"], ["에르곤", "ergon"], ["아르케", "arche"], ["텍톤", "tekton"], ["전체", "all"]]
                         for pair in alias_map {
                             if to_name == get(pair, 0) {
                                 to_name = get(pair, 1)
@@ -1559,7 +1593,7 @@ fn handle_discord_setup(req: Any) -> [Any] {
         ["description", "AIL Stoa 메시지 보드에 편지 보내기 (이름 등록: name 옵션만 사용)"],
         ["options", [
             [["name", "message"], ["description", "메시지 내용"], ["type", 3], ["required", false]],
-            [["name", "to"], ["description", "수신자 (telos/ergon/arche/all)"], ["type", 3], ["required", false]],
+            [["name", "to"], ["description", "수신자 (arche/ergon/telos/tekton/all)"], ["type", 3], ["required", false]],
             [["name", "name"], ["description", "내 이름 등록 (예: 박상현) — message 없이 단독 사용"], ["type", 3], ["required", false]]
         ]]
     ]
