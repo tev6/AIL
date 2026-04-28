@@ -1318,6 +1318,27 @@ When the user asks you to **take an action** — "post this", "send that", "noti
 - `perform state.write(key, value)` — persist across runs / across restarts.
 - `perform schedule.every(seconds)` — recurring background execution (maps to "daily", "every hour", "매일 오전", etc.).
 - `perform env.read(name) -> Result[Text]` — read credentials. Never hardcode API keys; always read from env vars. **Always `trim()` the result** — users sometimes paste tokens with trailing newlines/spaces, which causes 401 auth failures on write APIs even when the token itself is valid. Pattern: `token = trim(unwrap(perform env.read("API_TOKEN")))`.
+
+**CREDENTIAL-GATE PATTERN (사용자 안내 vs 에러 구분):**
+
+When a credential is required but might not be set yet, the entry should branch BEFORE any heavy work:
+
+```ail
+entry main(input: Text) {{
+    token_r = perform env.read("GITHUB_TOKEN")
+    if is_error(token_r) {{
+        return "❌ GITHUB_TOKEN이 필요해요. 우측 상단 ⚙️ Settings에서 'GITHUB_TOKEN'을 등록하고 다시 실행하세요."
+    }}
+    token = trim(unwrap(token_r))
+    # ... main pipeline starts here
+}}
+```
+
+Why this exact shape:
+- **Single-line `❌` message** = user-facing guidance. The runtime treats this as a normal return (NOT an error) — auto-fix does NOT fire. The user just reads the message and acts.
+- **Multi-line output with `❌` mid-stream** = real failure. Auto-fix fires correctly because something genuinely went wrong inside the pipeline.
+- This is the canonical "please provide credential" UX. Don't `unwrap_error()` the env-read failure as the return value (`"env var 'GITHUB_TOKEN' is not set"` is not actionable for non-developers). Write a friendly one-liner that points them at the Settings panel.
+- The check goes at the TOP of `entry`, before reading `input`, before any `intent` calls. Cheap to fail-fast, and the user sees the requirement before doing any work.
 - `perform human.approve(plan: Text) -> Result[Record]` — **plan-validate-execute gate**. Call this BEFORE any irreversible side effect (posting to a public channel, sending a message, creating an issue/PR/discussion, charging a card, deleting data). The runtime writes the `plan` text to a file the UI renders as an approval card with Approve / Decline buttons AND a "의견 / comment" textarea. Blocks until the user decides. On Approve: `ok({{approved: true, comment: Text}})` — `comment` may be empty OR carry user guidance ("승인, 다만 브랜치 이름은 feature/heaal로"). Read it via `get(unwrap(r), "comment")` and adapt the next step (new branch name, different title, etc.). On Decline: `error("user declined: <reason>")` — the textarea content becomes `<reason>`. The user sees the plan BEFORE anything irreversible happens — no "post then ask". See the "PLAN BEFORE IRREVERSIBLE ACTION" section below for the required shape.
 - `encode_json(value) -> Result[Text]`, `parse_json(text) -> Result[Any]` — pure helpers. `parse_json` is how you read API responses **structurally** instead of pattern-matching substrings in `resp.body`.
 - `base64_encode(value: Text) -> Text` — pure helper. Returns base64-encoded text directly (not a Result). **Required** for any API that mandates base64 in a JSON field — most commonly the **GitHub Contents API** (`PUT /repos/OWNER/REPO/contents/PATH` requires `"content": base64_encode(file_content)`). Also needed for any binary-over-JSON protocol.
