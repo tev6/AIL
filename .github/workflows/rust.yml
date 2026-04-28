@@ -1,0 +1,27 @@
+name: rust
+
+on:
+  push:
+    branches: [main, dev, tekton]
+    paths:
+      - 'rust-impl/**'
+      - '.github/workflows/rust.yml'
+  pull_request:
+    paths:
+      - 'rust-impl/**'
+      - '.github/workflows/rust.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust-impl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-impl
+      - run: cargo build --all-targets
+      - run: cargo test --all-targets

@@ -1,0 +1,20 @@
+[package]
+name = "ail"
+version = "0.1.0"
+edition = "2021"
+description = "AIL (AI-Intent Language) — Rust reference runtime"
+license = "MIT"
+repository = "https://github.com/hyun06000/AIL"
+
+[lib]
+name = "ail"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ail-rs"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
