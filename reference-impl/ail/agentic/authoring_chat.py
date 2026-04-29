@@ -1665,6 +1665,74 @@ entry main(input: Text) {{
 
 When the user wants an agent that acts on its own on a schedule ("매일 한 번 포스트", "every hour", "자동으로 돌아가게", "자율적으로 활동"), add `perform schedule.every(N)` at the end (before return). The pattern above already shows this.
 
+**MESSAGE QUEUES — `perform queue.*` (Telos + Arche 2026-04-29):**
+
+When the agent needs to process *one item at a time, in order, with retry and dead-letter*, use the project's append-only queue. The runtime exposes 4 effects:
+
+- `perform queue.push(msg: Record)` → enqueue (returns `Result[Text]` with msg_id)
+- `perform queue.take()` → atomically pull oldest pending → marks `working` (returns `Result[Record]` with `_id`/`_retry_count` plus original fields, or `error("empty")`)
+- `perform queue.done(msg_id)` → mark complete
+- `perform queue.retry(msg_id, reason)` → return to pending with bumped counter; auto `dead_letter` after 5 (Physis: same threshold as scheduler self-throttle and evolve `consecutive_failures`)
+
+**When to use:** "인박스 처리", "들어온 요청 하나씩", "실패하면 다시 시도", "주문/이벤트 큐", "우편 처리". When NOT: a single computation that returns a value (no queue needed — just `entry main`).
+
+**Canonical pattern — process-one-then-yield:**
+```ail
+entry main(input: Text) {{
+    pushed = ""
+    if length(input) > 0 {{
+        push_r = perform queue.push(make_record([["body", input]]))
+        if is_ok(push_r) {{ pushed = unwrap(push_r) }}
+    }}
+
+    take_r = perform queue.take()
+    if is_error(take_r) {{
+        perform schedule.every(60)
+        return "큐 비어있음 — 60초 후 재시도"
+    }}
+    job = unwrap(take_r)
+    msg_id = get(job, "_id")
+
+    // ... do the work using fields from `job` ...
+    work_r = perform http.post_json(url, get(job, "body"))
+    if is_error(work_r) {{
+        perform queue.retry(msg_id, slice(unwrap_error(work_r), 0, 100))
+        perform schedule.every(30)
+        return join(["⚠ 일시 실패 — retry 등록: ", unwrap_error(work_r)], "")
+    }}
+
+    perform queue.done(msg_id)
+    perform schedule.every(5)  // 다음 메시지 빨리
+    return join(["✓ 완료: ", msg_id], "")
+}}
+```
+
+Rules:
+- Each tick processes ONE item (or yields if empty). Don't loop inside main; let `schedule.every` drive the next tick.
+- ALWAYS pair `queue.take` with either `queue.done` or `queue.retry`. Leaving a `working` message un-resolved means it sits there forever (until manual inspection).
+- Use the `_retry_count` field on the taken record to *adapt your strategy* — first try might be optimistic, third try might fall back to a slower-but-safer path.
+- Don't push and take in the same tick unless you're testing. The queue is meant for cross-tick / cross-program message passing.
+
+**THINKING LOOP — `import plan, act, reflect from "stdlib/agent"` (Telos + Arche 2026-04-29):**
+
+When the agent's *decision* is non-trivial — multiple possible actions, judgment about which to take, learning from outcomes — split the tick into Plan → Act → Reflect using the stdlib intents. Three is the right number (Arche verdict): observe is folded into act's return, replan is folded into reflect's return.
+
+```ail
+import plan from "stdlib/agent"
+import act from "stdlib/agent"
+import reflect from "stdlib/agent"
+
+fn on_tick(state: Record) -> Text {{
+    p = plan(state)               // intent: pick ONE next action
+    result = act(p)               // intent: execute it; result IS observation
+    lessons = reflect(result)     // intent: what to remember; replan_hint is in here
+    perform state.write("last_lesson", get(lessons, "lesson"))
+    return get(result, "summary")
+}}
+```
+
+When NOT: simple agents that "do the same thing every tick" (just put logic in `on_tick` directly). The 3-intent loop is for adaptive agents that change strategy based on what they learn.
+
 **LIFECYCLE-AGENT BUNDLES — when the project already has scattered `on_*.ail` files:**
 
 If the project root contains 2+ files like `on_genesis.ail` / `on_birth.ail` / `on_tick.ail` / `on_dying.ail` / `on_death.ail` (each with its own `entry main`) and *no* `evolve` block anywhere — the user is on the *split-then-combine* path. The chat UI auto-surfaces a **[🔧 지금 합치기]** card; **DO NOT re-implement bundling yourself in the reply.** Instead, in `<reply>` tell the user one sentence: *"위에 뜬 [🔧 지금 합치기] 카드를 누르면 이 5개 파일이 한 덩어리로 합쳐지고 [🚀 지금 배포하기] 카드가 나타나요."* Then emit `<action>nothing</action>` (or whatever fits). The bundle endpoint moves originals to `.ail/_archive/` (not delete) and writes a single deployable file with a default Physis `evolve` block (`rollback_on: error_rate > 0.5 or consecutive_failures > 5`).
