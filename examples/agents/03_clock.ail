@@ -1,0 +1,20 @@
+// 03 — 시계 / Clock
+// 매 분 현재 시각을 state에 기록하는 첫 *자율* 에이전트.
+// Run 한 번 누르면 그 다음부터는 알아서 60초마다 다시 실행돼.
+// 새로 배우는 것: `clock.now` — 현재 시각.
+//                  `schedule.every(N)` — N초 뒤 다시 실행 등록. 채팅 닫혀도
+//                  background에서 계속 돔 (단, ail up이 살아있는 동안만).
+
+entry main(input: Text) {
+    now = perform clock.now("iso")
+    if is_error(now) {
+        return ok("시계를 못 읽었어요.")
+    }
+    ts = unwrap(now)
+    perform state.write("last_tick", ts)
+
+    // 60초 뒤 다시 깨워줘.
+    perform schedule.every(60)
+
+    return ok(join(["⏰ 현재 시각: ", ts, " (다음 tick 60초 뒤)"], ""))
+}
