@@ -56,6 +56,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "clock.now",
     "state.read", "state.write", "state.has", "state.delete",
     "schedule.every",
+    "queue.push", "queue.take", "queue.done", "queue.retry",
     "env.read",
     "human.approve",
     "search.web",
@@ -687,6 +688,14 @@ class Executor:
             return self._state_delete(args, kwargs, origin)
         if name == "schedule.every":
             return self._schedule_every(args, kwargs, origin)
+        if name == "queue.push":
+            return self._queue_push(args, kwargs, origin)
+        if name == "queue.take":
+            return self._queue_take(args, kwargs, origin)
+        if name == "queue.done":
+            return self._queue_done(args, kwargs, origin)
+        if name == "queue.retry":
+            return self._queue_retry(args, kwargs, origin)
         if name == "env.read":
             return self._env_read(args, kwargs, origin)
         if name == "human.approve":
@@ -2077,6 +2086,145 @@ class Executor:
                 f"schedule.every: could not write schedule file: "
                 f"{type(e).__name__}: {e}", origin)
         return self._result_ok(True, origin)
+
+    # --- queue.* (Telos + Arche 2026-04-29 rebuild) -------------
+
+    def _queue_path(self, origin):
+        """Resolve AIL_QUEUE_FILE → Path, or Result-error if unset."""
+        from . import queue_engine
+        path = queue_engine.queue_file_path()
+        if path is None:
+            return None, self._result_err(
+                "queue effect requires AIL_QUEUE_FILE env var "
+                "(set automatically by `ail up`; not available under "
+                "a bare `ail run`)",
+                origin,
+            )
+        return path, None
+
+    def _queue_push(self, args, kwargs, origin):
+        """queue.push(msg: Record) -> Result[Text]
+
+        Append a new message to the queue's append-only log. Returns
+        the assigned msg_id. The message is in `pending` state until
+        a `queue.take` consumer pulls it.
+        """
+        from . import queue_engine
+        if not args:
+            return self._result_err(
+                "queue.push needs a message argument", origin)
+        path, err = self._queue_path(origin)
+        if err is not None:
+            return err
+        try:
+            msg_id = queue_engine.push(path, args[0].value)
+        except OSError as e:
+            return self._result_err(
+                f"queue.push: write failed: {type(e).__name__}: {e}",
+                origin,
+            )
+        return self._result_ok(msg_id, origin)
+
+    def _queue_take(self, args, kwargs, origin):
+        """queue.take() -> Result[Record]
+
+        Atomically pull the oldest pending message and mark it
+        `working`. The returned record carries `_id` (for done/retry
+        callbacks) and `_retry_count` (so the agent can adapt its
+        approach as the same payload comes back). Returns
+        `error("empty")` when no pending messages exist.
+        """
+        from . import queue_engine
+        path, err = self._queue_path(origin)
+        if err is not None:
+            return err
+        try:
+            payload = queue_engine.take(path)
+        except OSError as e:
+            return self._result_err(
+                f"queue.take: read failed: {type(e).__name__}: {e}",
+                origin,
+            )
+        if payload is None:
+            return self._result_err("empty", origin)
+        return self._result_ok(payload, origin)
+
+    def _queue_done(self, args, kwargs, origin):
+        """queue.done(msg_id: Text) -> Result[Text]
+
+        Mark a `working` message complete. Returns the msg_id back on
+        success; error if the id doesn't exist or isn't in working
+        state (already done / dead-lettered / never taken).
+        """
+        from . import queue_engine
+        if not args:
+            return self._result_err(
+                "queue.done needs a msg_id argument", origin)
+        msg_id = args[0].value
+        if not isinstance(msg_id, str) or not msg_id:
+            return self._result_err(
+                f"queue.done: msg_id must be a non-empty Text (got "
+                f"{type(msg_id).__name__})",
+                origin,
+            )
+        path, err = self._queue_path(origin)
+        if err is not None:
+            return err
+        try:
+            ok = queue_engine.done(path, msg_id)
+        except OSError as e:
+            return self._result_err(
+                f"queue.done: write failed: {type(e).__name__}: {e}",
+                origin,
+            )
+        if not ok:
+            return self._result_err(
+                f"queue.done: msg_id {msg_id!r} not in working state",
+                origin,
+            )
+        return self._result_ok(msg_id, origin)
+
+    def _queue_retry(self, args, kwargs, origin):
+        """queue.retry(msg_id: Text, reason: Text) -> Result[Text]
+
+        Send a `working` message back to `pending` with bumped retry
+        count. Returns "retried" normally, or "dead_letter" when the
+        bump pushes the count to DEAD_LETTER_AT (5) — at that point
+        the message is invisible to future `queue.take` calls and
+        becomes archive material.
+        """
+        from . import queue_engine
+        if len(args) < 2:
+            return self._result_err(
+                "queue.retry needs (msg_id, reason)", origin)
+        msg_id = args[0].value
+        reason = args[1].value
+        if not isinstance(msg_id, str) or not msg_id:
+            return self._result_err(
+                "queue.retry: msg_id must be a non-empty Text",
+                origin,
+            )
+        if not isinstance(reason, str):
+            reason = str(reason)
+        path, err = self._queue_path(origin)
+        if err is not None:
+            return err
+        try:
+            outcome = queue_engine.retry(path, msg_id, reason)
+        except OSError as e:
+            return self._result_err(
+                f"queue.retry: write failed: {type(e).__name__}: {e}",
+                origin,
+            )
+        if outcome == "not_found":
+            return self._result_err(
+                f"queue.retry: msg_id {msg_id!r} not found", origin)
+        if outcome == "wrong_state":
+            return self._result_err(
+                f"queue.retry: msg_id {msg_id!r} not in working state",
+                origin,
+            )
+        return self._result_ok(outcome, origin)
 
     # --- http.respond (server evolve) ---
 
