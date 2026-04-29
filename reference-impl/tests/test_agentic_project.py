@@ -9,41 +9,68 @@ from ail.agentic.project import Project
 
 def test_init_creates_layout(tmp_path):
     proj = Project.init(tmp_path / "demo")
-    assert proj.intent_path.exists()
+    # Telos + Arche 2026-04-29 rebuild — Project.init no longer writes
+    # INTENT.md. The .ail/ state dir is the only required scaffolding.
+    assert not proj.intent_path.exists()
     assert proj.state_dir.exists()
     assert proj.ledger_path.exists()
-    body = proj.intent_path.read_text(encoding="utf-8")
-    assert "# demo" in body
-    # Initial ledger entry
+    # Ledger entry records the project name (now passed via record,
+    # not via a heading inside INTENT.md).
     lines = proj.ledger_path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec["event"] == "init"
+    assert rec["name"] == "demo"
 
 
-def test_init_explicit_name_used_in_template(tmp_path):
+def test_init_explicit_name_recorded_in_ledger(tmp_path):
     proj = Project.init(tmp_path / "folder", name="My App")
-    body = proj.intent_path.read_text(encoding="utf-8")
-    assert "# My App" in body
+    rec = json.loads(
+        proj.ledger_path.read_text(encoding="utf-8").splitlines()[0])
+    assert rec["name"] == "My App"
 
 
-def test_init_refuses_to_clobber(tmp_path):
+def test_init_idempotent(tmp_path):
+    """Re-running Project.init on an existing project is a no-op now
+    that there's no INTENT.md to clobber."""
     Project.init(tmp_path / "demo")
-    with pytest.raises(FileExistsError):
-        Project.init(tmp_path / "demo")
+    # Should not raise.
+    Project.init(tmp_path / "demo")
+    # Both calls left an init ledger entry — that's fine; the ledger is
+    # append-only and records the *intent* of each call.
+    lines = (tmp_path / "demo" / ".ail" / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()
+    assert len(lines) == 2
 
 
-def test_at_requires_intent_md(tmp_path):
-    (tmp_path / "empty").mkdir()
+def test_at_auto_inits_empty_directory(tmp_path):
+    """Arche directive 2026-04-29: no bare-terminal user should hit a
+    dead end. `Project.at` on an empty directory now auto-creates
+    `.ail/` instead of raising FileNotFoundError."""
+    target = tmp_path / "empty"
+    target.mkdir()
+    proj = Project.at(target)
+    assert proj.state_dir.is_dir()
+    # Ledger has one init record from the auto-init.
+    rec = json.loads(
+        proj.ledger_path.read_text(encoding="utf-8").splitlines()[0])
+    assert rec["event"] == "init"
+
+
+def test_at_raises_when_directory_does_not_exist(tmp_path):
     with pytest.raises(FileNotFoundError):
-        Project.at(tmp_path / "empty")
+        Project.at(tmp_path / "does-not-exist")
 
 
 def test_at_opens_existing(tmp_path):
     Project.init(tmp_path / "demo")
     proj = Project.at(tmp_path / "demo")
     spec = proj.read_intent()
+    # Empty IntentSpec because no INTENT.md exists — name falls back
+    # to the directory name.
     assert spec.name == "demo"
+    assert spec.behavior == []
+    assert spec.tests == []
 
 
 def test_app_source_round_trip(tmp_path):

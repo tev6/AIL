@@ -1878,15 +1878,16 @@ def test_chat_ui_has_export_and_copy_links(tmp_path):
     assert "navigator.clipboard.writeText" in html
 
 
-def test_project_state_omits_intent_md_in_v1_14(tmp_path):
-    """v1.14.0 — chat_history is the agent's memory. _read_project_state
-    MUST NOT include INTENT.md in the PROJECT STATE block sent to the
-    model. The file can still exist on disk (legacy scaffold) but the
-    agent no longer reads it to avoid the dual-source-of-truth class
-    of bugs."""
+def test_project_state_omits_intent_md(tmp_path):
+    """v1.14.0 + 2026-04-29 rebuild — chat_history is the agent's
+    memory; INTENT.md was vestigial in v1.14 and is no longer written
+    at all in the rebuild. Even if a legacy project keeps INTENT.md on
+    disk, _read_project_state must not surface it (dual-source-of-truth
+    bugs)."""
     proj = Project.init(tmp_path / "nointent")
-    # INTENT.md exists on disk (default from init).
-    assert proj.intent_path.is_file()
+    # Simulate a legacy on-disk INTENT.md to prove it's ignored.
+    proj.intent_path.write_text("# legacy\nold spec body\n",
+                                encoding="utf-8")
     proj.write_app_source(
         'entry main(input: Text) { return input }')
     chat = AuthoringChat(proj, _ScriptedChatAdapter([]))

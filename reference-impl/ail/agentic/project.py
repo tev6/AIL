@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from .intent_md import IntentSpec, parse_intent_md, render_intent_template
+from .intent_md import IntentSpec, parse_intent_md
 
 
 @dataclass
@@ -40,21 +40,25 @@ class Project:
 
     @classmethod
     def init(cls, root: Path | str, name: Optional[str] = None) -> "Project":
-        """Create a fresh project on disk. Refuses to overwrite an
-        existing INTENT.md so a `ail init` typo doesn't clobber work.
+        """Create a fresh project on disk.
+
+        Telos + Arche 2026-04-29 rebuild — INTENT.md is no longer
+        written. v1.14.0 had already pivoted: chat_history is the
+        agent's memory, .ail files are its output, and INTENT.md was
+        a vestigial setting file that *only* served to confuse the
+        author model with leftover placeholder bullets. *"문법에 없는
+        것은 존재하지 않는다"* (Arche). A fresh project is just a
+        directory + the .ail/ state folder.
+
+        Idempotent — re-running on a directory that already has .ail/
+        is a no-op. (Older releases raised FileExistsError when
+        INTENT.md was already there; that guard is gone now that the
+        file isn't part of the contract.)
         """
         root = Path(root).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         proj = cls(root)
-        if proj.intent_path.exists():
-            raise FileExistsError(
-                f"{proj.intent_path} already exists — refusing to overwrite. "
-                f"Edit it directly or remove it before re-init."
-            )
         display_name = name or root.name
-        proj.intent_path.write_text(
-            render_intent_template(display_name), encoding="utf-8"
-        )
         proj.state_dir.mkdir(exist_ok=True)
         (proj.state_dir / "state").mkdir(exist_ok=True)
         # Gitignore the project so .ail/secrets.json and the ledger
@@ -72,15 +76,27 @@ class Project:
 
     @classmethod
     def at(cls, root: Path | str) -> "Project":
-        """Open an existing project. Verifies INTENT.md is present."""
+        """Open an existing project — or auto-init if the directory has
+        nothing in it yet (Arche 2026-04-29: never leave a bare-terminal
+        user without an entry point).
+
+        Pre-rebuild this required INTENT.md to exist. With INTENT.md
+        gone, the only signal that the directory is *meant* to be an
+        AIL project is the `.ail/` state dir; if it isn't there yet,
+        we create it. This makes `ail up <empty-dir>` Just Work without
+        a separate `ail init` step.
+        """
         root = Path(root).expanduser().resolve()
-        proj = cls(root)
-        if not proj.intent_path.exists():
+        if not root.is_dir():
             raise FileNotFoundError(
-                f"No INTENT.md at {proj.intent_path}. "
-                f"Run `ail init <name>` to scaffold a project, or `cd` "
-                f"into an existing one before `ail up`."
+                f"No such directory: {root}. "
+                f"Pass an existing path or `mkdir` it first."
             )
+        proj = cls(root)
+        if not proj.state_dir.exists():
+            # Auto-init — same code path as Project.init, identity rules
+            # all the way through (.gitignore + ledger).
+            return cls.init(root)
         proj.state_dir.mkdir(exist_ok=True)
         return proj
 
@@ -113,6 +129,17 @@ class Project:
     # ---------- spec + source ----------
 
     def read_intent(self) -> IntentSpec:
+        """Parse INTENT.md if present; otherwise return an empty spec.
+
+        Telos + Arche 2026-04-29: INTENT.md is no longer written by
+        `Project.init`. Existing projects that still have one are
+        parsed for back-compat (so old `examples/` keep running), but
+        a missing file is the *expected* shape going forward. Callers
+        treat the empty IntentSpec as "no behavior bullets, no test
+        cases, default port" — which is exactly the right zero state.
+        """
+        if not self.intent_path.exists():
+            return IntentSpec(name=self.root.name, preamble="")
         text = self.intent_path.read_text(encoding="utf-8")
         return parse_intent_md(text, default_name=self.root.name)
 

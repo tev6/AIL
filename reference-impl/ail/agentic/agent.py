@@ -401,7 +401,16 @@ def bring_up(
     project.write_tests(spec)
 
     # Author or reuse app.ail.
-    if not project.read_app_source().strip():
+    #
+    # Telos + Arche 2026-04-29 rebuild: with INTENT.md gone, a fresh
+    # project has an empty IntentSpec — preamble blank, no behavior
+    # bullets, no test cases. There's nothing concrete to author from.
+    # The right place for the user to start is the chat UI (which
+    # `serve_project` lands on for fresh projects). Skip the author
+    # call in that case rather than asking the model to write code
+    # against an empty brief.
+    has_spec = bool(spec.preamble.strip()) or bool(spec.behavior)
+    if not project.read_app_source().strip() and has_spec:
         adapter_desc = _describe_adapter()
         logger.authoring_start(adapter_desc)
         try:
@@ -411,7 +420,7 @@ def bring_up(
             return 1
         project.write_app_source(source)
         logger.authoring_done(project.app_path)
-    else:
+    elif project.read_app_source().strip():
         logger.using_existing(
             project.app_path, project.app_path.stat().st_size,
         )
