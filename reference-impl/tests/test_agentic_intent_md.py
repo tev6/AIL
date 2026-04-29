@@ -5,7 +5,6 @@ template's round-trip parseability.
 from ail.agentic.intent_md import (
     DEFAULT_PORT,
     parse_intent_md,
-    render_intent_template,
 )
 
 
@@ -86,17 +85,23 @@ def test_authoring_goal_includes_behavior_and_tests():
     assert "must error" in goal
 
 
-def test_template_round_trips():
-    text = render_intent_template("demo")
-    spec = parse_intent_md(text)
-    assert spec.name == "demo"
-    assert spec.port == DEFAULT_PORT
-    # Telos 2026-04-29: scaffold no longer plants example bullets in
-    # ## Behavior / ## Tests — the model used to read those examples
-    # as literal requirements (see Arche field test). HTML comments
-    # carry the hints; the parser's `- ` bullet regex skips them.
-    assert spec.behavior == []
-    assert spec.tests == []
+def test_legacy_intent_md_still_parses_for_back_compat():
+    """`render_intent_template` was removed in the 2026-04-29 rebuild —
+    `Project.init` no longer writes INTENT.md. Existing projects with
+    a hand-written INTENT.md (legacy + the `examples/` tree) must still
+    parse cleanly: that's the whole point of leaving `parse_intent_md`
+    in place."""
+    legacy = (
+        "# legacy_app\n\n"
+        "A legacy project with a real INTENT.md.\n\n"
+        "## Behavior\n- one bullet\n\n"
+        "## Tests\n- \"x\" → ok\n"
+    )
+    spec = parse_intent_md(legacy)
+    assert spec.name == "legacy_app"
+    assert spec.behavior == ["one bullet"]
+    assert len(spec.tests) == 1
+    assert spec.tests[0].input == "x"
 
 
 def test_unknown_headers_dont_crash():

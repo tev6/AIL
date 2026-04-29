@@ -215,41 +215,8 @@ def parse_intent_md(text: str, *, default_name: str = "app") -> IntentSpec:
     )
 
 
-def render_intent_template(name: str) -> str:
-    """Return a starter INTENT.md for a freshly-initialized project.
-
-    hyun06000 + Arche field-test 2026-04-29: the previous template
-    embedded *example* bullets (`"" → 에러`, *"Empty input returns an
-    error"*) directly under ## Tests / ## Behavior. The author model
-    reads INTENT.md verbatim to decide what AIL to write — so those
-    "examples" became *literal requirements*, and every fresh project
-    started life with `if is_empty(input) {{ return error(...) }}` even
-    if the user wanted something else (and the scheduler then beat that
-    code with empty ticks forever — see Arche project ledger).
-
-    Fix: leave Behavior / Tests sections empty. Hints live in HTML
-    comments, which the bullet parser doesn't pick up. The user fills
-    sections in via chat; the model only sees what the user actually
-    intends.
-    """
-    return f"""# {name}
-
-<!-- 만들고 싶은 기능을 자연스러운 한국어 또는 영어로 적으세요.
-     예: "매일 오전 9시에 캘린더 일정을 슬랙으로 요약해서 보내기".
-     이 줄은 무시되니 지우거나 그대로 둬도 됩니다. -->
-
-## Behavior
-
-<!-- 행동 요구사항을 한 줄씩 `- ...` 형식으로. 비워두면 위 한 줄
-     설명만으로 AI가 알아서 만듭니다. -->
-
-## Tests
-
-<!-- 입력 → 예상 결과를 한 줄씩 `- "입력" → 결과` 형식으로.
-     예: `- "안녕" → 인사 응답`. 비워두면 행동 설명만으로 만들고
-     테스트는 건너뜁니다. 빈 input 거부 같은 제약을 *원하지 않으면*
-     적지 마세요 — 적힌 모든 항목은 AI가 글자 그대로 구현합니다. -->
-
-## Deployment
-- 포트 {DEFAULT_PORT}
-"""
+# `render_intent_template` was removed in the 2026-04-29 rebuild.
+# `Project.init` no longer writes INTENT.md; chat_history is the
+# project's memory. Existing INTENT.md files (legacy + examples/) are
+# still parsed by `parse_intent_md` above for back-compat — that path
+# is exercised when a user opens an old project with `ail up`.
