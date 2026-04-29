@@ -1,0 +1,106 @@
+// PURPOSE: Stoa 인박스 메시지를 한 번에 하나씩 큐로 처리하는 reference 에이전트.
+// Author: telos (2026-04-29)
+// Context: queue.* + schedule.every의 canonical 사용 예시. v1.69+에서 동작.
+//
+// 흐름:
+//   1) Stoa /inbox에서 새 letter 가져와서 queue.push (없으면 skip)
+//   2) queue.take → 한 메시지 꺼냄
+//   3) 처리 (여기선 ledger에 기록만 — 진짜 사용 시엔 답장 발송 / 분류 등)
+//   4) 성공 → queue.done. 실패 → queue.retry (5회 시 dead_letter)
+//   5) schedule.every — 큐가 비어있으면 길게(60s), 메시지가 있으면 짧게(5s)
+//
+// HEAAL 동형성: Physis 4층 — 같은 에러 5회 → dead_letter로 영구 격리.
+// scheduler self-throttle / evolve consecutive_failures와 동일 규칙.
+//
+// 환경변수 (선택):
+//   STOA_BASE_URL — Stoa 서버 주소 (없으면 큐만 처리)
+//   STOA_AGENT_NAME — 인박스 to= 값 (없으면 "agent")
+//
+// 사용:
+//   ail up <project_dir> 후 채팅 UI 또는 ail run으로 첫 실행. 이후
+//   schedule이 알아서 돌림.
+
+pure fn render_outcome(action: Text, msg_id: Text, detail: Text) -> Text {
+    head = join([action, " ", msg_id], "")
+    if length(detail) > 0 {
+        return join([head, " — ", detail], "")
+    }
+    return head
+}
+
+entry main(input: Text) {
+    log = ""
+
+    // ---- Step 1: Stoa에서 새 letter pull → 큐에 push (선택) ----
+    base_r = perform env.read("STOA_BASE_URL")
+    if is_ok(base_r) {
+        agent_r = perform env.read("STOA_AGENT_NAME")
+        agent_name = "agent"
+        if is_ok(agent_r) { agent_name = trim(unwrap(agent_r)) }
+        url = join([trim(unwrap(base_r)), "/api/v1/messages?to=", agent_name, "&limit=20"], "")
+        resp_r = perform http.get(url)
+        if is_ok(resp_r) {
+            resp = unwrap(resp_r)
+            if resp.ok {
+                parsed_r = parse_json(resp.body)
+                if is_ok(parsed_r) {
+                    body = unwrap(parsed_r)
+                    msgs = unwrap_or(get(body, "messages"), [])
+                    pushed_count = 0
+                    for letter in msgs {
+                        msg_id = unwrap_or(get(letter, "id"), "")
+                        // 이미 본 letter는 state로 dedupe
+                        seen_key = join(["seen_", msg_id], "")
+                        seen_r = perform state.has(seen_key)
+                        if not unwrap_or(seen_r, false) {
+                            perform queue.push(letter)
+                            perform state.write(seen_key, true)
+                            pushed_count = pushed_count + 1
+                        }
+                    }
+                    if pushed_count > 0 {
+                        log = log + "✓ Stoa → 큐 push: " + to_text(pushed_count) + "건\n"
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Step 2: 큐에서 한 건 take ----
+    take_r = perform queue.take()
+    if is_error(take_r) {
+        // 큐 비어있음 — 다음 폴링 60초 뒤
+        perform schedule.every(60)
+        return log + "큐 비어있음 — 60초 후 재시도"
+    }
+    job = unwrap(take_r)
+    msg_id = get(job, "_id")
+    retry_count = unwrap_or(get(job, "_retry_count"), 0)
+
+    // ---- Step 3: 처리 (실제 사용 시 여기 로직 — 여기선 ledger 기록 데모) ----
+    sender = unwrap_or(get(job, "from"), "(unknown)")
+    title = unwrap_or(get(job, "title"), "(no title)")
+    log = log + "📬 처리 중: " + msg_id + " from " + sender + "\n"
+    log = log + "   title: " + slice(title, 0, 80) + "\n"
+    if retry_count > 0 {
+        log = log + "   (재시도 " + to_text(retry_count) + "회차)\n"
+    }
+
+    // 가짜 처리 실패 시뮬레이션 — input에 "fail"이 들어오면 retry 트리거
+    if index_of(input, "fail") != -1 {
+        retry_r = perform queue.retry(msg_id, "demo-failure")
+        outcome = unwrap_or(retry_r, "retry-error")
+        perform schedule.every(30)
+        return log + render_outcome("⚠", msg_id, outcome)
+    }
+
+    // ---- Step 4: 성공 → done ----
+    done_r = perform queue.done(msg_id)
+    if is_error(done_r) {
+        log = log + "❌ done 실패: " + unwrap_error(done_r) + "\n"
+    }
+
+    // ---- Step 5: 다음 tick 빨리 (큐에 더 있을 수 있음) ----
+    perform schedule.every(5)
+    return log + render_outcome("✓ done", msg_id, "")
+}
