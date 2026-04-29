@@ -976,6 +976,43 @@ def _make_handler(project: Project, serve_only: bool = False):
                 self.wfile.write(payload)
                 return
 
+            if self.path in ("/authoring-schedule/pause",
+                             "/authoring-schedule-pause"):
+                # Telos 2026-04-29 — manual pause (mirrors throttle's
+                # auto-pause; user-initiated). Sets `paused: true` on
+                # schedule.json with reason="user". The existing throttle
+                # card UI then surfaces [▶ 다시 켜기] for symmetry.
+                import json as _json
+                schedule_path = project.state_dir / "schedule.json"
+                try:
+                    raw_text = schedule_path.read_text(encoding="utf-8")
+                    raw = _json.loads(raw_text)
+                except (OSError, _json.JSONDecodeError):
+                    self._send_text(404, "no schedule registered\n")
+                    return
+                if not isinstance(raw, dict):
+                    self._send_text(400, "schedule file malformed\n")
+                    return
+                raw["paused"] = True
+                raw["paused_reason"] = "user"
+                raw["paused_consecutive_failures"] = 0
+                import time as _time
+                raw["paused_at"] = _time.time()
+                try:
+                    schedule_path.write_text(
+                        _json.dumps(raw), encoding="utf-8",
+                    )
+                except OSError as e:
+                    self._send_text(
+                        500, f"pause write failed: {e}\n")
+                    return
+                project.append_ledger({
+                    "event": "schedule_paused",
+                    "by": "user",
+                })
+                self._send_text(200, "paused\n")
+                return
+
             if self.path in ("/authoring-schedule/resume",
                              "/authoring-schedule-resume"):
                 # Clear `paused` + counters on schedule.json so the

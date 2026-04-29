@@ -143,6 +143,33 @@ class AuthoringChat:
             else:
                 applied_writes.append({"path": path, "skipped": summary})
 
+        # Telos 2026-04-29 (hyun06000 counter_loop field test): the
+        # author model still picks `ready_to_run` even when the file
+        # it just emitted contains `perform schedule.every` — that
+        # combination is wrong by definition (`ready_to_run` shows a
+        # one-shot Run card; the schedule means the program *is* a
+        # service). Detect the contradiction at the server and force
+        # the action to `ready_to_serve` regardless of what the model
+        # said. Prompt-only guards aren't enough; structural detection
+        # is.
+        if action == "ready_to_run":
+            for w in applied_writes:
+                content = w.get("content", "")
+                if (
+                    isinstance(content, str)
+                    and w.get("path", "").endswith(".ail")
+                    and "schedule.every" in content
+                ):
+                    self.project.append_ledger({
+                        "event": "action_override",
+                        "from": action,
+                        "to": "ready_to_serve",
+                        "reason": "schedule.every in emitted file",
+                        "file": w.get("path"),
+                    })
+                    action = "ready_to_serve"
+                    break
+
         self._append_history(user_message, reply, applied_writes, action)
 
         raw = response.raw or {}
