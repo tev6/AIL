@@ -158,6 +158,40 @@ def _program_is_evolve_server(project) -> bool:
     return False
 
 
+def _program_is_deployable(project) -> bool:
+    """Return True if the project's active program is worth deploying
+    as a separate process (so closing the chat doesn't kill it).
+
+    Deployable shapes (any one):
+      1. evolve-server (`evolve { when request_received(req) ... }`)
+      2. recurring agents — any `perform schedule.every(N)` call
+
+    Telos 2026-04-29 (hyun06000 oscillator field test): the deploy
+    CTA was wired to `_program_is_evolve_server` only, so a program
+    using `schedule.every` (the canonical autonomous-agent pattern)
+    didn't get a [🚀 지금 배포하기] card — the chat showed
+    `ready_to_serve` framing but only an "Open /run in new tab" link
+    that closes when `ail up` quits. The user explicitly wants the
+    schedule to outlive the chat session, which is exactly what a
+    spawned `ail serve` process delivers.
+    """
+    if _program_is_evolve_server(project):
+        return True
+    target = _resolve_active_program_path(project)
+    if target is None:
+        return False
+    try:
+        source = target.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    # Cheap text check first — `schedule.every` is grammatically
+    # `perform schedule.every(N)`, so its presence in source is a
+    # reliable signal without requiring AST parse on every status poll.
+    if "schedule.every" in source:
+        return True
+    return False
+
+
 def start_deployment(project) -> dict:
     """Spawn the project on a free port and record the resulting
     {pid, port, url, started_at, log, mode}. Returns the existing record
@@ -202,7 +236,10 @@ def start_deployment(project) -> dict:
             f"\n=== ail run (evolve-server) start "
             f"{time.strftime('%Y-%m-%dT%H:%M:%S')} port={port} ===\n")
     else:
-        mode = "single-shot"
+        # Either a schedule.every-driven autonomous agent (the scheduler
+        # spawned inside `ail serve` keeps its tick alive) or a plain
+        # single-shot served via view.html. `ail serve` handles both.
+        mode = "service"
         cmd = [sys.executable, "-m", "ail", "serve",
                str(project.root), "--port", str(port), "--host", "127.0.0.1"]
         env = None
@@ -226,7 +263,10 @@ def start_deployment(project) -> dict:
         "log": str(log_path),
         "mode": mode,
     }
-    if mode == "single-shot":
+    if mode == "service":
+        # `ail serve` exposes `/run` as the user-facing URL (view.html or
+        # the textarea page). Evolve-servers expose `/` directly because
+        # their `when request_received` handler owns every route.
         record["url"] = f"http://127.0.0.1:{port}/run"
     _deployment_path(project).write_text(
         json.dumps(record, ensure_ascii=False))
