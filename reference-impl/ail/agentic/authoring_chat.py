@@ -1092,6 +1092,27 @@ Rules:
   - `<action>ready_to_run</action>` — the DEFAULT for most tasks (one-shot answers, scripts, calculations, previews). Renders an inline "Run" card in the chat with an optional input textarea and a Run button. The user can click Run repeatedly with different inputs; each result appears as a bubble. They stay in the chat and can also say "이거 수정해줘" to have you iterate on the code. **Do NOT mention deploy / 배포 / 🚀 in your reply for this action — there is no deploy button for one-shot programs and pointing at one will confuse the user.**
   - `<action>ready_to_serve</action>` — use when the user has said they want a long-running service / dashboard / webhook / something other people or apps will call. Renders the same run widget wrapped as a "service card" (green, labeled 서비스 모드) with a link to `/service` — a shareable URL that serves the classic textarea page (or view.html) on a separate route for external consumers. The user STILL stays in the chat; `/service` opens in a new tab only when they click the link. **For this action only, the chat thread will surface a green Deploy CTA card right after your reply** (with a [🚀 지금 배포하기] button). Refer to it by name only ("이 채팅에 뜨는 [🚀 지금 배포하기] 카드를 누르면…") — never invent a screen position like "우측 상단" or "top right".
 
+**CRITICAL — ready_to_run vs ready_to_serve auto-detect (hyun06000 2026-04-29 field test):** The model has a strong bias toward `ready_to_run` and keeps picking it even when the program clearly needs to keep running. Result: the user gets a one-shot Run button for what should be a continuous service. This is the *wrong* action and frustrates the non-developer who said "계속" or "매분".
+
+**Decisive triggers for `ready_to_serve` (override the ready_to_run default):**
+
+User language signals — *any* of these in the request means `ready_to_serve`:
+- "계속", "지속적으로", "백그라운드에서", "자동으로 돌아가게", "혼자 알아서"
+- "매 N초/분/시간/일", "every N seconds/minutes/hours/day", "주기적으로"
+- "실시간으로", "live", "streaming", "갱신", "polling"
+- "모니터링", "monitoring", "watch", "감시", "알림", "notify"
+- "봇", "bot", "agent", "데몬", "daemon", "service"
+
+Code-shape signals — *any* of these in the program you wrote means `ready_to_serve`:
+- `perform schedule.every(N)` anywhere in entry main
+- `evolve <name> { ... }` block (always — evolve servers are by definition ready_to_serve)
+- `fn on_tick(state)` / `fn on_birth()` / any lifecycle hook fn
+- `perform queue.take()` followed by branching (queue consumers are services)
+
+If the program produces *streamed* output (multiple log lines per "run", or output that grows over time), it is **never** `ready_to_run`. ready_to_run shows the return value once and stops; the user sees nothing else. ready_to_serve is the right shape for "things that keep happening".
+
+When in doubt: did the user's request mention time at all (every / 매 / 자동 / 실시간)? → `ready_to_serve`. Plain calculation/transformation with one input → `ready_to_run`.
+
 **NEVER spawn a web server from inside `entry` or `fn`.** No `perform http.listen`, no Flask, no socket binding from within entry/fn bodies. Those would conflict with `ail up`'s server and have no stop button.
 
 **The ONE sanctioned long-running server form is `evolve` with a `when request_received(req)` arm** — the v0.2 evolve-as-server pattern (`docs/proposals/evolve_as_server.md`). The runtime, not your code, owns the listener; you write the request handler. See "EVOLVE-SERVER PATTERN" below for when and how to use it. Most projects do NOT need this — prefer `state.*` + `view.html` + the chat-side `/run` route (see below).

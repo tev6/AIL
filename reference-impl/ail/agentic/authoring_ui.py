@@ -252,19 +252,11 @@ def render_authoring_page(
     .run-result .diag {{ margin-top: 8px; padding-top: 8px;
       border-top: 1px solid #fecaca; font-size: 12px;
       color: #6b7280; white-space: pre-wrap; }}
-    /* Persistent run bar — always visible above the composer when a
-       valid program exists. Separate from the chat-thread run cards so
-       the user never has to scroll up to find a buried run card. */
-    #quick-run-bar {{ display: none; padding: 10px 0 6px;
-      border-top: 1px solid #e5e7eb; }}
-    #quick-run-bar textarea {{ width: 100%; box-sizing: border-box;
-      font-family: inherit; font-size: 14px;
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
-      background: #fff; color: var(--fg); resize: none; line-height: 1.4;
-      max-height: 100px; }}
-    #quick-run-bar textarea:focus {{ outline: 2px solid #111; outline-offset: -1px; }}
-    #quick-run-bar .qr-label {{ font-size: 11px; color: #6b7280;
-      margin-bottom: 4px; }}
+    /* Quick-run-bar removed 2026-04-29 (hyun06000 field test): the
+       persistent input + the chat composer being visible at the same
+       time looked like "two message boxes" to non-developers. Run cards
+       in the chat thread + file-tree click → re-summon Run card cover
+       the same need without the duplicate input. */
     .composer {{ position: sticky; bottom: 0; padding: 12px 0;
       background: var(--bg); border-top: 1px solid var(--border);
       display: flex; gap: 8px; align-items: flex-end;
@@ -426,12 +418,6 @@ def render_authoring_page(
       </div>
     </div>
 
-    <div id="quick-run-bar">
-      <div class="qr-label" id="qr-label">▶ 실행 / Run</div>
-      <textarea id="qr-input" rows="1"
-                placeholder="입력값을 적고 Enter (Shift+Enter는 줄바꿈)"
-                autocomplete="off" spellcheck="false"></textarea>
-    </div>
     <form class="composer" id="composer" onsubmit="return onSend(event);">
       <div id="attach-strip" style="display:none;flex-wrap:wrap;gap:.4rem;width:100%;padding:.4rem 0"></div>
       <textarea id="msg" rows="1"
@@ -1327,101 +1313,14 @@ def render_authoring_page(
       turnEl.appendChild(foot);
     }}
 
-    // Quick-run bar: persistent input+button above the composer.
-    // Always visible when a valid program exists, regardless of chat
-    // history state. Solves "buried run card" for non-developers.
-    // Declared here (before INITIAL_HISTORY replay) so updateQuickRunBar()
-    // is safe to call at the end of the replay block.
-    const qrBar = document.getElementById('quick-run-bar');
-    const qrInput = document.getElementById('qr-input');
-    const qrLabel = document.getElementById('qr-label');
-
-    function updateQuickRunBar() {{
-      const prog = programsForNext && programsForNext.length > 0
-        ? programsForNext[0] : null;
-      const valid = prog && prog.parses !== false && prog.entry_present !== false;
-      if (!valid) {{ qrBar.style.display = 'none'; return; }}
-      qrBar.style.display = 'block';
-      const hint = prog.input_hint || '';
-      const usesInput = prog.input_used !== false;
-      qrInput.style.display = usesInput ? '' : 'none';
-      if (hint) qrInput.placeholder = hint;
-      qrLabel.textContent = (prog.purpose || '▶ 실행 / Run');
-      // auto-resize
-      qrInput.style.height = 'auto';
-      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
-    }}
-
-    qrInput.addEventListener('input', () => {{
-      qrInput.style.height = 'auto';
-      qrInput.style.height = Math.min(qrInput.scrollHeight, 100) + 'px';
-    }});
-
-    let qrAbortCtrl = null;
-
-    async function runQuickBar() {{
-      if (qrAbortCtrl) {{ return; }}
-      const prog = programsForNext && programsForNext.length > 0
-        ? programsForNext[0] : null;
-      if (!prog) return;
-      // 수동 Run = 자가수리 중단 해제.
-      autoFixCancelled = false;
-      qrAbortCtrl = new AbortController();
-      const origLabel = qrLabel.textContent;
-      qrLabel.innerHTML = '▶ 실행 중… <a href="#" id="qr-abort" '
-        + 'style="color:#dc2626;text-decoration:underline;margin-left:8px">'
-        + '■ 중단</a>';
-      const abortLink = document.getElementById('qr-abort');
-      abortLink.addEventListener('click', (e) => {{
-        e.preventDefault();
-        if (qrAbortCtrl) qrAbortCtrl.abort();
-      }});
-      const runInput = prog.input_used !== false ? qrInput.value : '';
-      try {{
-        const r = await fetch('/authoring-run', {{
-          method: 'POST',
-          headers: {{'Content-Type': 'application/json'}},
-          body: JSON.stringify({{
-            input: runInput,
-            program: prog.name,
-          }}),
-          signal: qrAbortCtrl.signal,
-        }});
-        const data = await r.json();
-        addRunResult({{
-          kind: 'run_result',
-          input: runInput,
-          ok: data.ok,
-          value: data.value || '',
-          error: data.error || '',
-          diagnostic: data.diagnostic || '',
-        }});
-        scrollBottom();
-        if (data.input_used !== undefined) {{
-          programsForNext[0] = {{...programsForNext[0], input_used: data.input_used}};
-          updateQuickRunBar();
-        }}
-      }} catch(e) {{
-        if (e.name !== 'AbortError') {{
-          addRunResult({{kind:'run_result',input:runInput,ok:false,value:'',error:String(e),diagnostic:''}});
-          scrollBottom();
-        }}
-      }} finally {{
-        qrAbortCtrl = null;
-        qrLabel.textContent = origLabel;
-      }}
-    }}
-
-    qrInput.addEventListener('keydown', (e) => {{
-      // Enter runs; Shift+Enter inserts newline. IME guard for Korean
-      // (isComposing / keyCode 229) so completing Hangul commits the
-      // composition instead of triggering a run.
-      if (e.key === 'Enter' && !e.shiftKey
-          && !e.isComposing && e.keyCode !== 229) {{
-        e.preventDefault();
-        runQuickBar();
-      }}
-    }});
+    // hyun06000 2026-04-29: quick-run-bar removed entirely. Two input
+    // boxes (composer #msg + qr-input) at the bottom looked like
+    // duplicate message inputs to non-developers. Run cards in the chat
+    // thread + file-tree click → re-summon Run card cover the same need
+    // without the second input. The function names are preserved as
+    // no-ops so call sites elsewhere don't crash.
+    function updateQuickRunBar() {{ /* no-op — quick-run-bar removed */ }}
+    async function runQuickBar() {{ /* no-op — quick-run-bar removed */ }}
 
     // Replay history embedded by the server on first render.
     const INITIAL_HISTORY = {history_json};
