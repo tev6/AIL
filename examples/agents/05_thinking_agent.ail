@@ -1,0 +1,41 @@
+// 05 — 생각하는 에이전트 / Thinking agent
+// 상황 보고 *알아서 결정*하는 에이전트. plan → act → reflect 사고 루프
+// 사용. 단순 반복이 아니라, 매 tick마다 무엇을 할지 스스로 정함.
+//
+// 새로 배우는 것:
+//   `import` — stdlib에서 plan/act/reflect 가져오기.
+//   intent의 자연스러운 합성 — 각 단계가 LLM 호출이지만 의도가 작아서
+//   잘 동작함. observe는 act의 반환값에, replan은 reflect의 반환값에
+//   흡수돼서 셋만 있으면 사이클이 닫혀.
+//
+// 비용 주의: 매 tick마다 plan/act/reflect 셋 다 LLM 호출이야.
+// 단순한 일은 02_counter처럼 entry main 하나로 끝내는 게 토큰 절약.
+// 진짜 *판단*이 필요한 자율 agent에서만 쓰는 패턴.
+
+import plan from "stdlib/agent"
+import act from "stdlib/agent"
+import reflect from "stdlib/agent"
+
+entry main(input: Text) {
+    // 이전 lesson을 읽어서 state로 만듦. 첫 실행이면 빈 lesson.
+    prev_r = perform state.read("last_lesson")
+    last_lesson = unwrap_or(prev_r, "")
+    state = make_record([["last_lesson", last_lesson], ["input_hint", input]])
+
+    // 사고 루프 — 셋이면 원이 닫혀.
+    p = plan(state)                       // 무엇을 할지 한 줄로
+    result = act(p)                       // 실행 + 결과 = 관찰
+    lessons = reflect(result)             // 배운 것 = 다음 plan 입력
+
+    // 다음 tick이 읽을 수 있게 lesson 저장.
+    perform state.write("last_lesson", get(lessons, "lesson"))
+
+    // 5분마다 다시 생각.
+    perform schedule.every(300)
+
+    return ok(join([
+        "📋 계획: ", to_text(p), "\n",
+        "🎬 결과: ", to_text(get(result, "summary")), "\n",
+        "📝 교훈: ", to_text(get(lessons, "lesson"))
+    ], ""))
+}

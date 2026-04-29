@@ -1,0 +1,8 @@
+// 01 — 메아리 / Echo
+// 가장 작은 에이전트. 받은 입력을 그대로 돌려줘.
+// 새로 배우는 것: `entry main(input)` — 모든 AIL 프로그램의 시작점.
+//                  `ok(...)` — 성공 결과 표시.
+
+entry main(input: Text) {
+    return ok(input)
+}

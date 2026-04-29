@@ -1,0 +1,51 @@
+// 04 — 인박스 큐 / Inbox queue
+// 메시지를 한 번에 하나씩 처리하는 에이전트. 실패하면 자동 재시도,
+// 5번 연속 실패하면 dead_letter로 격리됨 (Physis: 같은 실수 반복 금지).
+//
+// 사용법:
+//   첫 실행: input에 메시지 텍스트를 적고 Run → 큐에 push, 그 자리에서 처리.
+//   다음 실행: input 비우고 Run (또는 schedule이 자동으로 호출) → 다음 큐 처리.
+//
+// 새로 배우는 것:
+//   `queue.push` / `queue.take` / `queue.done` / `queue.retry` — 4개 큐 effect.
+//   _retry_count — take 결과 안에 있어. 몇 번째 시도인지 알 수 있어.
+
+entry main(input: Text) {
+    log = ""
+
+    // input이 있으면 큐에 push.
+    if length(input) > 0 {
+        push_r = perform queue.push(make_record([["body", input]]))
+        if is_ok(push_r) {
+            log = log + "📥 큐에 추가됨: " + unwrap(push_r) + "\n"
+        }
+    }
+
+    // 큐에서 한 건 꺼냄.
+    take_r = perform queue.take()
+    if is_error(take_r) {
+        perform schedule.every(60)
+        return ok(log + "큐 비어있음 — 60초 후 다시 확인.")
+    }
+    job = unwrap(take_r)
+    msg_id = get(job, "_id")
+    body = unwrap_or(get(job, "body"), "(없음)")
+    retry_count = unwrap_or(get(job, "_retry_count"), 0)
+
+    log = log + "📬 처리 중: " + msg_id + "\n"
+    log = log + "   내용: " + slice(body, 0, 80) + "\n"
+    if retry_count > 0 {
+        log = log + "   (재시도 " + to_text(retry_count) + "회차)\n"
+    }
+
+    // 데모: body에 "fail"이 들어있으면 일부러 실패 → retry.
+    if index_of(body, "fail") != -1 {
+        perform queue.retry(msg_id, "demo failure")
+        perform schedule.every(10)
+        return ok(log + "⚠ 일부러 실패 — retry 등록.")
+    }
+
+    perform queue.done(msg_id)
+    perform schedule.every(5)
+    return ok(log + "✓ 완료.")
+}
