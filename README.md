@@ -101,7 +101,7 @@ The 0% error-handling omission is not a score — it is a structural guarantee. 
 
 ### Can a frontier model get those properties without fine-tuning?
 
-Claude Sonnet writing both AIL and Python through `ail ask`, no external tooling on either side.
+Claude Sonnet writing both AIL and Python through the AIL chat UI (the historical `ail ask` benchmark harness, kept for benchmark reproducibility), no external tooling on either side.
 
 | Scenario | AIL HEAAL Score | Python HEAAL Score | Δ |
 |---|---|---|---|
@@ -134,101 +134,59 @@ Full dashboards: [`docs/benchmarks/dashboards/`](docs/benchmarks/dashboards/) ·
 Two commands. No code editor, no API knowledge required.
 
 ```bash
-pip install ail-interpreter
-ail
+pip install -U ail-interpreter
+ail up my-agent
 ```
 
-That is it. The second command opens a page in your browser at `http://localhost:8079`. From there you click through:
+That is it. The second command creates a folder `my-agent/` (if it does not exist) and opens a chat page in your browser. From there:
 
-1. **Pick a folder** in the file tree (or drop into your home directory by default).
-2. **Paste an API key** when the wizard asks — Anthropic, OpenAI, or skip and use a local model via Ollama. Each option has a "where do I get this?" link.
-3. **Click "Create polis,"** type what you want in plain language ("a calculator that handles bad input gracefully"), and watch the AI author, test, and serve it.
+1. **Paste an API key** when the wizard asks — Anthropic, OpenAI, or skip and use a local model via Ollama. Each option has a "where do I get this?" link.
+2. **Type what you want in plain language** ("매일 오전 9시에 캘린더 일정을 슬랙에 요약해서 보내", "숫자 두 개 받아서 더하기"), and the AI authors, tests, and runs it. Click the inline **Run** card to try it on your input, or **🚀 지금 배포하기** for a service that keeps running after you close the chat.
 
 If the browser does not open automatically, the URL is printed in the terminal — copy and paste it.
 
 > **Want to use a local model with no API key?** Install [Ollama](https://ollama.com), then `ollama pull ail-coder:7b-v3` (4.7 GB, fine-tuned on AIL). The browser wizard auto-detects it.
 
-### Terminal mode — for one-off questions
+### Other commands (you usually don't need them)
 
-If you would rather skip the browser, ask the AI a single question from the shell:
+| Command | What it does |
+|---|---|
+| `ail up [<dir>]` | Open the chat UI (auto-creates `.ail/` on first run). Primary entry. |
+| `ail run <file.ail>` | Execute a single `.ail` file directly — handy for scripts you already have. |
+| `ail serve <dir>` | Run a project's programs as a service without the chat UI. |
+| `ail bundle <on_*.ail>` | Combine scattered lifecycle files into one deploy-ready module. |
+| `ail doctor [<dir>]` | 5-second project diagnosis (missing evolve / scaffold leftovers / parse errors / orphan schedules). |
+| `ail parse <file.ail>` | Print AST — useful for an agent self-validating its own emitted code. |
+| `ail version` | Print the installed version. |
 
-```bash
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
+### Walk before you run — `examples/agents/`
 
-ail ask "Count the vowels in 'Hello World'"
-# 3
-```
+Five tiny, graded examples in plain Korean:
 
-To see the AIL the AI wrote, add `--show-source`:
+1. [`01_echo.ail`](examples/agents/01_echo.ail) — return whatever you typed (5 lines).
+2. [`02_counter.ail`](examples/agents/02_counter.ail) — remember how many times you clicked Run.
+3. [`03_clock.ail`](examples/agents/03_clock.ail) — first autonomous agent (`schedule.every`).
+4. [`04_inbox_queue.ail`](examples/agents/04_inbox_queue.ail) — process one item at a time, retry, dead-letter.
+5. [`05_thinking_agent.ail`](examples/agents/05_thinking_agent.ail) — Plan → Act → Reflect cycle.
 
-```bash
-ail ask "Sum 1 to 100" --show-source
-# 5050
-# --- AIL ---
-# pure fn sum_range(start: Number, end: Number) -> Number {
-#     total = 0
-#     for i in range(start, end + 1) { total = total + i }
-#     return total
-# }
-# entry main(x: Text) { return sum_range(1, 100) }
-# --- confidence=1.000 retries=0 author=anthropic/claude-sonnet-4-6 ---
-```
-
-Save and replay:
-
-```bash
-ail ask "Sum 1 to 100" --save-source sum.ail
-ail run sum.ail --input ""
-# 5050
-```
+See [`examples/agents/README.md`](examples/agents/README.md) for the 5-minute tour.
 
 ---
 
 ## From one-shot to a running service
 
-`ail ask` answers one prompt. The next step is an **agentic project** — a folder with an `INTENT.md` you write in plain language, and an HTTP service the AI authors, tests, and serves.
+The chat UI does it all in one place. Type what you want; the AI:
 
-**1. Initialize**
+- Drafts a spec for a new agent (the **spec_pending** card asks you to confirm before writing files).
+- Writes the `.ail` files into the project folder.
+- Renders an inline **Run** card you can click to try the program with your input.
+- For continuous services (anything with `schedule.every`, `evolve`, lifecycle `on_*` hooks), surfaces a green **🚀 지금 배포하기** card that forks a separate process — your agent keeps running after the chat closes.
 
-```bash
-ail init word-counter
-# Initialized AIL project at ./word-counter
-#   edit:  ./word-counter/INTENT.md
-#   then:  ail up word-counter
-```
+Every authoring decision, test run, and request is logged to `.ail/ledger.jsonl` across sessions. Failed attempts land in `.ail/attempts/` so a future AI session can see what was tried. The chat history (`.ail/chat_history.jsonl`) is the agent's memory across turns.
 
-**2. Describe what you want** (any language, plain text)
+> **Hot reload:** Edit any `.ail` while the service is running — AIL re-reads and hot-swaps the program. No restart.
 
-```markdown
-# word-counter
-
-Counts words in incoming text. Empty input is an error, not a zero.
-
-## Behavior
-- Trim whitespace before counting
-- Empty input → error
-
-## Tests
-- "hello world" → succeed
-- "" → error
-```
-
-**3. Start the service**
-
-```bash
-ail up word-counter
-# ✓ AIL authored — word_count.ail
-# ✓ Tests passed (2/2)
-# ✓ Serving at http://127.0.0.1:8080/
-```
-
-Open the browser, type `"the quick brown fox"` → `4`. Submit empty input → error message, HTTP 500.
-
-> **Hot reload:** Edit `INTENT.md` and save while the service is running — AIL re-reads, re-runs tests, and hot-swaps the program. No restart.
-
-Every authoring decision, test run, and request is logged to `.ail/ledger.jsonl` across sessions. Failed attempts land in `.ail/attempts/` so a future AI session can see what was tried.
-
-Design notes: [`runtime/01-agentic-projects.md`](runtime/01-agentic-projects.md) · Examples: [`reference-impl/examples/agentic/`](reference-impl/examples/agentic/)
+Design notes: [`runtime/01-agentic-projects.md`](runtime/01-agentic-projects.md) · Examples: [`examples/agents/`](examples/agents/)
 
 ---
 
@@ -284,7 +242,7 @@ AIL is one layer of a larger system. The same paradigm — **safety baked into t
 | Layer | Name | What goes in the structure | Status |
 |---|---|---|---|
 | **L1** — Language | **AIL + HEAAL** | Grammar enforces purity, error handling, no infinite loops, explicit LLM calls. | ✅ shipped |
-| **L2** — Runtime | **AIRT** (the agentic runtime) | `ail init` / `ail up` / `ail chat` — author, test, and serve from one chat. Decisions logged immutably. | ✅ shipped |
+| **L2** — Runtime | **AIRT** (the agentic runtime) | `ail up` — author, test, run, and deploy from one chat. Auto-init, queue, lifecycle hooks, scheduler self-throttle, append-only ledger. | ✅ shipped |
 | **L3** — OS-shaped layer | **Polis** (working name) | `perform process.spawn` / `process.stop` as first-class effects. Replaces the subprocess scaffolding in `process_manager.py`. The OS primitives become AIL primitives. | 🌱 designed |
 
 ### Crosscutting projects
@@ -360,22 +318,25 @@ The five names — Stoa, Physis, Mneme, Polis, Sphinx, Agora — will be in your
 
 | Feature | What it does |
 |---|---|
-| `ail init` / `ail up` | Project-level AI authorship — INTENT.md → running service |
-| `ail chat` | Natural-language edits to a running project |
-| `ail ask` | One-shot prompt → AIL program → answer |
-| `--auto-fix N` | Autonomous retry loop for failed authoring |
-| `ail run` | Run a `.ail` file directly |
-| Browser UI | Input-aware browser interface; hot-reload on INTENT.md save |
-| `.ail/ledger.jsonl` | Immutable log of all decisions, test runs, requests |
+| `ail up [<dir>]` | Open chat UI for a project (auto-creates `.ail/` if missing). Primary entry. |
+| Browser chat | Type plain language; AI emits `.ail` files, runs, deploys. Spec-first for new agents; direct edit for existing. |
+| Inline Run / Deploy cards | One-click run or background deploy from the chat thread. Logs streamed via `perform log`. |
+| `ail run <file.ail>` | Run a single file directly (handy for scripts you already have). |
+| `ail bundle <on_*.ail>` | Combine scattered lifecycle files into one deploy-ready module. |
+| `ail doctor [<dir>]` | 5-second project diagnosis. |
+| `--auto-fix N` | Autonomous retry loop on failed authoring (paired with the chat's ■ 중단). |
+| `.ail/ledger.jsonl` | Append-only immutable log of every decision, test, run, request. |
+| `.ail/chat_history.jsonl` | The agent's memory — replaces INTENT.md as source of truth. |
+| `.ail/queue.jsonl` | Append-only message queue (push / take / done / retry / dead-letter). |
 
-Standard library (written in AIL, not Python): `stdlib/core`, `stdlib/language`, `stdlib/utils`
+Standard library (written in AIL, not Python): `stdlib/core`, `stdlib/language`, `stdlib/utils`, `stdlib/agent` (Plan → Act → Reflect)
 
 ---
 
 ## How it works
 
 ```
-User: "ail ask 'summarize this CSV'"
+User in chat: "이 CSV 요약해줘"
            │
            ▼
     ┌─────────────────┐
@@ -411,7 +372,7 @@ AIL/
 ├── spec/                     # Language spec (00-overview → 08-reference-card)
 ├── reference-impl/           # Python interpreter — pip install ail-interpreter
 │   ├── ail/                  # Parser, runtime, stdlib, agentic engine
-│   │   └── agentic/          # ail init / ail up / ail chat / --auto-fix
+│   │   └── agentic/          # ail up — chat UI, lifecycle hooks, queue, scheduler
 │   ├── examples/             # .ail programs + agentic/ project demos
 │   └── training/             # QLoRA fine-tune pipeline (ail-coder:7b-v3)
 ├── go-impl/                  # Second interpreter in Go — same spec, independent impl
