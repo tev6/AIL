@@ -1223,7 +1223,15 @@ def _make_handler(project: Project, serve_only: bool = False):
                 self.wfile.write(payload)
                 return
 
-            if self.path in ("/authoring-deploy", "/authoring-deploy/"):
+            # Telos 2026-04-29 (hyun06000 deploy-stop bug): self.path
+            # carries the query string, so the bare-path comparison
+            # below missed POST /authoring-deploy?stop=1 entirely —
+            # the user's ⏹ 중단 click silently no-op'd. Strip the
+            # query before routing.
+            from urllib.parse import urlparse, parse_qs
+            import json as _json
+            _route = urlparse(self.path).path
+            if _route in ("/authoring-deploy", "/authoring-deploy/"):
                 # PRINCIPLES.md §5-bis: subprocess lifecycle is
                 # scaffolding for L3. All OS plumbing lives in
                 # process_manager; this endpoint only handles the
@@ -1231,8 +1239,6 @@ def _make_handler(project: Project, serve_only: bool = False):
                 from .process_manager import (
                     start_deployment, stop_deployment, read_deployment,
                 )
-                from urllib.parse import urlparse, parse_qs
-                import json as _json
                 qs = parse_qs(urlparse(self.path).query)
                 stop_requested = (qs.get("stop", ["0"])[0] == "1")
                 length = int(self.headers.get("Content-Length", "0") or "0")
