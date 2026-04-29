@@ -357,6 +357,9 @@ def render_authoring_page(
     <div id="deploy-bar" style="display:flex;align-items:center;gap:10px;
          padding:8px 12px;margin-bottom:6px;border:1px solid #e5e7eb;
          border-radius:8px;background:#fff;font-size:13px;"></div>
+    <div id="schedule-bar" style="display:none;align-items:center;gap:10px;
+         padding:6px 12px;margin-bottom:6px;border:1px solid #d1fae5;
+         border-radius:8px;background:#ecfdf5;font-size:12px;color:#065f46;"></div>
     <details id="deploy-help" style="margin-bottom:8px;padding:0 4px;
              font-size:12px;color:#4b5563;line-height:1.55;">
       <summary style="cursor:pointer;color:#6b7280;padding:2px 0;
@@ -702,6 +705,7 @@ def render_authoring_page(
     // 자가수리 ■ 중단 / evolve rollback_on / scheduler throttle —
     // 셋이 같은 비주얼 + 같은 행동 패턴. 사용자가 한 번 배우면
     // 세 곳에서 통함.
+    const scheduleBar = document.getElementById('schedule-bar');
     let scheduleThrottleCard = null;
     let lastScheduleSig = null;
     async function refreshScheduleThrottle() {{
@@ -711,6 +715,41 @@ def render_authoring_page(
         if (!r.ok) return;
         st = await r.json();
       }} catch (e) {{ return; }}
+
+      // ---- Active-schedule strip (Telos 2026-04-29 hyun06000): when
+      //      schedule.json has seconds and isn't paused, show a
+      //      subtle green pill at top of chat with [⏸ 일시정지] so
+      //      the user always knows a tick is running and can stop it.
+      //      Earlier model hallucinations described this strip as
+      //      already existing; now it actually does.
+      if (st && st.active && !st.paused) {{
+        scheduleBar.style.display = 'flex';
+        const sec = st.seconds;
+        scheduleBar.innerHTML =
+          '🟢 <b>' + (sec === 1 ? '1초' : sec + '초') +
+          '마다 자동 실행 중</b>' +
+          '<span style="color:#047857;font-size:11px;margin-left:4px">' +
+          '(채팅 안 ail up 프로세스 안에서 도는 중. ail up 닫으면 멈춤. ' +
+          '채팅 닫혀도 살아있게 하려면 [🚀 지금 배포하기])</span>' +
+          '<button id="sched-pause" style="margin-left:auto;' +
+          'padding:4px 10px;background:#fff;border:1px solid #a7f3d0;' +
+          'border-radius:4px;cursor:pointer;font-size:12px;' +
+          'color:#065f46;font-family:inherit">⏸ 일시정지</button>';
+        const pauseBtn = document.getElementById('sched-pause');
+        if (pauseBtn) {{
+          pauseBtn.onclick = async () => {{
+            pauseBtn.disabled = true;
+            pauseBtn.textContent = '일시정지 중…';
+            try {{
+              await fetch('/authoring-schedule/pause', {{method:'POST'}});
+            }} catch (e) {{}}
+            await refreshScheduleThrottle();
+          }};
+        }}
+      }} else {{
+        scheduleBar.style.display = 'none';
+      }}
+
       if (!st || !st.paused) {{
         if (scheduleThrottleCard) {{
           scheduleThrottleCard.remove();
@@ -734,15 +773,25 @@ def render_authoring_page(
         'background:#fef3c7;border:1px solid #fde68a;color:#78350f;' +
         'font-size:13px;';
       const head = document.createElement('div');
-      head.innerHTML =
-        '⏰ <b>스케줄이 ' + (st.paused_consecutive_failures || 0) +
-        '번 연속 실패해서 멈췄어요.</b>';
+      const isUserPause = (st.paused_reason || '').trim() === 'user';
+      if (isUserPause) {{
+        head.innerHTML = '⏸ <b>스케줄 일시정지됨.</b>';
+      }} else {{
+        head.innerHTML =
+          '⏰ <b>스케줄이 ' + (st.paused_consecutive_failures || 0) +
+          '번 연속 실패해서 멈췄어요.</b>';
+      }}
       bubble.appendChild(head);
       const why = document.createElement('div');
       why.style.cssText = 'margin-top:4px;font-size:12px;color:#92400e;';
       const reason = (st.paused_reason || '').trim();
-      why.textContent = '같은 에러가 반복되고 있어요: ' +
-        (reason ? '"' + reason.slice(0, 200) + '"' : '(원인 정보 없음)');
+      if (isUserPause) {{
+        why.textContent = '직접 멈춘 상태예요. [▶ 다시 켜기]를 누르면 ' +
+          '같은 cadence(' + (st.seconds || '?') + '초마다)로 재개됩니다.';
+      }} else {{
+        why.textContent = '같은 에러가 반복되고 있어요: ' +
+          (reason ? '"' + reason.slice(0, 200) + '"' : '(원인 정보 없음)');
+      }}
       bubble.appendChild(why);
       const row = document.createElement('div');
       row.style.cssText = 'margin-top:8px;display:flex;gap:10px;';
@@ -751,6 +800,8 @@ def render_authoring_page(
       showBtn.textContent = '원인 보기';
       showBtn.style.cssText =
         'color:#92400e;text-decoration:underline;font-size:12px;';
+      // User-paused has no error to inspect — hide the "원인 보기" link.
+      if (isUserPause) {{ showBtn.style.display = 'none'; }}
       showBtn.addEventListener('click', (ev) => {{
         ev.preventDefault();
         const detail = document.createElement('pre');
