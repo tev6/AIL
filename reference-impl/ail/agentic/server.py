@@ -568,10 +568,10 @@ def _make_handler(project: Project, serve_only: bool = False):
                 # program (evolve-server) so the UI can hide the
                 # Deploy bar for single-shot projects — Deploy is only
                 # meaningful for long-running independent agents.
-                from .process_manager import read_deployment, _program_is_evolve_server
+                from .process_manager import read_deployment, _program_is_deployable
                 import json as _json
                 rec = read_deployment(project)
-                deployable = _program_is_evolve_server(project)
+                deployable = _program_is_deployable(project)
                 payload_obj = {
                     "deployment": rec,
                     "deployable": deployable,
