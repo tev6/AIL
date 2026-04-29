@@ -1398,8 +1398,16 @@ def _make_handler(project: Project, serve_only: bool = False):
             length = int(self.headers.get("Content-Length", "0") or "0")
             body = self.rfile.read(length).decode("utf-8") if length else ""
 
+            # Telos 2026-04-29 — resolve via active_program / first .ail
+            # instead of hardcoding app.ail (project may name files
+            # differently post-INTENT.md-removal).
+            program_path = _resolve_program_path(project, "")
+            if program_path is None:
+                self._send_text(
+                    500, "no .ail program in project root\n")
+                return
             try:
-                result, _trace = ail_run(str(project.app_path), input=body)
+                result, _trace = ail_run(str(program_path), input=body)
                 value = result.value
                 if _looks_like_error(value):
                     rendered = _render_value(value)
@@ -1516,19 +1524,41 @@ def serve_project(
     def _invoke_scheduled_tick():
         # Returns (ok, signature) so Scheduler can count consecutive
         # failures with the same signature and auto-pause after N.
+        #
+        # Telos 2026-04-29 (hyun06000 evolve-tutorial field test): the
+        # scheduler used to hardcode `project.app_path`, which fails for
+        # any project whose program isn't named app.ail (the common case
+        # post-INTENT.md-removal — chat names the file after intent).
+        # Resolve via the same precedence the HTTP routes use: explicit
+        # request → active_program marker → app.ail → first .ail in root.
+        program_path = _resolve_program_path(project, "")
+        if program_path is None:
+            sig = (
+                "no .ail program found in project root "
+                "(scheduler tick skipped — set "
+                ".ail/active_program or create one .ail file)"
+            )
+            project.append_ledger({
+                "event": "schedule_tick",
+                "ok": False,
+                "error": sig,
+            })
+            return (False, sig)
         try:
-            result, _trace = ail_run(str(project.app_path), input="")
+            result, _trace = ail_run(str(program_path), input="")
             value = result.value
             if _looks_like_error(value):
                 preview = str(_render_value(value))[:200]
                 project.append_ledger({
                     "event": "schedule_tick",
+                    "program": program_path.name,
                     "ok": False,
                     "value_preview": preview,
                 })
                 return (False, preview)
             project.append_ledger({
                 "event": "schedule_tick",
+                "program": program_path.name,
                 "ok": True,
                 "value_preview": str(value)[:200],
             })
@@ -1537,6 +1567,7 @@ def serve_project(
             sig = f"{type(e).__name__}: {e}"
             project.append_ledger({
                 "event": "schedule_tick",
+                "program": program_path.name,
                 "ok": False,
                 "error": sig,
             })
