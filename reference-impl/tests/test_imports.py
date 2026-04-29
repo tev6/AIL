@@ -50,6 +50,22 @@ def test_stdlib_language_resolves():
         assert expected in names, f"stdlib/language missing {expected}"
 
 
+def test_stdlib_agent_resolves():
+    """Telos + Arche 2026-04-29 — Plan → Act → Reflect 사고 루프 stdlib.
+    Three intent declarations (plan / act / reflect), no observe / no
+    replan (those are folded into act's return / reflect's return per
+    Arche's verdict)."""
+    _clear_cache()
+    program = resolve("stdlib/agent")
+    names = {getattr(d, "name", None) for d in program.declarations}
+    assert "plan" in names
+    assert "act" in names
+    assert "reflect" in names
+    # Deliberately absent — the three-step shape closes the loop.
+    assert "observe" not in names
+    assert "replan" not in names
+
+
 def test_unknown_stdlib_module_raises():
     _clear_cache()
     with pytest.raises(ImportResolutionError, match="not found"):

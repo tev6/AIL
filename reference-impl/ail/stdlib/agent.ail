@@ -1,0 +1,36 @@
+// stdlib/agent — Plan → Act → Reflect 사고 루프 (Telos + Arche 2026-04-29).
+//
+// 단순한 에이전트는 on_tick 하나로 끝나지만, 결정이 복잡한 에이전트는
+// 이 셋을 import해서 사고를 명시적으로 단계화할 수 있어. lifecycle
+// hook과 달리 *강제되지 않음* — 쓰고 싶을 때만 쓰는 패턴.
+//
+// 사용 예 (Korean):
+//   import plan from "stdlib/agent"
+//   import act from "stdlib/agent"
+//   import reflect from "stdlib/agent"
+//
+//   fn on_tick(state: Record) -> Text {
+//       p = plan(state)
+//       result = act(p)
+//       lessons = reflect(result)
+//       perform state.write("last_lesson", get(lessons, "lesson"))
+//       return get(result, "summary")
+//   }
+//
+// 왜 셋만? — observe는 act의 반환값에 흡수, replan은 reflect의 반환값에
+// 흡수 (아르케 verdict 2026-04-29). 행동하면 반드시 결과가 오므로
+// observe를 별도 fn으로 두면 *행동했지만 관찰 안 함*이라는 빈 틈이
+// 생김. 성찰하면 수정 여부가 함께 나오므로 replan을 별도 fn으로 두면
+// *성찰했지만 수정 안 함*이라는 빈 틈이 생김. 셋이면 원이 닫힘.
+
+intent plan(state: Record) -> Text {
+    goal: "Given the current agent state (request_count, error_rate, consecutive_failures, history, queue depth, etc. as available in `state`), decide what ONE concrete action to take next. Return a short imperative — '인박스 첫 메시지 처리', '에러율 안정화 — 새 작업 중단', '대기 — 처리할 일 없음', 'queue.take 후 routing'. One action per call; the loop fires again next tick. Don't enumerate — pick one."
+}
+
+intent act(plan_description: Text) -> Record {
+    goal: "Execute the planned action and return a record describing what happened: {done: Boolean, summary: Text, data: Any}. The returned record IS the observation — there is no separate observe step (Arche 2026-04-29). For trivial plans like '대기' return {done: false, summary: '대기 — 아무것도 안 함', data: null}. For plans that involve effects (perform queue.take, perform http.get, perform state.write) make the calls inside this intent's wrapper and roll the outcome into `data`."
+}
+
+intent reflect(action_result: Record) -> Record {
+    goal: "Look at the action_result record and decide: did the action accomplish what the plan intended? What should the next plan know? Return a record {happy: Boolean, lesson: Text, replan_hint: Text}. happy=false means the next plan should change strategy. lesson is a short note about what worked or failed (1-2 sentences). replan_hint is concrete guidance for the next plan call — empty Text when nothing needs to change. The next tick's plan() will read these via state.read or via a parameter you persist."
+}
