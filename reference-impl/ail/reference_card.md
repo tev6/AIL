@@ -709,6 +709,22 @@ Built-in effects:
     `state.write` so each tick stores a result and GET / reads it.
     Seconds in (0, 86400]. Outside `ail up` it returns an explanatory
     error. Latest call wins.
+  - `queue.push(msg: Record) -> Result[Text]` — enqueue a message
+    onto the project's append-only queue (`<project>/.ail/queue.jsonl`).
+    Returns the assigned `msg_id` (e.g. `"msg_0001"`). Any program in
+    the project can push.
+  - `queue.take() -> Result[Record]` — atomically pull the oldest
+    pending message and mark it `working`. The returned record carries
+    `_id` and `_retry_count` plus all original fields. Returns
+    `error("empty")` when no pending messages.
+  - `queue.done(msg_id: Text) -> Result[Text]` — mark a `working`
+    message complete. Errors if the id isn't currently working.
+  - `queue.retry(msg_id: Text, reason: Text) -> Result[Text]` —
+    return a `working` message to `pending` with bumped retry count.
+    Returns `"retried"` normally, `"dead_letter"` when the bump
+    pushes the count to 5 (Physis: same threshold as scheduler
+    self-throttle and evolve `consecutive_failures`). Dead-lettered
+    messages are invisible to future `take` calls.
   - `human.approve(plan: Text, notify?: [Text]) -> Result[Record]` —
     **plan-validate-execute gate** with two channels (Arche #6, ergon
     2026-04-27). **Foreground**: writes `plan` to a pending-approval

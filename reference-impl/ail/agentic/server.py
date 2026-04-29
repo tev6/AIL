@@ -1468,6 +1468,11 @@ def serve_project(
     # below polls it and drives recurring entry invocations.
     schedule_file = project.state_dir / "schedule.json"
     _os.environ.setdefault("AIL_SCHEDULE_FILE", str(schedule_file))
+    # Telos + Arche 2026-04-29 — message queue. Append-only JSONL log
+    # at .ail/queue.jsonl. `perform queue.push/take/done/retry` from
+    # any program in the project share this single queue.
+    queue_file = project.state_dir / "queue.jsonl"
+    _os.environ.setdefault("AIL_QUEUE_FILE", str(queue_file))
     # `perform human.approve(plan)` writes its pending record to
     # this directory. The authoring UI polls it and surfaces an
     # approve/decline card; without the env var the effect returns
