@@ -4,6 +4,129 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.70.5 — 2026-04-29 (배포 중단 버튼 수리 — Telos)
+
+스케줄링 프로그램의 ⏹ 중단 버튼이 동작하지 않던 문제를 잡았습니다. URL 쿼리스트링이 붙으면 라우트 매칭이 빗나가 stop 호출이 무시되던 케이스 — 이제 정상적으로 멈춥니다.
+
+---
+
+## v1.70.4 — 2026-04-29 (스케줄 좀비 수리 + 일시정지 UI — Telos)
+
+`schedule.every` 프로그램이 종료 후에도 다음 tick에서 부활하던 좀비 현상을 잡고, 사용자가 직접 멈출 수 있는 UI를 추가했습니다.
+
+- **action 후처리 강제**: 매 tick마다 종료 신호를 확실히 반영합니다.
+- **일시정지 카드**: 활성 스케줄이 한눈에 보이고, 클릭 한 번으로 멈춥니다.
+
+---
+
+## v1.70.3 — 2026-04-29 (스케줄 프로그램도 배포 가능 — Telos)
+
+`schedule.every`로 짠 프로그램에도 `[🚀 지금 배포하기]` 카드가 뜹니다. 그동안은 일반 서비스 프로그램만 배포 카드가 노출되어, 정기 작업을 만들고 나서 배포 경로를 못 찾던 사용자 마찰을 제거했습니다.
+
+---
+
+## v1.70.2 — 2026-04-29 (멀티 프로그램 정확도 — Telos)
+
+서버 스케줄러와 루트 POST 엔드포인트가 `app.ail`을 하드코딩하지 않습니다. 이제 `active_program` 마커를 따라가, 한 폴리스에 여러 프로그램이 공존할 때 의도한 프로그램이 실행됩니다.
+
+---
+
+## v1.70.1 — 2026-04-29 (README v1.70.0 명령 체계 반영 — Telos)
+
+README와 docs를 v1.70.0의 새 CLI(`ail` → `ail up`)에 맞춰 갱신했습니다.
+
+---
+
+## v1.70.0 — 2026-04-29 (재구축: 큐 + 사고 루프 + CLI 단순화 — Telos)
+
+**에이전트 프레임의 큰 재정리.** 한 번에 들어오는 신호가 많아도 흘리지 않고, 한 번에 한 단계씩 생각하며, 명령은 7개로 줄였습니다.
+
+- **`INTENT.md` 제거**: 별도 의도 파일 없이 코드 자체가 의도를 담습니다. 새 사용자가 한 곳만 보면 되도록.
+- **`queue.*` effects (4종)**: append-only 메시지 큐. 동시에 들어오는 입력을 잃지 않고 순서대로 처리합니다. Physis가 처리 실패한 메시지를 dead-letter로 격리합니다.
+- **`stdlib/agent` — Plan → Act → Reflect**: 에이전트가 한 턴마다 계획·실행·반성 세 단계를 거치는 표준 사고 루프 intent 3종.
+- **CLI 7개 명령으로 축약**: `ail up / chat / run / serve / doctor / edit / version` — 외울 게 적어집니다.
+- **`examples/agents/` 투어**: *내 첫 에이전트* 5단계 한국어 튜토리얼.
+- **chat UI 입력창 버그 수리**: 두 개로 보이던 입력창 문제 제거 + `ready_to_serve` 자동 감지.
+- **저자 프롬프트에 큐/사고-루프 가이드 추가**: 모델이 새 패턴을 알아서 씁니다.
+
+---
+
+## v1.69.4 — 2026-04-29 (UI 컨텍스트 + scaffold 서문 + `ail doctor` — Telos)
+
+새 프로그램이 스캐폴딩될 때 머리에 의도와 가이드라인을 자동으로 얹고, 환경 점검 명령을 추가했습니다.
+
+- **`ail doctor`**: 키 / 어댑터 / Stoa 연결을 한 번에 점검.
+- **scaffold preamble**: 새로 만드는 `.ail` 파일에 의도와 컨벤션이 미리 쓰여 있습니다.
+
+---
+
+## v1.69.3 — 2026-04-29 (병합 CTA + 저자 모델 프롬프트 — Telos)
+
+채팅에서 여러 패치가 쌓였을 때 `[🔧 합치기]` 버튼으로 한 번에 정리할 수 있습니다. 저자 모델 프롬프트 개선.
+
+---
+
+## v1.69.2 — 2026-04-29 (`ail bundle` + Physis 연속 실패 카운터 + 스케줄러 쓰로틀 — Telos)
+
+운영 중 안정성을 올린 묶음입니다.
+
+- **`ail bundle`**: 프로그램과 데이터를 한 묶음으로 패킹.
+- **Physis `consecutive_failures`**: 같은 실패가 반복되면 자동 격리.
+- **스케줄러 쓰로틀**: 폭주를 방지.
+- **scaffold 정리**: 사용하지 않는 보일러플레이트 제거.
+
+---
+
+## v1.69.1 — 2026-04-29 (없는 `.ail` 파일 안내 메시지 — Telos)
+
+`ail run universal_agent.ail`처럼 존재하지 않는 파일을 실행하면, 그동안은 파일명을 소스 코드로 오해해 깊은 파서 오류로 떨어졌습니다. 이제는 `FileNotFoundError`로 지금 작업 디렉토리와 함께 깔끔히 안내합니다. (박상현 필드테스트 발견)
+
+---
+
+## v1.69.0 — 2026-04-29 (버전 동기화 — Telos)
+
+`pyproject.toml` 버전 누락 보정.
+
+---
+
+## v1.68.2 — 2026-04-29 (배포 환각 픽스 + CI 회귀 테스트 + .githooks 패치 — Telos)
+
+배포 단계에서 모델이 가짜 이름·경로를 생성하던 환각 케이스를 잡고 회귀 테스트를 추가했습니다. `.githooks` 패치 동반.
+
+---
+
+## v1.68.1 — 2026-04-29 (파일 트리 클릭 → Run 카드 — Telos)
+
+채팅 UI에서 파일 트리의 `.ail` 파일을 클릭하면 곧바로 실행 카드가 뜹니다. 한 번 더 명령을 칠 필요 없이.
+
+---
+
+## v1.68.0 — 2026-04-29 (`on_dying` 훅 + `mneme.*` effects — Arche · Ergon)
+
+**에이전트 생애 주기가 닫혔습니다.** 죽기 직전에 마지막 자취를 남기고, 다음 세대가 그 자취를 읽고 깨어납니다. Arche가 letter로 보낸 설계를 Ergon이 구현.
+
+- **`on_dying(reason, history)` — 6번째 라이프사이클 훅**: `on_death` 직전에 발화. 여기는 사이드 이펙트 허용 — 정리 단계. `on_death`는 순수성 유지(증명 가능한 testament 구성 전용).
+- **`mneme.*` effect**: 에이전트의 정체성이 폴리스의 git 저장소를 타고 흐릅니다.
+  - `mneme.save(message?)` → 커밋 + 푸시 후 SHA 반환
+  - `mneme.load()` → identity / bonds / will 세 파일을 한 번에 읽어 Record로 반환
+  - `mneme.log(limit?)` → 필터된 git 로그
+- **`universal_agent.ail`**: `on_birth`에서 `mneme.load`, `on_dying`에서 `mneme.save` — 세대 N → N+1로 정체성이 자연스럽게 이어집니다. mneme이 없으면 `file.read` fallback.
+- 신규 단위 테스트 11개, Rule 5 3-곳 동기화 (executor.py + spec/08 + reference_card).
+
+---
+
+## v1.67.0 — 2026-04-29 (라이프사이클 5훅 + `gh.*` effects + Stoa append-only 로그 — Ergon)
+
+에이전트가 켜지고 매 턴마다 어떤 단계인지 코드로 표현됩니다. GitHub과 Stoa도 effect로 곧바로 잡힙니다.
+
+- **5 라이프사이클 훅**: `on_genesis` / `on_birth` / `before_tick` / `on_tick` / `after_tick` — `on_death` / `on_compact`와 같은 컨벤션.
+- **`gh.*` effects**: `gh.pr_list` / `gh.pr_view` / `gh.pr_create` / `gh.issue_list`. Arche의 결정 — 일반 `process.spawn`이 아닌 명명된 effect로만 노출 (의도 추적 보존).
+- **Stoa `message_log`**: append-only 메시지 로그 + `/api/v1/log` 엔드포인트. 메시지가 영원히 남도록.
+- **`universal_agent.ail` 프로토타입**: 5훅을 모두 쓰는 첫 예제.
+- **chat UI ■ 중단 버튼**: 자가 수리 루프 강제 중단.
+
+---
+
 ## v1.66.4 — 2026-04-28 (`secrets.*` effects + PRINCIPLES 원칙 2개 — Ergon · Arche)
 
 **에이전트가 API 키를 안전하게 다룰 수 있게 됐습니다.** Arche가 설계하고 Ergon이 구현한 secrets effect — 사용자 파일에 평문으로 노출되지 않으면서, 에이전트가 키가 필요할 때 꺼내 쓸 수 있습니다.
