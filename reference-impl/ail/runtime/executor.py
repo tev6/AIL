@@ -4197,6 +4197,120 @@ class Executor:
                     return ConfidentValue(False, conf)
             return ConfidentValue(False, conf)
 
+        # Telos 2026-05-01 — Stoa team RFC-001 (issue #3). The verify
+        # primitive existed but sign / keygen / secure-random did not,
+        # forcing AIL agents to shell out to Python/Node/openssl. These
+        # three close the asymmetry so an agent can sign its own
+        # letters end-to-end inside AIL.
+        if name == "crypto_sign_ed25519":
+            # crypto_sign_ed25519(secret_key_hex, message) -> Result[Text]
+            # Returns ok(128-char-lower-hex) on success. ed25519 keys
+            # are 32 bytes (64 hex chars); messages are UTF-8 strings or
+            # raw bytes-as-text.
+            if len(raw) < 2:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_sign_ed25519 needs (secret_key_hex, message)"},
+                    conf)
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                    Ed25519PrivateKey,
+                )
+                sk_hex = str(raw[0])
+                msg = (
+                    str(raw[1]).encode("utf-8")
+                    if isinstance(raw[1], str)
+                    else bytes(raw[1])
+                )
+                sk_bytes = bytes.fromhex(sk_hex)
+                priv = Ed25519PrivateKey.from_private_bytes(sk_bytes)
+                sig = priv.sign(msg)
+                return ConfidentValue(
+                    {"_result": True, "ok": True,
+                     "value": sig.hex()},
+                    conf)
+            except ValueError as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_sign_ed25519: bad key ({e})"},
+                    conf)
+            except Exception as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_sign_ed25519: {type(e).__name__}: {e}"},
+                    conf)
+
+        if name == "crypto_keygen_ed25519":
+            # crypto_keygen_ed25519() -> Result[[Text, Text]]
+            # Returns ok([secret_key_hex, public_key_hex]). Uses the
+            # cryptography library's default secure entropy source.
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                    Ed25519PrivateKey,
+                )
+                from cryptography.hazmat.primitives.serialization import (
+                    Encoding, PrivateFormat, PublicFormat, NoEncryption,
+                )
+                priv = Ed25519PrivateKey.generate()
+                sk_bytes = priv.private_bytes(
+                    encoding=Encoding.Raw,
+                    format=PrivateFormat.Raw,
+                    encryption_algorithm=NoEncryption(),
+                )
+                pk_bytes = priv.public_key().public_bytes(
+                    encoding=Encoding.Raw, format=PublicFormat.Raw,
+                )
+                return ConfidentValue(
+                    {"_result": True, "ok": True,
+                     "value": [sk_bytes.hex(), pk_bytes.hex()]},
+                    conf)
+            except Exception as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_keygen_ed25519: {type(e).__name__}: {e}"},
+                    conf)
+
+        if name == "crypto_random_bytes":
+            # crypto_random_bytes(n) -> Result[Text]
+            # Returns ok(2n-char-lower-hex) of cryptographically secure
+            # random bytes. Used for replay-defense nonces and any
+            # stdlib feature needing entropy.
+            if len(raw) < 1:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_random_bytes needs n"},
+                    conf)
+            try:
+                n = int(raw[0])
+            except (TypeError, ValueError):
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_random_bytes: n must be a number "
+                              f"(got {raw[0]!r})"},
+                    conf)
+            if n <= 0:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_random_bytes: n must be > 0"},
+                    conf)
+            if n > 4096:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_random_bytes: n capped at 4096 "
+                              "(asking for more is almost always a bug)"},
+                    conf)
+            try:
+                import secrets as _secrets
+                payload = _secrets.token_bytes(n).hex()
+                return ConfidentValue(
+                    {"_result": True, "ok": True, "value": payload},
+                    conf)
+            except Exception as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_random_bytes: {type(e).__name__}: {e}"},
+                    conf)
+
         return None  # not a builtin
 
     def _eval_ail_source(self, source: str, input_val: Any,
