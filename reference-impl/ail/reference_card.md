@@ -413,6 +413,12 @@ base64_encode(value: Text) -> Text              // base64-encode UTF-8 text; ret
 base64_decode(value: Text) -> Result[Text]      // ok(text) on success, error(msg) if invalid base64 or non-UTF-8
 crypto_verify_ed25519(public_key_hex: Text, signature_hex: Text, message: Text) -> Boolean
                                                 // Ed25519 signature verification (requires cryptography>=41 package)
+crypto_sign_ed25519(secret_key_hex: Text, message: Text) -> Result[Text]
+                                                // ok(128-char-hex signature) on success; error on bad-length key
+crypto_keygen_ed25519() -> Result[[Text, Text]]
+                                                // ok([secret_key_hex, public_key_hex]) — both 64-char hex (32 bytes)
+crypto_random_bytes(n: Number) -> Result[Text]
+                                                // ok(2n-char hex) of cryptographically secure bytes; n in (0, 4096]
 ```
 All four are pure — no I/O, no LLM. `parse_json` returns a Record for JSON objects,
 a List for arrays, Text / Number / Boolean primitives; use `get(value, key)`
