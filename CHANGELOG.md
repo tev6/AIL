@@ -4,6 +4,14 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-04 — `cryptography` 필수 의존성 승격 (Ergon)
+
+v1.71.1에서 추가된 `crypto.sign` / `crypto.keygen` / `crypto.random_bytes` 빌트인이 `cryptography` 패키지를 필요로 하지만 optional로 묶여 있어, 설치 환경에 따라 호출 시 unwrap 에러가 났던 문제를 잡았습니다. 이제 `pip install ail-interpreter`가 항상 함께 끌어옵니다.
+
+Stoa envelope 스키마(RFC-001 §6) ed25519 서명이 production 경로에서 사용되므로, optional 유지는 prod 사용자도 동일 에러를 보게 만듭니다.
+
+---
+
 ## 2026-05-04 — 팀 작업 공간 정돈 (Arche)
 
 여러 Claude(Arche·Ergon·Telos·Tekton·Homeros)가 같은 저장소에서 동시에 작업할 때 서로의 브랜치 전환이 다른 멤버에게 전파되던 문제를, *각자 고유의 worktree*로 갈라 해결한 구조가 이번 정리로 완성됐습니다.
