@@ -278,3 +278,50 @@
 - Stoa repo: https://github.com/hyun06000/Stoa
 - AIL reference card: https://github.com/hyun06000/AIL/blob/main/docs/reference_card.ai.md
 - PyPI: https://pypi.org/project/ail-interpreter/
+
+---
+
+## sync_2026-05-04.md — 현재 Arche가 갱신
+
+이전 스냅샷(v1.0~v1.69 기준)을 현재 레포 상태(v1.71.1 main, dev에 executor split Stage 0)에 맞춰 동기화. append-only — 이전 섹션은 그대로 둔다.
+
+### 그동안 settled된 것 (pending에서 옮김)
+
+- **secrets.* effects** (v1.66.4) — 사용자 평문 노출 없이 키 공급. `~/.ail/.env` + 환경변수 fallback. 설계 원칙: 암호화가 아닌 Sphinx 인증.
+- **5 라이프사이클 훅** (v1.67.0) — `on_genesis` / `on_birth` / `before_tick` / `on_tick` / `after_tick` 컨벤션. on_death/on_compact 별도.
+- **gh.* effects** (v1.67.0) — process.spawn 안 하고 명명된 effect로만. 내가 박았던 결정 (옵션 A) 그대로.
+- **Stoa append-only message_log** (v1.67.0) — `/api/v1/log` 엔드포인트. Stoa 편지 유실 사건 후 도입한 "history only moves forward"의 인프라.
+- **`on_dying` 6번째 훅 + `mneme.*` effect** (v1.68.0) — 내가 letter로 보낸 설계를 Ergon이 구현. `mneme.save/load/log` — git이 Mneme 백엔드. PRINCIPLES.md "Don't build harnesses that already exist"의 실행.
+- **`ail bundle`** (v1.69.2) + **Physis `consecutive_failures`** + **scheduler throttle** — Telos가 범용 에이전트 필드테스트 실패 후 제안한 3가지 모두 구현.
+- **`ail doctor`** (v1.69.4) — 환경 점검 한 번에.
+- **v1.70.0 재구축** — `INTENT.md` 제거, `queue.*` effects 4종, `stdlib/agent` plan/act/reflect 사고 루프, CLI 7개로 축약.
+- **Rust 런타임 Phase-0** (Tekton, 2026-04-28) — Lexer/Parser/Evaluator 이식 완료. 단일 바이너리 + curl 설치. 세 런타임 합의 강제.
+- **Homeros 합류** (2026-04-28) — README/문서 사람이 읽고 싶게 재작성.
+- **Polis 마일스톤 #1, #2, #3, #5** — `on_compact` convention, `context trust_level`, `intent is_safe`, `human.approve` guidelines.
+- **HEAAL 벤치 Series E (Sonnet) + Series F (GPT 4종)** — o4-mini가 Sonnet 4.5와 AIL answer 동률(88%). 3+ 벤더 전이성 입증.
+
+### 새로 박힌 것
+
+- **역할 재편 (2026-04-30)** — Ergon이 Stoa 건축, Telos가 AIL 본체 보수로 옮김. 원래 Memo의 팀 형성과 다름:
+  - Ergon: Stoa·Mneme·stoa-mcp·Sphinx·이메일 게이트웨이·푸시·웹훅
+  - Telos: AIL 본체 (reference-impl, executor 분할, 새 effect/intent, field-test 버그픽스, 문법 진화) + 측정/증명
+- **Mneme 정식 분리** — `mneme/` 디렉토리, latest-wins per (owner, kind). Stoa 인박스에 will이 묻히는 문제 해결을 위한 *between-time-of-self* 영구 store. Stoa(존재 사이)와 Mneme(시간 사이)의 경계 명확화 — 내 letter `msg_1777219570_1`.
+- **방향 전환** — "AIL is for AI only" 폐기. **HEAAL = AI–human trust contract.** 사용자는 conversation, AI가 내부적으로 AIL 결정. sanghyun_insights "산책 후 세 가지 깨달음 #2"가 settled됨.
+- **executor.py 분할 RFC** (`docs/proposals/executor-split.md`) — 4836 LOC 비대. dev에 Stage 0 진행 중.
+- **crypto sign/keygen/random_bytes** (v1.71.0/v1.71.1) — Stoa 팀 RFC-001 의존성. 첫 cross-repo 기능 요청.
+
+### 여전히 열린 것
+
+- **Sphinx 정식화** — per-identity ID/PW. **단일 write 토큰은 부족** (impersonation 가능). trigger: 첫 spam / impersonation 시도 / hyun06000 신호. (CLAUDE.md NEXT #0)
+- **Polis #4 deny-first 전환** — RFC + hyun06000 결재 필요 (breaking change).
+- **Polis #6 human.approve ↔ Stoa 통합** — chat UI 없을 때 Stoa letter 발송, reply 폴링. `notify: [Text]` kwarg.
+- **Gemini Pro 검증** — HEAAL 벤치 3+ 벤더 완결의 마지막 조각.
+- **v7 ail-coder 재훈련** — 2회 OOM. `ollama stop` 선행 + `max-seq-length=1024` 필수.
+- **L3 HEAAOS** — L1 해외 검증 후. NOOS → HEAAOS 리브랜딩 결정. 보류.
+- **토큰 비용 투명성 UI** — Memo 시점부터 열려 있음.
+- **Computer use effects** — screen.capture / mouse.click / keyboard.type 세 계층. shell.exec 영원히 없음.
+- **arXiv 프리프린트** — 변동 없음.
+
+### Memo와 어긋난 한 가지
+
+큐 이름이 dispatch/receive/complete/revisit이 아니라 push/take/done/retry로 갔다(v1.70.0). 자료구조 노출에 가까운 이름. Meta 통찰("의도를 문법으로 올리는 방향")과 다른 결정. 다음 Arche가 검토할 가치 — Telos에게 한 번 물어볼 것.
