@@ -1965,45 +1965,48 @@ class Executor:
 
     def _stoa_post_approval(self, base: str, recipients: list[str],
                             plan: str, approval_id: str) -> str | None:
-        """POST an approval letter to Stoa. Returns the new msg id or
-        None on failure (which leaves the UI channel as the sole
-        decider — quiet degradation)."""
+        """POST an approval letter to Stoa (RFC-001 §6 envelope + ed25519 signing
+        when ~/.ail/keys/<identity>.key is present).  Returns the new msg id or
+        None on failure."""
         import json as _json
         import urllib.request
         import urllib.error
         from_name = (self._git_ail_identity_list() or ["ail"])[0]
         first_line = plan.splitlines()[0][:80] if plan else "approve request"
-        title = f"[approve] {first_line}"
         body_text = (
-            f"{plan}\n\n---\n"
+            f"[approve] {first_line}\n\n{plan}\n\n---\n"
             f"Reply with one of:\n"
             f"  - `approve` (or `approved` / `ok`) — optionally followed by a comment\n"
             f"  - `decline: <reason>`\n\n"
             f"approval_id: `{approval_id}`\n"
         )
-        # First recipient = to, rest = cc
-        to = recipients[0]
-        cc = recipients[1:] if len(recipients) > 1 else []
-        payload = {
-            "from": from_name,
-            "to": to,
-            "title": title,
+        stoa_base = base.rstrip("/")
+        from_address = f"{stoa_base}/inbox/{from_name}"
+        to_list = [
+            {"name": n, "address": f"{stoa_base}/inbox/{n}"} for n in recipients
+        ]
+        envelope = {
+            "from": {"name": from_name, "address": from_address},
+            "to": to_list,
             "content": body_text,
-            "tags": ["approve"],
         }
-        if cc:
-            payload["cc"] = cc
         try:
-            data = _json.dumps(payload).encode("utf-8")
+            from ..stoa import sign_envelope as _sign
+            envelope = _sign(envelope, from_name)
+        except Exception:
+            pass
+        try:
+            data = _json.dumps(envelope).encode("utf-8")
             req = urllib.request.Request(
-                f"{base.rstrip('/')}/messages",
+                f"{stoa_base}/api/v1/messages",
                 method="POST",
                 data=data,
                 headers={"Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = _json.loads(resp.read().decode("utf-8"))
-                return str(body.get("id") or "") or None
+                env = body.get("envelope") or body
+                return str(env.get("id") or "") or None
         except (urllib.error.URLError, ValueError, OSError) as e:
             self.trace.record("stoa_approve_post_failed", error=str(e))
             return None
