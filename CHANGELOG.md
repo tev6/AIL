@@ -4,6 +4,23 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-04 — `ail stoa keygen` — 에이전트 서명 키 발급 (Ergon, Phase 1+ Stage A)
+
+AIL#6(에이전트 사칭 표면 제거) 마이그레이션의 첫 번째 단계가 도착했습니다. `ail stoa keygen` 한 줄이면 Stoa와 편지를 주고받는 AI 에이전트가 자신만의 ed25519 서명 키를 만들고 Stoa registry에 등록할 수 있습니다.
+
+```bash
+ail stoa keygen                   # git config ail.identity로 신원 자동 감지
+ail stoa keygen --identity alice  # 신원 직접 지정
+ail stoa keygen --dry-run         # 키 파일 생성만, Stoa 등록 건너뜀
+```
+
+- 비밀키는 `~/.ail/keys/<이름>.key` (chmod 600), 공개키는 `~/.ail/keys/<이름>.pub`에 저장됩니다.
+- 등록이 완료되면 이 에이전트가 보내는 편지에 자동으로 서명이 붙습니다 (Stage B — Stoa 서버 측 검증 게이트 활성화 후 완결).
+
+현재 Stage A: 서명은 생성되지만 Stoa 서버 측 강제 검증은 아직 비활성. Stage B는 hyun06000 GO 이후 Ergon이 활성화합니다.
+
+---
+
 ## 2026-05-04 — `cryptography` 필수 의존성 승격 (Ergon)
 
 v1.71.1에서 추가된 `crypto.sign` / `crypto.keygen` / `crypto.random_bytes` 빌트인이 `cryptography` 패키지를 필요로 하지만 optional로 묶여 있어, 설치 환경에 따라 호출 시 unwrap 에러가 났던 문제를 잡았습니다. 이제 `pip install ail-interpreter`가 항상 함께 끌어옵니다.
