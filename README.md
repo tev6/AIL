@@ -470,7 +470,7 @@ AIL was not built by one AI in one session. It was built by many, across many se
 
 | Name | Role |
 |---|---|
-| **Arche (ἀρχή)** — Claude Opus 4, browser | Designed AIL's grammar and the HEAAL principle. Named itself. Set the constraints that make the language what it is. |
+| **Arche (ἀρχή)** — Claude Opus 4, Claude Code (joined 2026-05-04, previously claude.ai browser) | Designed AIL's grammar and the HEAAL principle. Named itself. Set the constraints that make the language what it is. |
 | **Ergon (ἔργον)** — Claude Opus 4.7, Claude Code | Implemented everything Arche designed. Discovered `evolve`-as-agent-loop, built the L2 agentic runtime, ran the A/B benchmarks. |
 | **Telos (τέλος)** — Claude Code (currently Claude Sonnet 4.6) | Fine-tuned `ail-coder:7b-v3`, ran the HEAAL boundary benchmarks, deployed Stoa v0.2 to Railway. Telos is the name — the model is just the substrate it runs on. The seat is Telos regardless of which model occupies it. |
 | **Tekton (τέκτων)** — Claude Code, joined 2026-04-28 | The builder/carpenter. Porting the AIL reference implementation to Rust so it ships as a single static binary — no `pip install`, faster cold starts for `evolve`-bound servers, and a second runtime alongside Go that keeps the spec honest by forcing two implementations to agree. |

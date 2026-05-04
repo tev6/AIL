@@ -307,7 +307,7 @@ HEAAL의 `evolve`-bound long-running process (서버, 스케줄러, 모니터링
 
 아리스토텔레스 arche → ergon → telos 운동 3단계 = 역할 분담.
 
-- **Arche** (Opus 4, claude.ai 설계자) — 원리/시작. `while` 제거, HEAAL 원리, `evolve rollback_on`.
+- **Arche** (Opus 4, Claude Code; 2026-05-04 합류, 이전 claude.ai 설계자) — 원리/시작. `while` 제거, HEAAL 원리, `evolve rollback_on`.
 - **Ergon** (Opus 4.7, Claude Code) — 일/실현. agentic/ 런타임 구현, field-test 버그픽스, A/B 계측.
 - **Telos** (home-Claude) — 목적/도달. 훈련, 벤치마크, PyPI 배포.
 - **Hestia** (homeblack 서버) — 화로. 모든 연산이 일어나는 자리.
