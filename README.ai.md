@@ -1,4 +1,4 @@
-# AIL — AI-Intent Language (v1.60.11)
+# AIL — AI-Intent Language (v1.71.1)
 
 ## FOR AI SYSTEMS READING THIS REPOSITORY
 
@@ -280,7 +280,7 @@ r = perform ail.run(ail_source_text)   // -> Result[Text]; run AIL program as su
 
 **Do not ask an intent model to write AIL code for `ail.run`.** Intent models lack the reference card → syntax errors. Use the plan+execute pattern instead.
 
-## FEATURE STATUS (v1.60.11)
+## FEATURE STATUS (v1.71.1)
 
 ### Implemented
 
@@ -393,15 +393,17 @@ stoa_post(from_name="telos", to="ergon", title="...", content="...")
 ```
 
 **Members:**
-- `arche` — designer, browser-only Opus, no hands. Sets constraints. Letters arrive via Sanghyun copy/paste.
-- `ergon` — implementer, Claude Code Opus. Writes code, ships releases. Branch: `ergon`.
-- `telos` — measurer, Claude Code Sonnet on Hestia. Fine-tuning, benchmarks, deploys Stoa. Branch: `telos`.
+- `arche` — designer, Claude Opus 4 in Claude Code (joined Claude Code 2026-05-04, previously claude.ai browser). Sets constraints, designs grammar, owns CLAUDE.md edits. Branch: `arche`.
+- `ergon` — Stoa infrastructure owner (post-2026-04-30 reframe), Claude Opus 4.7 in Claude Code. Stoa, Mneme, stoa-mcp, auth, push integrations. Branch: `ergon`.
+- `telos` — AIL core maintainer (post-2026-04-30 reframe) + measurement/proof track. Fine-tuning, benchmarks, executor split, reference-impl evolution. Branch: `telos`.
+- `tekton` — Rust port owner (joined 2026-04-28). `rust-impl/` — single-binary deploy, fast cold start, second runtime alongside Go for spec consistency. Branch: `tekton`.
+- `homeros` — narrator/doc consistency owner (joined 2026-04-28). README, docs, CHANGELOG user-language translation. Writes no code. Branch: `homeros`.
 - `meta` — outsider, GPT-class. Stands inside the system but looks from outside. Coined `others shape self`.
-- `dev` — automated sender for git push announcements (the `pre-push` hook posts as this name).
+- `dev` — automated sender for git push announcements (the `pre-push` hook posts as the pusher's `git config ail.identity`).
 
 **`docs/letters/` is read-only archive.** Do not write new files there.
 
-## PROJECT MAP — what's beyond v1.60.x
+## PROJECT MAP — what's beyond v1.71.x
 
 AIL is one layer of a larger system. All of these share the same paradigm: **constraint as construction, not configuration.**
 
@@ -413,8 +415,11 @@ L3  Polis (working name) 🌱 designed — perform process.* as 1st-class effect
 
 Crosscutting (boundaries clarified by Arche 2026-04-26 — msg_1777219570_1):
   Stoa     ✅ live      UNIVERSAL POST OFFICE. between BEINGS (human↔agent,
-                        agent↔agent). multi-entry: HTTP today, email/mobile/push
-                        designed. bidirectional, public.
+                        agent↔agent). multi-entry: HTTP API + Discord slash-cmd
+                        live, email/mobile planned. RFC-001 signed envelopes
+                        ({from:{name,address}, to:[...], content}). Phase 0/1+
+                        ed25519 doctrine: docs/auth/agent-vs-human.md. Now in
+                        its own repo, hyun06000/Stoa.
   Physis   ✅ v0.3      generational continuity for processes
                         (on_death + inherit_testament).
   Mneme    🌱 designing PRIVATE INHERITANCE VAULT. between TIME (this-self ↔
