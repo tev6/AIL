@@ -1991,8 +1991,10 @@ class Executor:
             "content": body_text,
         }
         try:
-            from ..stoa import sign_envelope as _sign
+            from stoa_client import sign_envelope as _sign
             envelope = _sign(envelope, from_name)
+        except ImportError:
+            pass  # stoa-client not installed — Stage A: unsigned POST still accepted
         except Exception:
             pass
         try:
