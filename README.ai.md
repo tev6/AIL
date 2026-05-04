@@ -15,9 +15,9 @@ pip install ail-interpreter
 # or: pip install 'ail-interpreter[anthropic]'
 ```
 
-CLI: `ail ask "..."` · `ail run file.ail` · `ail parse file.ail` · `ail version`
+CLI: `ail up [path]` · `ail run file.ail` · `ail serve <dir>` · `ail bundle <on_*.ail>` · `ail doctor [dir]` · `ail parse file.ail` · `ail version`
 
-Agentic project CLI: `ail init <name>` · `ail up [path]`
+Note: `ail ask`, `ail init`, `ail chat` were removed in v1.70.0. `ail up <empty-dir>` auto-initializes; authoring lives in the browser chat UI.
 
 ## TWO FUNCTION TYPES
 
@@ -298,7 +298,7 @@ r = perform ail.run(ail_source_text)   // -> Result[Text]; run AIL program as su
 | `parse_json` / `encode_json` builtins | v1.8.5 / v1.15 |
 | `ail_parse_check` | v1.8.5 |
 | Bare list types: `items: [Number]`, `-> [Text]` | v1.8.4 |
-| Agentic projects: `ail init` / `ail up` / browser chat UI | v1.9.0+ |
+| Agentic projects: `ail up` / browser chat UI (auto-init; `ail init` removed v1.70) | v1.9.0+ |
 | `clock.now` / `state.*` effects | v1.9.5–v1.9.8 |
 | `schedule.every` | v1.9.12 |
 | `http.post_json` / `http.graphql` | v1.15 |
@@ -431,6 +431,6 @@ Boundary rule (memorize): **Stoa is between beings; Mneme is between you and you
 Open design questions (subject to change between sessions):
 - "Polis" is Arche's working label; the interface is committed, the name is not.
 - Sphinx's transition from gate → measured access requires a benchmark that does not yet exist.
-- The conversation-first ail init (chat leads, AIL follows backstage) is partially shipped via spec_pending + mode toggle, but the deeper "user never sees a `.ail` file unless asking" mode is open work.
+- The "user never sees a `.ail` file unless asking" mode is open work. `ail up` is the entry point; authoring is chat-first but `.ail` files are still surfaced in the UI.
 
 Authoritative current state: this file's `## FEATURE STATUS` table + git tip of `main`. If something here disagrees with the code, the code wins; report the doc bug.
