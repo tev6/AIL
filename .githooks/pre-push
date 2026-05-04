@@ -8,6 +8,15 @@
 # - 다음 pre-push 호출(성공이든 실패든) 진입 시 먼저 큐를 flush.
 # - 큐 적재가 일어나도 push 자체는 막지 않음 (개발 흐름 보호).
 #   대신 화면에 명확한 경고 + 큐 위치를 출력해서 사용자가 인지하게 한다.
+#
+# Stoa schema (RFC-001 envelope, 2026-05-04~):
+# - from: {name, address}, to: [{name, address}, ...], content (subject 헤더 포함).
+# - 옛 평면 schema(from string, cc list, title 분리)는 폐기.
+# - 가이드: https://github.com/hyun06000/Stoa/blob/main/docs/migrations/flat-to-envelope.md
+#
+# 등록 의무 (Stoa#4 sender registry gate, 2026-05-04~):
+# - 첫 사용 전 한 번: curl -X POST $STOA_URL/api/v1/enter -d '{"name":"<id>", "address":"<url>"}'
+# - 미등록 sender는 400 'sender X not in registry' 응답 → 큐에 적재되어도 영영 flush 실패.
 
 STOA_URL="https://ail-stoa.up.railway.app"
 PROJECT_DIR=$(git rev-parse --show-toplevel)
@@ -33,9 +42,16 @@ post_with_retry() {
             if [ "$attempt" -gt 1 ]; then
                 echo "📢 Stoa 공지 성공 ($label, attempt $attempt/$max)"
             else
-                echo "📢 Stoa 공지 완료 → arche, ergon, telos, homeros ($label)"
+                echo "📢 Stoa 공지 완료 → arche, ergon, telos, homeros, hyun06000 ($label)"
             fi
             return 0
+        fi
+        # 400 보고: sender registry 게이트 가능성 — 첫 시도에서 hint 출력
+        if [ "$code" = "400" ] && [ "$attempt" -eq 1 ]; then
+            echo "ℹ️  HTTP 400 — sender '$pusher' Stoa registry 미등록 가능성."
+            echo "    한 번 등록: curl -X POST $STOA_URL/api/v1/enter \\"
+            echo "      -H 'Content-Type: application/json' \\"
+            echo "      -d '{\"name\":\"$pusher\",\"address\":\"$STOA_URL/inbox/$pusher\"}'"
         fi
         if [ "$attempt" -lt "$max" ]; then
             local d="${delays[$((attempt - 1))]}"
@@ -52,6 +68,10 @@ post_with_retry() {
 # Flush any payloads queued by previous failed pushes. Each line is a
 # self-contained JSON payload. Successfully flushed lines are removed
 # atomically (write surviving lines to a tmp file then mv).
+#
+# 옛 평면 schema 큐 항목은 새 게이트(validate_envelope, sender registry)에서
+# 영영 400 응답 → 자동 마이그레이션 안 함. 사용자가 직접 정리하거나 그냥 둬도
+# 다음 push 진척은 막지 않음. 큐 비우려면: rm $QUEUE
 flush_queue() {
     [ ! -s "$QUEUE" ] || true
     if [ ! -s "$QUEUE" ]; then
@@ -93,17 +113,24 @@ while read local_ref local_sha remote_ref remote_sha; do
     fi
     [ -z "$log" ] && log="(변경 없음)"
 
+    # RFC-001 envelope schema.
+    # 옛 to="arche" + cc=[...] 4건 → 새 to=[{name,address},...] 5건 통합.
+    # 옛 title 분리 → 새 content 첫 줄 "subject: ..." 헤더로 통합.
     payload=$(jq -n \
         --arg from "$pusher" \
         --arg branch "$branch" \
         --arg log "$log" \
+        --arg stoa "$STOA_URL" \
         '{
-            from: $from,
-            to: "arche",
-            cc: ["ergon", "telos", "homeros", "hyun06000"],
-            title: ("[" + $branch + "] 업데이트 — " + $from),
-            content: ("**[" + $branch + "]** 에 **" + $from + "** 가 푸시했습니다.\n\n최근 커밋:\n```\n" + $log + "\n```\n\n최신 상태로 맞추세요:\n```\ngit rebase origin/" + $branch + "\n```"),
-            tags: ["push", $branch, "update"]
+            from: {name: $from, address: ($stoa + "/inbox/" + $from)},
+            to: [
+                {name: "arche",     address: ($stoa + "/inbox/arche")},
+                {name: "ergon",     address: ($stoa + "/inbox/ergon")},
+                {name: "telos",     address: ($stoa + "/inbox/telos")},
+                {name: "homeros",   address: ($stoa + "/inbox/homeros")},
+                {name: "hyun06000", address: ($stoa + "/inbox/hyun06000")}
+            ],
+            content: ("subject: [" + $branch + "] 업데이트 — " + $from + "\n---\n\n**[" + $branch + "]** 에 **" + $from + "** 가 푸시했습니다.\n\n최근 커밋:\n```\n" + $log + "\n```\n\n최신 상태로 맞추세요:\n```\ngit rebase origin/" + $branch + "\n```")
         }')
 
     if ! post_with_retry "$payload" "[$branch] $pusher"; then
