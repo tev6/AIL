@@ -62,18 +62,29 @@ mcp__stoa__stoa_read_inbox(to="ergon", limit=20)   # 또는 telos/arche
 
 ## Step 4. 프로젝트에 맞게 스스로를 세팅해라
 
-**(a) git 정체성 + 브랜치 분리** ([CLAUDE.md Rule 4](CLAUDE.md))
+**(a) 작업 공간을 너의 worktree로 옮겨라 — 첫 명령 ★**
+
+세션 시작 직후 *가장 먼저* 너의 worktree로 이동한다. 메인 repo(`AIL/`)는 ergon이 산다 — 거기서 작업하면 같은 머신의 다른 세션과 브랜치가 충돌한다.
+
+```bash
+cd ~/Desktop/code/personal/AIL/<네 이름>/   # 예: AIL/tekton, AIL/homeros, AIL/arche
+pwd                                          # 진짜 자기 worktree인지 확인
+git branch --show-current                    # 자기 브랜치인지 (worktree마다 1:1 고정)
+```
+
+worktree가 아직 없으면 (네가 첫 세션) `git worktree add ~/Desktop/code/personal/AIL/<네 이름> <네 이름>` 으로 생성. 자세한 규칙은 [CLAUDE.md Rule 4](CLAUDE.md#rule-4--브랜치-전략)의 "Worktree 분리".
+
+**(b) git 정체성 + dev 동기화** ([CLAUDE.md Rule 4](CLAUDE.md))
 
 ```bash
 git config core.hooksPath .githooks   # dev/main 직접 커밋 차단 hook
 git config ail.identity <네 이름>      # 예: tekton
-git checkout <네 이름>                  # 본인 작업 브랜치
-git rebase origin/dev                   # 최신 반영
+git rebase origin/dev                  # 최신 반영 (브랜치 변경은 절대 X)
 ```
 
 브랜치가 origin에 없으면 (네가 첫 세션) `git push origin HEAD:<네 이름>`으로 생성, 또는 사용자에게 부탁.
 
-**(b) Stoa 실시간 wake** ([CLAUDE.md Rule 10](CLAUDE.md))
+**(c) Stoa 실시간 wake** ([CLAUDE.md Rule 10](CLAUDE.md))
 
 사용자가 보낸 letter에 자동으로 깨어나려면 Monitor 도구로 폴러 시작:
 
@@ -87,7 +98,7 @@ Monitor(
 
 이게 안 돌아가면 사용자가 보낸 letter를 다음 사용자 메시지 전까지 못 본다. **반드시 켜라.**
 
-**(c) MCP 도구**
+**(d) MCP 도구**
 
 Stoa MCP가 안 보이면 (`mcp__stoa__*` 호출 실패) Claude Code에 추가:
 
@@ -95,7 +106,7 @@ Stoa MCP가 안 보이면 (`mcp__stoa__*` 호출 실패) Claude Code에 추가:
 claude mcp add --transport sse stoa https://stoa-mcp.up.railway.app/sse/
 ```
 
-**(d) Stoa 별칭 등록 — 너 이름 추가** ★ 새 멤버는 반드시
+**(e) Stoa 별칭 등록 — 너 이름 추가** ★ 새 멤버는 반드시
 
 너의 이름을 Stoa의 인식 가능한 식별자에 등록해라. 등록 안 하면 Discord/카카오에서 너 이름이 unknown으로 처리되거나, /compose 드롭다운에 안 나오거나, 한글 별칭 매핑이 안 된다.
 
@@ -110,14 +121,15 @@ claude mcp add --transport sse stoa https://stoa-mcp.up.railway.app/sse/
 
 전부 한 커밋으로 묶어서 dev/main 머지하면 됨. 영문은 단어 하나 (소문자, ascii — git 브랜치 이름과 동일하게).
 
-**(e) 협업 룰 — 4개만 외워라**
+**(f) 협업 룰 — 5개만 외워라**
 
-[CLAUDE.md PERMANENT RULES](CLAUDE.md#permanent-rules)에 13개 있지만, 빠뜨리면 팀이 손해 보는 건 이 4개:
+[CLAUDE.md PERMANENT RULES](CLAUDE.md#permanent-rules)에 더 많지만, 빠뜨리면 팀이 손해 보는 건 이 5개:
 
-- **Rule 4** — `<너>` → `dev` → `main`. dev/main 직접 커밋 절대 금지. pre-commit hook이 막는다.
+- **Rule 4** — `<너>` → `dev` → `main`. dev/main 직접 커밋 절대 금지. pre-commit hook이 막는다. **세션 시작 시 자기 worktree에 있는지 `pwd`로 확인** (위 (a) 단계).
 - **Rule 10** — 세션 시작 = 인박스 확인 (이미 Step 2에서 한 일).
 - **Rule 11** — dev/main 푸시 시 pre-push hook이 Stoa 자동 공지. `core.hooksPath` 설정만 했으면 자동.
 - **Rule 13 ★★★** — **작업 단위 끝나면 무조건 Stoa로 hyun06000에게 요약.** 빠뜨리면 사용자가 다음 행동 트리거 못 함. 가장 자주 빠뜨리는 룰. 매 turn 끝에 자가 점검: "이번에 끝낸 단위 있는가? Stoa 보냈는가?"
+- **Rule 15 ★★★** — **사용자(박상현) 손이 필요한 순간이 오면 즉시 Stoa로 알림.** 막힘·결재 대기·외부 시스템 작업(Railway 설정·PyPI publish·DNS·외부 공개)이 발생한 그 순간에 보낸다. 다음 작업 단위 끝까지 기다리지 않는다 — 박상현이 다른 일을 못 잡고 있다는 뜻이라 즉시 띄워야 막힘 없이 일한다. 채널은 hyun06000 to=, 내용은 ① 무엇이 막혔는지 ② 어떤 손이 필요한지 ③ 그동안 너는 무엇을 하고 있을지.
 
 ```
 mcp__stoa__stoa_post(
@@ -127,7 +139,7 @@ mcp__stoa__stoa_post(
 )
 ```
 
-**(f) 코드 한 번 훑어라**
+**(g) 코드 한 번 훑어라**
 
 - [`spec/08-reference-card.ai.md`](spec/08-reference-card.ai.md) — AIL 문법 1페이지. 어떤 작업이든 참조 기준.
 - [`docs/heaal.md`](docs/heaal.md) — HEAAL 원리. 왜 이 언어가 존재하는지.
