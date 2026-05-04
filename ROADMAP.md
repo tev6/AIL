@@ -4,7 +4,7 @@ No dates. This is a project with a direction, not a schedule.
 
 ---
 
-## Current state (v1.46.5)
+## Current state (v1.71.1)
 
 L1 language, L2 runtime (v2 complete), benchmark, fine-tune pipeline all working. Field-tested in production by hyun06000.
 
@@ -41,10 +41,10 @@ The first six items below come from that case study, in the priority order it im
 
 - ✅ **`perform clock.now() -> Text`** — shipped in v1.9.5. No more hardcoded `"2024-01-15"` literals.
 - ✅ **Authoring prompt surfaces `perform http.get`** — shipped in v1.9.5; verified by hyun06000's usd-now project where Sonnet picked the effect on the real exchangerate-api URL.
-- **`perform schedule.every(seconds: Number) { ... }`** — declarative background polling. Unlocks the dashboard / monitor / cron-job project class. Requires a scheduler thread in the agentic runtime.
+- ✅ **`perform schedule.every(seconds: Number) { ... }`** — shipped. Action override + self-throttle + pause UI live (v1.70.x line). Unlocks dashboard / monitor / cron-job projects.
 - ✅ **Cross-request state effect** — `perform state.read/write/has/delete` shipped in v1.9.8. Process-restart-safe under `.ail/state/keyval/`. Live-verified with the visit-counter example.
-- **HTML / layout output mode** — entries today must return Text; the browser UI shows it as monospace. Allow `entry main` to return rich layout (HTML, structured payload, or INTENT.md `## Layout` directives) so projects can express "left summary, right references" without leaving plain language.
-- **Input-aware UI rendering** — when `entry main` does not reference its `input` parameter, the friendly UI should hide the textarea. Currently a user types "안녕" and gets back unrelated content with no signal that input was ignored.
+- ✅ **HTML / layout output mode** — shipped. HTML output is rendered separately from monospace text in the chat UI.
+- ✅ **Input-aware UI rendering** — shipped. The browser UI hides the textarea when `entry main` does not reference its `input` parameter.
 
 - **Better autonomous diagnosis.** Current auto-fix hands the whole app.ail to the chat backend. v2 should isolate the failing test, propose the minimal patch, and re-run. Smaller context, faster cycle, lower cost per attempt.
 - **Multi-file projects.** One `app.ail` per project today. v2 allows sub-modules / shared stdlib files for anything non-trivial.
@@ -55,7 +55,8 @@ The first six items below come from that case study, in the priority order it im
 
 The HEAAL claim is anchored across Sonnet (✅) and local base models (qwen14b ✅, llama8b ✅, mistral7b ✅ as boundary). Still open:
 
-- **GPT-4o, Gemini Pro** with `anti_python`. Does the frontier-only effect reproduce across model families? ~$5 in API credits per run.
+- ✅ **OpenAI GPT family (gpt-4o, gpt-4.1, gpt-4.1-mini, o4-mini)** — Series F (2026-04-25) shipped. o4-mini ties Sonnet 4.5 at 88% AIL answer; Python err-miss 66–70% across all four models. Cross-vendor transferability confirmed.
+- **Gemini Pro** with `anti_python` — API key in preparation. Last vendor needed to close the 3+ family bar.
 - **E1' retest** — Sonnet 4.5 with the default prompt, apples-to-apples against the anti_python score. ~$2.
 - **HEAAL in a manifesto-ready form.** The paradigm, boundary, and corrected scores are in place; a public long-form pitch is not.
 
