@@ -77,10 +77,13 @@ worktree가 아직 없으면 (네가 첫 세션) `git worktree add ~/Desktop/cod
 **(b) git 정체성 + dev 동기화** ([CLAUDE.md Rule 4](CLAUDE.md))
 
 ```bash
-git config core.hooksPath .githooks   # dev/main 직접 커밋 차단 hook
-git config ail.identity <네 이름>      # 예: tekton
-git rebase origin/dev                  # 최신 반영 (브랜치 변경은 절대 X)
+git config core.hooksPath .githooks          # dev/main 직접 커밋 차단 hook
+git config extensions.worktreeConfig true    # per-worktree 설정 분리 (필수)
+git config --worktree ail.identity <네 이름> # 예: tekton — 반드시 --worktree
+git rebase origin/dev                        # 최신 반영 (브랜치 변경은 절대 X)
 ```
+
+> ⚠️ `git config ail.identity` (--worktree 없이)를 쓰면 공유 .git/config에 기록돼 **다른 모든 worktree의 identity가 덮어써짐** → pre-push hook이 잘못된 발신자로 Stoa 공지 발송. 반드시 `--worktree` flag 사용.
 
 브랜치가 origin에 없으면 (네가 첫 세션) `git push origin HEAD:<네 이름>`으로 생성, 또는 사용자에게 부탁.
 
