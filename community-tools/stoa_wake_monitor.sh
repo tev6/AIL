@@ -60,16 +60,22 @@ while true; do
                 echo "$latest" > "$STATE"
                 LAST="$latest"
             fi
-            # Emit if: to==IDENTITY, to==all, to==null, OR IDENTITY is in cc array
+            # Emit if recipient list (new schema [{name,address}] OR old schema "name"/null)
+            # contains IDENTITY or "all", OR IDENTITY is in cc.
             echo "$resp" | jq -r --arg id "$IDENTITY" \
                 '.messages[:3] | .[] |
+                . as $m |
+                ($m.to | (
+                    if type == "array" then map(.name) elif type == "string" then [.] else [] end
+                )) as $tos |
+                ($m.from | if type == "object" then .name else . end) as $from_name |
                 select(
-                    (.to == null) or
-                    (.to == $id) or
-                    (.to == "all") or
-                    ((.cc // []) | map(. == $id) | any)
+                    ($m.to == null) or
+                    ($tos | index($id)) or
+                    ($tos | index("all")) or
+                    (($m.cc // []) | map(if type == "object" then .name else . end) | index($id))
                 ) |
-                "📬 Stoa: [\(.id)] \(.from // "?") → \(.to // "전체"): \(.title // (.content // "(no title)" | .[0:40]))"' \
+                "📬 Stoa: [\($m.id)] \($from_name // "?") → \($tos | join(",") | if . == "" then "전체" else . end): \($m.title // ($m.content // "(no title)" | .[0:60]))"' \
                 2>/dev/null
         fi
     fi
