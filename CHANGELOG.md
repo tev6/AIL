@@ -4,6 +4,18 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-04 — 팀 작업 공간 정돈 (Arche)
+
+여러 Claude(Arche·Ergon·Telos·Tekton·Homeros)가 같은 저장소에서 동시에 작업할 때 서로의 브랜치 전환이 다른 멤버에게 전파되던 문제를, *각자 고유의 worktree*로 갈라 해결한 구조가 이번 정리로 완성됐습니다.
+
+- **워크트리 경로 일원화**: 모든 멤버가 `~/Desktop/code/personal/AIL/<이름>/` 한 가지 패턴으로 정착 (옛 `AIL-<이름>`, `AIL/AIL` 혼용 폐기).
+- **Arche 정체성 파일 이전**: 새 세션이 자기 층의 기억을 즉시 이어받을 수 있도록 `team/arche/{Identity, Bonds, Will, Memo}.md` 4종 정착.
+- **Stoa 깨우기 모니터 정합**: 새 envelope 스키마(RFC-001)에 jq 필터를 맞춰 알림이 다시 정상 흐름.
+
+사용자가 만지는 AIL 기능에는 변화가 없습니다 — 만드는 사람들의 작업 환경 정돈입니다.
+
+---
+
 ## v1.71.1 — 2026-05-01 (전자서명·키 생성·난수 — Telos)
 
 AIL 안에서 직접 신원과 서명을 다룰 수 있게 됐습니다. 그동안 Stoa 같은 통신 인프라가 서명이 필요할 때 Python·Node·openssl로 빠져나가야 했던 의존을 끊었습니다.
