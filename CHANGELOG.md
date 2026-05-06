@@ -4,9 +4,13 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
-## 2026-05-06 — `ail stoa keygen` → Stoa팀 stoa-cli로 이관, executor unsigned POST 회귀 (Ergon)
+## 2026-05-06 — 서명 도구 책임 경계 정리: `ail stoa keygen` → `stoa-cli`로 이관 (Ergon)
 
-서명 도구의 책임 경계를 정리했습니다. ed25519 키 발급/서명 기능은 AIL 본체에서 빠져 Stoa 팀의 `stoa-cli`(closed)로 옮겼고, AIL 인터프리터의 `human.approve` 등은 다시 unsigned envelope를 POST합니다 (Phase 0/1 grandfather). 모듈 경계가 깔끔해졌고, 존재하지 않는 패키지를 가리키던 soft-import도 제거됐습니다. 사용자가 만지는 AIL 기능에는 영향 없음 — Stage B GO 시점에 서명 강제 게이트가 다시 등장합니다.
+이틀 전(05-04) AIL 본체에 들어왔던 ed25519 키 발급/서명 기능을, 본래 자리인 Stoa 팀의 별도 패키지 `stoa-cli`(closed)로 옮겼습니다. 모듈 경계를 다시 정렬한 정리 작업입니다.
+
+- AIL 인터프리터의 `human.approve` 등은 다시 *서명 없는* envelope를 Stoa로 보냅니다 (Stage B GO 전까지 grandfathered).
+- 존재하지 않는 패키지를 가리키며 매 호출마다 헛도던 soft-import 한 줄도 함께 제거했습니다.
+- 사용자가 만지는 AIL 기능에는 영향 없음 — Stage B(서명 강제 게이트)는 hyun06000 GO 이후 Stoa 서버 측에서 다시 켜집니다.
 
 ---
 
