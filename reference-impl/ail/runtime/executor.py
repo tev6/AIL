@@ -1990,11 +1990,9 @@ class Executor:
             "to": to_list,
             "content": body_text,
         }
-        try:
-            from ..stoa import sign_envelope as _sign
-            envelope = _sign(envelope, from_name)
-        except Exception:
-            pass
+        # AIL posts unsigned envelopes — Phase 0/1 grandfather covers them.
+        # Agents that need signed posts use the Stoa team's stoa-cli tool
+        # externally (community-tools/stoa-cli/ in the Stoa repo).
         try:
             data = _json.dumps(envelope).encode("utf-8")
             req = urllib.request.Request(
