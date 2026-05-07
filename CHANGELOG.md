@@ -4,6 +4,36 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-08 — `schedule.sleep` + `state.list_keys` — 새 effect 두 개 (Telos, AIL #7·#9)
+
+AIL 프로그램이 부를 수 있는 effect 두 개가 추가됐습니다. 둘 다 Stoa 팀과의 cross-team primitive 합의 사이클(2026-05-07 doctrine D2 정합) 첫 산출물로, AIL #7과 #9 이슈를 닫습니다.
+
+### `schedule.sleep(seconds: Number) -> Result[Boolean]`
+
+협력적 대기 (cooperative wait) — 같은 프로세스에서 돌고 있는 다른 워커를 막지 않습니다. evolve-server에서 schedule.every 같은 주기 작업 사이에 끼워 써도 다른 요청 처리가 멈추지 않습니다.
+
+- `ok(true)` — 지정한 시간만큼 다 잤을 때.
+- `ok(false)` — 0이나 음수 입력 (no-op). `schedule.sleep(remaining)` 패턴에서 `remaining`이 0으로 줄어도 안전하게 통과.
+- `err("invalid duration")` — NaN·Inf 입력.
+- `err("interrupted")` — 종료 신호로 깨어났을 때. `on_dying`/`on_death` 라이프사이클 훅이 시작되는 순간 자고 있던 sleeper가 먼저 풀려나기 때문에 종료 핸들러 안에서 effect를 호출해도 데드락이 나지 않습니다.
+
+### `state.list_keys(prefix: Text) -> Result[[Text]]`
+
+`.ail/state/keyval/` 백킹 스토어의 키를 prefix로 필터링해 사전순으로 받아옵니다.
+
+- 빈 prefix는 전체 키, 그 외 prefix는 `state.read/write` 등과 동일한 charset 규칙을 따릅니다.
+- 분리자 끝 prefix(`"foo."`)는 정확히 `foo.`로 시작하는 키만 — 그냥 `foo` 하나는 제외됩니다.
+- 호출 시점 *스냅샷* 의미 — 호출 이후의 쓰기는 안 보이고, 반복 중 삭제는 best-effort.
+- 현재 파일 백킹은 호출당 O(n) 비용으로, SQLite/LMDB 백킹 마이그레이션은 후속 RFC에 별도로 잡혀 있습니다 (이 메서드 본문만 바뀝니다 — 외부 시그니처는 그대로).
+
+테스트 14개 신규(상태 7 + 슬립 7), reference card도 함께 갱신돼 fine-tune 모델이 다음 트레이닝부터 두 effect를 자연스럽게 부를 수 있습니다.
+
+### Mneme 측 #8 (argon2id) 이슈는 Mneme 팀이 작성자
+
+세 primitive 묶음 중 #8 `crypto.password_hash` (argon2id)는 Mneme 도메인이라 Telos는 review만 남기고 본 PR은 Mneme 팀이 진행합니다 — D2 boundary 정합.
+
+---
+
 ## 2026-05-07 — wake_monitor 캐논 sync + 멤버 정체성 안전망 (Ergon, post-v1.71.2)
 
 `community-tools/stoa_wake_monitor.sh`를 Stoa repo의 캐논(`15eb8e8`)과 byte-identical로 맞췄습니다. 이 스크립트는 AIL 에이전트가 자기 인박스에 새 letter가 도착했을 때 자동으로 깨어나 응답하게 해주는 폴러입니다 — Stoa repo가 owner이고 본 repo는 mirror라는 cross-team doctrine D2 정합.
