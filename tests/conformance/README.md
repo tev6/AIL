@@ -16,26 +16,45 @@ Exit code is 0 when every program matches its expected output, 1 on any mismatch
 
 ## Corpus
 
-The default corpus lives at `rust-impl/examples/`. The same files ship in `ail-rs` release tarballs as smoke tests, so a single update keeps both pinned to the same expected behavior.
+Two corpora are exercised in CI:
 
-Each `.ail` has a header with two machine-readable directives:
+- `rust-impl/examples/` (default) — the smoke-test set bundled with `ail-rs` release tarballs. Inline header directives.
+- `reference-impl/tests/conformance/cases/` — the older pytest fixture set. Sidecar files.
+
+Both formats are accepted per-program; either may be used.
+
+### Format A — inline directives
 
 ```
 // INPUT:  hello,world,from,ail
 // OUTPUT: HELLO | WORLD | FROM | AIL
 ```
 
-`// INPUT:` is optional (empty if omitted). `// OUTPUT:` is required — programs without it are skipped with a warning.
+`// INPUT:` is optional. `// OUTPUT:` is required.
+
+### Format B — sidecar files
+
+```
+foo.ail            # the program
+foo.input          # optional; passed via --input
+foo.expected       # required; trailing newline stripped before compare
+foo.skip-<rt>      # optional; runtime ∈ {rust, go, python} skipped, body = reason
+```
+
+Mirrors the pytest harness at `reference-impl/tests/conformance/test_conformance.py` — same fixtures work in both harnesses without duplication. Inline takes precedence when both are present.
+
+A program with neither inline `// OUTPUT:` nor `.expected` sidecar is skipped with a warning.
 
 ## Adding a new conformance program
 
-1. Drop the `.ail` file into `rust-impl/examples/` (so it ships with releases too).
-2. Add the two directives at the top.
-3. Run all three runtimes locally — every one must match before merging:
+1. Pick a corpus and format:
+   - For a smoke test that ships with `ail-rs` releases → `rust-impl/examples/` + inline directives.
+   - For a richer fixture (multi-line outputs, runtime-specific skip) → `reference-impl/tests/conformance/cases/` + sidecar files.
+2. Run all three runtimes locally against the chosen corpus — every one must match before merging:
    ```bash
-   bash tests/conformance/run.sh rust
-   bash tests/conformance/run.sh go
-   bash tests/conformance/run.sh python
+   bash tests/conformance/run.sh rust    [CORPUS]
+   bash tests/conformance/run.sh go      [CORPUS]
+   bash tests/conformance/run.sh python  [CORPUS]
    ```
 
 If only one runtime matches, that's a spec-ambiguity bug — file an issue on the diverging runtime, or sharpen `spec/08-reference-card.ai.md` so all three converge.

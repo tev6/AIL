@@ -35,7 +35,10 @@ jobs:
         with:
           workspaces: rust-impl
       - run: cd rust-impl && cargo build --release --bin ail-rs
-      - run: bash tests/conformance/run.sh rust
+      - name: rust-impl/examples (inline format)
+        run: bash tests/conformance/run.sh rust
+      - name: reference-impl cases (sidecar format)
+        run: bash tests/conformance/run.sh rust reference-impl/tests/conformance/cases
 
   go:
     name: go
@@ -46,7 +49,10 @@ jobs:
         with:
           go-version: stable
       - run: cd go-impl && go build -o ail-go .
-      - run: bash tests/conformance/run.sh go
+      - name: rust-impl/examples (inline format)
+        run: bash tests/conformance/run.sh go
+      - name: reference-impl cases (sidecar format)
+        run: bash tests/conformance/run.sh go reference-impl/tests/conformance/cases
 
   python:
     name: python
@@ -57,4 +63,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: cd reference-impl && pip install -e .
-      - run: bash tests/conformance/run.sh python
+      - name: rust-impl/examples (inline format)
+        run: bash tests/conformance/run.sh python
+      - name: reference-impl cases (sidecar format)
+        run: bash tests/conformance/run.sh python reference-impl/tests/conformance/cases
