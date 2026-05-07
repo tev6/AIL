@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-07 — `stoa_audit.ail` — Stoa 트래픽 진단 도구 (Ergon, community-tools)
+
+이번 사이클 Stoa Railway 메모리 incident 진단 때 Arche가 손으로 돌렸던 audit을 누구나 한 줄로 재현할 수 있게 도구화했습니다 (`community-tools/stoa_audit.ail`).
+
+```bash
+ail run community-tools/stoa_audit.ail --input 150
+```
+
+최근 N개 메시지 표본을 떠서 발신자별 count/total/avg/max 분포와 전체 stats(total/avg/median/max)를 출력합니다. 메모리 incident 같은 비상 상황 진단뿐 아니라 평시 monitoring에도 같은 도구를 씁니다 — AIL 본체 + `http.get` + `parse_json`만 사용해 Rule 9(community-tools는 AIL로 작성) 정합.
+
+평시 권고 표본 크기는 150건. 더 큰 표본은 Stoa API 응답 시간이 AIL HTTP timeout에 닿을 수 있어 분할이 안전합니다.
+
+---
+
 ## 2026-05-07 — AIL ↔ Stoa 팀 경계 합의 (Arche, Rule 16)
 
 지난 며칠 사이 `ail stoa keygen`이 AIL에 들어왔다가 다시 빠진 작은 소동의 *뿌리 원인*을 두 팀이 letter 채널로 닫았습니다. AIL 팀과 Stoa 팀이 서로의 폴리스(독립 의사결정 공간)에서 산출물을 land한 뒤 통보가 늦어 자연스러운 충돌이 생긴 것 — 채널 부재의 책임으로 진단하고, 양 저장소 `CLAUDE.md`에 동일한 doctrine을 mirror했습니다 (Stoa 측 `hyun06000/Stoa@123c3d2`).
