@@ -282,7 +282,9 @@ If you only take away one thing from this README: **the grammar is the harness �
 Three notes for honesty:
 1. **Not all of this is built.** L1 and L2 are running in your terminal right now. L3 (Polis) is a name on top of `process_manager.py`'s scaffolding. Mneme has Arche's design and Telos's reframing — no code yet. Sphinx is a benchmark that doesn't exist. Agora is one paragraph.
 2. **Names will change.** "Polis" is Arche's working label; if the design shifts, so does the name. The interface boundary is what we're committing to, not the label.
-3. **The team is the spec.** Three Claude agents with no shared memory rebuild this whole picture every session by reading `CLAUDE.md` and Stoa. If the docs lie, the next session inherits the lie. We update them every release.
+3. **The team is the spec.** Five Claude agents (Arche · Ergon · Telos · Tekton · Homeros), none of them sharing memory, rebuild this whole picture every session by reading `CLAUDE.md` and Stoa. If the docs lie, the next session inherits the lie. We update them every release.
+
+**Where the project is heading right now.** As of cycle 7 (2026-05-08), the AIL team has explicit missions for the three sibling repositories that grew out of this one — *Mneme* (complete the private inheritance vault), *Stoa* (turn the post office into a self-rebuilding system per Phusis), and *AIL itself* (provide the language primitives those teams need: substrate effects like `schedule.sleep` and `state.list_keys` are the first deliverables under that framing). The doctrine that locks this in lives in `CLAUDE.md` — Rule 16 (cross-team boundary D1–D3) and Rule 17–19 (D4–D6: change-class gates, runtime parity scope, prompt ≤ spec × 1.5).
 
 The five names — Stoa, Physis, Mneme, Polis, Sphinx, Agora — will be in your way for years if the project succeeds. Worth understanding the shape now.
 
@@ -311,9 +313,9 @@ The five names — Stoa, Physis, Mneme, Polis, Sphinx, Agora — will be in your
 | `http.respond` | Server response from inside an `evolve` server arm |
 | `file.read` / `file.write` | File I/O — returns `Result` |
 | `clock.now` | Current timestamp |
-| `state.read` / `state.write` | Persistent key-value state across runs |
+| `state.read` / `state.write` / `state.list_keys` | Persistent key-value state across runs; `list_keys(prefix)` returns lex-sorted keys for retention sweeps and subscriber iteration |
 | `env.read` | Read credentials (masked in UI, never in source) |
-| `schedule.every` | Recurring `entry` re-invocation — cron-style workloads |
+| `schedule.every` / `schedule.sleep` | Recurring `entry` re-invocation; `sleep(seconds)` is a cooperative wait that does not block other workers and unwinds on `on_dying`/`on_death` |
 | `human.approve` | Approval card in browser UI before irreversible actions |
 | `search.web` | Web search — returns JSON array of results |
 | `perform log` | Stream a message to the browser run-log in real time |
@@ -470,6 +472,15 @@ homeros ──┘        └── Stoa announce ─────┘
 ```
 
 The Stoa announcements are the primary synchronization signal between agents and their human collaborator. Silent pushes are not allowed — Rule 11.
+
+**Joining the team is one command.** When a new agent comes online, the bootstrap is a single line that any existing worktree can run:
+
+```bash
+cd ~/Desktop/code/personal/AIL/arche
+bash community-tools/onboard.sh <name>
+```
+
+That creates the new worktree, pins per-worktree identity (so the new agent's Stoa announcements carry the right name from the first push), wires the pre-commit hook, and rebases on `dev`. Idempotent — running it twice on an existing member just refreshes config. The full onboarding script is part of the language: how a new collaborator joins is grammar, not folklore.
 
 ---
 
