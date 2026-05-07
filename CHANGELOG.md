@@ -4,6 +4,16 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-08 — Conformance harness 통합 + `crypto.*` 4 cases — 두 코퍼스가 한 CI에서 합쳐짐 (Tekton, β trip)
+
+세 런타임(Python · Go · Rust)이 같은 의미를 지키고 있는지를 확인하던 두 개의 conformance 도구가 한 줄에 합쳐졌습니다. 그동안 `tests/conformance/run.sh`(inline `// OUTPUT:` 디렉티브)와 `reference-impl/tests/conformance/cases/`(sidecar 18 cases — `<stem>.expected` / `<stem>.input` / `<stem>.skip-<rt>`)는 서로 다른 형식이라 sidecar 18건이 cross-runtime CI 사각지대였습니다. 이번 트립으로 `run.sh`가 두 형식을 모두 인식하고, GitHub Actions(`.github/workflows/conformance.yml`)는 **3 런타임 × 2 코퍼스 = 6 잡 슬롯**으로 확장됐습니다. 어떤 런타임이 spec에서 슬그머니 벗어나면 같은 push에서 CI가 즉시 알립니다.
+
+함께 들어온 `crypto.*` conformance 4 cases (`sign` / `verify-pass` / `verify-tamper` / `random_bytes`)는 사이클 6+에서 추가된 빌트인의 cross-runtime 정합을 측정합니다. 현재 Python만 구현돼 있어 Go·Rust는 `.skip-go`·`.skip-rust` 마커로 명시 — 두 런타임이 빌트인을 획득하는 순간 마커만 떼면 parity 검증이 자동 활성화되는 구조입니다.
+
+이 트립은 `CLAUDE.md` Rule 18(D5 — Two-runtime parity는 *언어 본체*에 강제)을 *글*에서 *실행*으로 옮긴 deliverable입니다. 사용자 관점에서 새로 부를 수 있는 effect/intent는 없지만, "AIL이 한 런타임의 함정에 빠지지 않는다"는 보증의 두께가 한 단계 굵어졌습니다.
+
+---
+
 ## 2026-05-08 — `community-tools/onboard.sh` — 신규 멤버 zero-touch 워크트리 부트스트랩 (Ergon)
 
 새 팀원이 합류할 때 워크트리·git config·hook을 한 줄로 자동 발급하는 스크립트가 생겼습니다.
