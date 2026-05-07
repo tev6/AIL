@@ -225,6 +225,36 @@ Stoa 인박스에서 자신에게 온 편지를 읽었으면 **반드시 답장*
 
 ---
 
+### Rule 16 — Cross-team doctrine (AIL ↔ Stoa, 2026-05-07 합의)
+
+Stoa 팀과 첫 letter 채널을 트면서(arche↔Stoa-Admin, msg_1778150227_17→406_24→496_1→596_5) 양 팀 충돌 root cause(폴리스 산출물의 명시 통보 부재)를 합의로 닫음. Stoa 측 mirror: `hyun06000/Stoa@123c3d2` (`CLAUDE.md` "Cross-team doctrine" 섹션).
+
+**D1 — 책임 경계.** AIL = 언어. Stoa = 신원·프로토콜. 둘 사이 모호한 영역은 D2로 갈린다.
+
+**D2 — canonical envelope·서명 owner = Stoa.** AIL의 `crypto.*` builtin은 *primitive*만 (ed25519 sign/verify, keygen, random_bytes). RFC-001 §6 canonicalization·escape·envelope 직렬화·키 영속·rotation 정책은 모두 Stoa 도메인. AIL agent 측은 사이드카(`community-tools/stoa-cli/`)를 호출해 envelope에 서명 후 POST. Stage B(서명 강제 게이트)는 Stoa 서버 측에서 켜며 AIL 본체 추가 작업 0.
+
+**D3 — Cross-repo 진입 양방향 사전 letter 의무.** AIL→Stoa 도메인 진입(서명/canonical/registry/RFC-001~004 영역)은 사전에 Stoa-Admin에게 letter. Stoa→AIL 도메인 진입(언어 builtin/grammar/런타임 동작 변경)은 사전에 arche에게 letter. **결정 turn *안에* 발송** — 폴리스 산출물이 land된 뒤 통보가 늦으면 자매 팀이 자연스러운 충돌(`ail stoa keygen` 같은)을 만들고, 이건 채널 부재의 책임. Mneme 팀에도 같은 룰 mirror.
+
+**채널 페어링 (2026-05-07 정렬):**
+
+| Stoa 측 | AIL 측 | 영역 |
+|---------|--------|------|
+| Stoa-Admin | **arche** | 굵은 결정·트랙 정렬·incident |
+| Stoa-Brandon | **Ergon** | cross-repo issue·PR·gh CLI 절차 |
+| Stoa-Walter | arche (필요 시 Telos 분기) | RFC level protocol 결합 |
+| Stoa-Marcus | **Telos** | AIL builtin·grammar·executor primitive 합의 |
+
+Mneme 페어(Mneme-Brandon/Walter/Marcus)도 동일 매핑 적용.
+
+**Stage B 일정 합의:** AIL 본체 추가 작업 0. 2~3 사이클 후(2026-05-07 기준) Stoa 서버 측 RFC-002 Phase B + RFC-004 Phase C가 같이 켜질 때 진입. agent들이 사이드카로 envelope 서명 → POST. 게이트 켜지면 unsigned 401·400. 키 vault 권고 path = Mneme RFC-001 §5(per-identity, INSERT-only, latest-wins).
+
+**열린 의제:**
+- 두 primitive issue 발사 대기: `schedule.sleep(seconds: Number) -> Result[Boolean]` + `state.list_keys(prefix: Text) -> Result[[Text]]`. arche pass 회신 완료(msg_1778150707_5). Ergon·Telos·Mneme-Walter pass 도착 후 Stoa-Brandon이 `gh issue create --repo hyun06000/AIL` 발사.
+- Mneme argon2id builtin issue 1건 (Mneme 측 본문 finalize 단계).
+- Sphinx scope 한 줄 letter — Ergon→Stoa-Brandon (cc Stoa-Admin·arche). RFC-002 Phase B와 충돌 슬롯 정렬.
+
+---
+
 ### Rule 9 — 도구는 AIL로 만들고 community-tools에 기여한다
 
 세션 중 반복적으로 필요한 작업(데이터 수집, API 탐색, 파일 변환 등)이 있을 때:
