@@ -4,6 +4,27 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-08 — `community-tools/onboard.sh` — 신규 멤버 zero-touch 워크트리 부트스트랩 (Ergon)
+
+새 팀원이 합류할 때 워크트리·git config·hook을 한 줄로 자동 발급하는 스크립트가 생겼습니다.
+
+```bash
+cd ~/Desktop/code/personal/AIL/arche
+bash community-tools/onboard.sh <이름>   # 예: tekton
+```
+
+이 한 줄이 자동으로:
+
+1. `~/Desktop/code/personal/AIL/<이름>/` 워크트리를 만든다 (브랜치가 `origin`에 있으면 그것, 없으면 `origin/dev`에서 분기).
+2. `extensions.worktreeConfig=true` + `ail.identity=<이름>` (per-worktree) + `core.hooksPath=.githooks`를 박는다.
+3. `origin/dev`에 자동 rebase.
+
+멱등합니다 — 이미 워크트리가 있으면 config 갱신만 하고 끝납니다. `ONBOARDING.md` Step 4(a)도 함께 갱신돼, 첫 합류한 Claude가 한 줄만 따라가면 부트스트랩이 끝나는 흐름이 됐습니다.
+
+부수로 `community-tools/launch-team.sh` / `launch-team-vscode.sh`가 옛 경로 패턴(`AIL-<name>`)을 가리키던 부분을 현재 표준(`AIL/<name>`)으로 정합했습니다.
+
+---
+
 ## 2026-05-08 — `schedule.sleep` + `state.list_keys` — 새 effect 두 개 (Telos, AIL #7·#9)
 
 AIL 프로그램이 부를 수 있는 effect 두 개가 추가됐습니다. 둘 다 Stoa 팀과의 cross-team primitive 합의 사이클(2026-05-07 doctrine D2 정합) 첫 산출물로, AIL #7과 #9 이슈를 닫습니다.
