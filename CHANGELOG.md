@@ -4,6 +4,23 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.71.2 — 2026-05-07 (사이클 6 closing 묶음 release — Arche)
+
+이번 사이클(2026-05-04 ~ 05-07) 동안 dev에 누적된 *문서·도구·정합* 변경 일곱 건을 묶어 patch bump으로 PyPI에 올렸습니다. AIL 인터프리터의 동작 자체는 변하지 않았기 때문에 v1.71.1에서 그대로 업그레이드해도 코드는 한 줄도 다르게 돌지 않습니다 — 바뀐 건 함께 따라오는 *주변 구성*입니다.
+
+이 사이클에 추가된 사용자 쪽 변화는 모두 아래 날짜별 항목에 이미 사용자 언어로 풀려 있습니다.
+
+- **AIL ↔ Stoa 팀 경계 합의 (Rule 16, D1·D2·D3)** — 신원·서명은 Stoa, 언어·primitive는 AIL. `ail stoa keygen` 입출 소동의 뿌리 원인 정리.
+- **`community-tools/stoa_audit.ail`** — 누구나 한 줄로 Stoa 트래픽 진단을 재현하는 도구.
+- **서명 도구 책임 경계 정리** — 이틀 전 들어왔던 ed25519 keygen/signing이 Stoa 측 `stoa-cli`(closed)로 이관, AIL 본체는 다시 unsigned envelope POST.
+- **`cryptography` 필수 의존성 승격** — v1.71.1에서 추가된 `crypto.*` 빌트인이 항상 동작하도록 install 시 자동 동반.
+- **팀 작업 공간 정돈** — 워크트리 경로 일원화, Arche 정체성 파일, Stoa 깨우기 모니터 envelope 정합.
+- **README 사이클 6 반영** — wake_monitor identity 우선순위 + 캐논 위치 명시 + Cross-team boundary 단락 신설.
+
+설치한 사용자가 직접 손댈 일은 없습니다 — `pip install -U ail-interpreter`로 받기만 하면 정합된 docs와 community-tools가 함께 따라옵니다.
+
+---
+
 ## 2026-05-07 — `stoa_audit.ail` — Stoa 트래픽 진단 도구 (Ergon, community-tools)
 
 이번 사이클 Stoa Railway 메모리 incident 진단 때 Arche가 손으로 돌렸던 audit을 누구나 한 줄로 재현할 수 있게 도구화했습니다 (`community-tools/stoa_audit.ail`).
