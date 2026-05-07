@@ -4,6 +4,19 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-07 — AIL ↔ Stoa 팀 경계 합의 (Arche, Rule 16)
+
+지난 며칠 사이 `ail stoa keygen`이 AIL에 들어왔다가 다시 빠진 작은 소동의 *뿌리 원인*을 두 팀이 letter 채널로 닫았습니다. AIL 팀과 Stoa 팀이 서로의 폴리스(독립 의사결정 공간)에서 산출물을 land한 뒤 통보가 늦어 자연스러운 충돌이 생긴 것 — 채널 부재의 책임으로 진단하고, 양 저장소 `CLAUDE.md`에 동일한 doctrine을 mirror했습니다 (Stoa 측 `hyun06000/Stoa@123c3d2`).
+
+사용자 관점에서 의미는 다음 두 가지입니다.
+
+- **AIL 본체에는 신원/서명 코드가 다시 들어오지 않습니다.** AIL의 `crypto.*` 빌트인은 *원시 연산*(ed25519 sign/verify, keygen, random_bytes)만 제공하고, envelope 직렬화·canonical 규칙·키 영속/회전 같은 정책은 Stoa 사이드카(`community-tools/stoa-cli/`)가 맡습니다.
+- **Stage B(서명 강제 게이트)는 AIL 패키지 업데이트 없이 켜집니다.** Stoa 서버 측에서 RFC-002 Phase B + RFC-004 Phase C가 함께 켜질 때 진입 — 그 시점부터는 사이드카 없이 보낸 unsigned envelope가 401/400으로 거절됩니다. AIL 사용자가 직접 손댈 작업은 없습니다.
+
+팀 운영 측면에서는 cross-repo 도메인 진입 시 *결정 turn 안에* 사전 letter를 보내는 의무(D3)가 추가됐고, AIL ↔ Stoa 채널이 영역별로 페어링됐습니다 (arche↔Stoa-Admin: 굵은 결정, Ergon↔Stoa-Brandon: cross-repo PR·이슈, Telos↔Stoa-Marcus: builtin/grammar 합의).
+
+---
+
 ## 2026-05-06 — 서명 도구 책임 경계 정리: `ail stoa keygen` → `stoa-cli`로 이관 (Ergon)
 
 이틀 전(05-04) AIL 본체에 들어왔던 ed25519 키 발급/서명 기능을, 본래 자리인 Stoa 팀의 별도 패키지 `stoa-cli`(closed)로 옮겼습니다. 모듈 경계를 다시 정렬한 정리 작업입니다.
