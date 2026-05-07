@@ -716,12 +716,14 @@ Built-in effects:
     hand-rolled error check a silent-failure vector in field
     test.
   - `schedule.every(seconds: Number) -> Result[Boolean]` — register
-    a recurring re-invocation of `entry main` inside an agentic
-    project. Call from inside the entry; the agentic runtime starts
-    a background thread that re-runs entry every N seconds. Pair with
-    `state.write` so each tick stores a result and GET / reads it.
-    Seconds in (0, 86400]. Outside `ail up` it returns an explanatory
-    error. Latest call wins.
+    a recurring tick. Two long-running contexts qualify: `ail up`
+    (drives `entry main` periodically — pair with `state.write` so
+    each tick stores a result) and `ail run` against a program with
+    an `evolve` block (drives the `on_tick` lifecycle hook on the
+    same cadence — call from `on_birth` / `on_genesis` to arm). Pair
+    with `state.write` so each tick stores a result and GET / reads it.
+    Seconds in (0, 86400]. Outside a long-running runtime the effect
+    returns an explanatory error. Latest call wins.
   - `schedule.sleep(seconds: Number) -> Result[Boolean]` —
     cooperative wait. `ok(true)` once the duration elapses;
     `ok(false)` immediately for `0` or negative input (modeled as
