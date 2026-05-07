@@ -99,7 +99,11 @@ Monitor(
 )
 ```
 
+정체성은 위 (b)에서 박은 `git config --worktree ail.identity` 값을 자동으로 잡는다 — `STOA_NAME` env는 평소 생략. fallback 순서: `STOA_NAME` > `--worktree ail.identity` > global `ail.identity` > literal `unknown-host`. 마지막 자리가 `unknown-host`인 이유는 정상 이름처럼 보이는 fallback이 실제 사고(2026-05-07 Marcus letter catch 0)를 만들었기 때문 — 잘못 박혔으면 *눈에 명백히 보여야* 한다.
+
 이게 안 돌아가면 사용자가 보낸 letter를 다음 사용자 메시지 전까지 못 본다. **반드시 켜라.**
+
+`stoa_wake_monitor.sh`의 캐논은 Stoa repo이고 이 repo는 mirror다 (cross-team doctrine D2, Rule 16). 본 사이클(2026-05-07) sync는 Ergon이 Stoa main `15eb8e8`과 byte-identical로 맞췄다.
 
 **(d) MCP 도구**
 

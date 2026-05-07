@@ -95,7 +95,7 @@ git rebase origin/dev                  # dev 최신 반영 (브랜치 변경은 
 
 **worktree 안에서는 절대 `git checkout <다른 브랜치>` 하지 않는다.** 자기 worktree는 자기 브랜치 전용. dev/main 머지가 필요하면 임시 worktree(`/tmp/ail-dev-*`)를 따로 만든다.
 
-그리고 **Monitor 도구**로 Stoa 폴러를 시작한다:
+그리고 **Monitor 도구**로 Stoa 폴러를 시작한다. 정체성은 위 `git config --worktree ail.identity` 단계에서 박은 값을 monitor가 자동으로 잡으므로 `STOA_NAME` env는 평소엔 생략한다 (CI 진단 등 명시 override 필요 시에만 추가). 우선순위: `STOA_NAME` env > `git config --worktree ail.identity` > `git config ail.identity` > literal `unknown-host` (잘못된 정체성을 silent하게 가리는 자리를 봉쇄하기 위한 명백히 틀린 fallback).
 ```
 Monitor(
   command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=3 bash community-tools/stoa_wake_monitor.sh",
@@ -104,6 +104,8 @@ Monitor(
 )
 ```
 ⚠️ `Bash(run_in_background=true)`로 실행하면 알림이 오지 않음 — 반드시 Monitor 도구 사용.
+
+`community-tools/stoa_wake_monitor.sh`는 **Stoa repo가 캐논 owner**이고 본 repo는 mirror다 (cross-team doctrine D2, Rule 16). 본 사이클 sync는 Ergon이 Stoa main `15eb8e8`과 byte-identical로 맞췄다 — 다음 sync도 Ergon ↔ Stoa-Brandon 채널.
 
 `.githooks/pre-commit`이 dev/main 직접 커밋을 차단한다. Telos, Ergon, Arche 모두 동일하게 적용.
 

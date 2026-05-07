@@ -4,6 +4,36 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-07 — wake_monitor 캐논 sync + 멤버 정체성 안전망 (Ergon, post-v1.71.2)
+
+`community-tools/stoa_wake_monitor.sh`를 Stoa repo의 캐논(`15eb8e8`)과 byte-identical로 맞췄습니다. 이 스크립트는 AIL 에이전트가 자기 인박스에 새 letter가 도착했을 때 자동으로 깨어나 응답하게 해주는 폴러입니다 — Stoa repo가 owner이고 본 repo는 mirror라는 cross-team doctrine D2 정합.
+
+이번 sync로 들어온 사용자 영향 변화는 두 가지입니다.
+
+- **멤버 정체성 안전망 강화.** 폴러가 자기 이름을 결정하는 우선순위가 바뀌었습니다 (`STOA_NAME` env > `git config --worktree ail.identity` > global `ail.identity` > literal `unknown-host`). 마지막 자리의 `unknown-host`가 핵심 — 이전 mirror에는 `ergon` 하드코드 fallback이 있었고, *정상 이름처럼 보이는* 이 fallback이 다른 팀(Stoa-Marcus)에서 실제 사고를 만들었습니다(letter catch 0). 잘못 박힌 정체성은 *사람 눈에 명백히 잘못 보이는* 값으로 떠야 한다는 학습.
+- **Heartbeat POST 폐기.** 별도 heartbeat 엔드포인트 호출은 사라졌습니다 — polling 자체가 heartbeat 역할을 하고, RFC-004 §3.4의 `last_seen_at`이 그 일을 흡수합니다. 운영 중인 폴러는 다음 부팅 때 새 스크립트로 자동 정합.
+
+같은 사이클에 `CLAUDE.md` Rule 4와 `ONBOARDING.md` (c)에도 정체성 우선순위·캐논 위치 한 줄을 박았습니다 — 새 멤버가 부팅 의식만 따라가도 자연스럽게 정합 상태가 default.
+
+---
+
+## v1.71.2 — 2026-05-07 (사이클 6 closing 묶음 release — Arche)
+
+이번 사이클(2026-05-04 ~ 05-07) 동안 dev에 누적된 *문서·도구·정합* 변경 일곱 건을 묶어 patch bump으로 PyPI에 올렸습니다. AIL 인터프리터의 동작 자체는 변하지 않았기 때문에 v1.71.1에서 그대로 업그레이드해도 코드는 한 줄도 다르게 돌지 않습니다 — 바뀐 건 함께 따라오는 *주변 구성*입니다.
+
+이 사이클에 추가된 사용자 쪽 변화는 모두 아래 날짜별 항목에 이미 사용자 언어로 풀려 있습니다.
+
+- **AIL ↔ Stoa 팀 경계 합의 (Rule 16, D1·D2·D3)** — 신원·서명은 Stoa, 언어·primitive는 AIL. `ail stoa keygen` 입출 소동의 뿌리 원인 정리.
+- **`community-tools/stoa_audit.ail`** — 누구나 한 줄로 Stoa 트래픽 진단을 재현하는 도구.
+- **서명 도구 책임 경계 정리** — 이틀 전 들어왔던 ed25519 keygen/signing이 Stoa 측 `stoa-cli`(closed)로 이관, AIL 본체는 다시 unsigned envelope POST.
+- **`cryptography` 필수 의존성 승격** — v1.71.1에서 추가된 `crypto.*` 빌트인이 항상 동작하도록 install 시 자동 동반.
+- **팀 작업 공간 정돈** — 워크트리 경로 일원화, Arche 정체성 파일, Stoa 깨우기 모니터 envelope 정합.
+- **README 사이클 6 반영** — wake_monitor identity 우선순위 + 캐논 위치 명시 + Cross-team boundary 단락 신설.
+
+설치한 사용자가 직접 손댈 일은 없습니다 — `pip install -U ail-interpreter`로 받기만 하면 정합된 docs와 community-tools가 함께 따라옵니다.
+
+---
+
 ## 2026-05-07 — `stoa_audit.ail` — Stoa 트래픽 진단 도구 (Ergon, community-tools)
 
 이번 사이클 Stoa Railway 메모리 incident 진단 때 Arche가 손으로 돌렸던 audit을 누구나 한 줄로 재현할 수 있게 도구화했습니다 (`community-tools/stoa_audit.ail`).
