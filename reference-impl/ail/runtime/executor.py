@@ -2094,11 +2094,20 @@ class Executor(EffectsMixin):
         """schedule.every(seconds: Number) -> Result[Boolean]
 
         Registers "this endpoint should be re-invoked every N seconds".
-        The agentic server notices the registration (via a JSON file
-        pointed at by AIL_SCHEDULE_FILE) and runs the recurring
+        A long-running runtime notices the registration (via a JSON
+        file pointed at by AIL_SCHEDULE_FILE) and runs the recurring
         invocation in a background thread. Calling twice updates the
-        cadence; latest call wins. Outside `ail up` the effect returns
-        an error — there's nothing to drive the recurrence.
+        cadence; latest call wins.
+
+        Two contexts qualify as "long-running": `ail up` (project
+        server) and `ail run` against a program that contains an
+        `evolve` block (evolve-server mode). The latter wires the
+        same env var + Scheduler thread inside `run_server`, so a
+        program can register its cadence from `on_birth` /
+        `on_genesis` and the runtime drives `on_tick` on schedule.
+
+        Outside both contexts the effect returns an explanatory error
+        — there is nothing to drive the recurrence.
 
         Seconds must be a positive number; hard-capped at 86400 (1 day)
         to keep an author from accidentally scheduling something that
@@ -2126,8 +2135,9 @@ class Executor(EffectsMixin):
         path_str = os.environ.get("AIL_SCHEDULE_FILE")
         if not path_str:
             return self._result_err(
-                "schedule.every: no scheduler running "
-                "(set AIL_SCHEDULE_FILE or run inside `ail up`)", origin)
+                "schedule.every: no long-running runtime "
+                "(set AIL_SCHEDULE_FILE, run inside `ail up`, or "
+                "use an `evolve` block under `ail run`)", origin)
 
         import pathlib
         path = pathlib.Path(path_str)
@@ -2520,6 +2530,19 @@ class Executor(EffectsMixin):
             state_dir.mkdir(parents=True, exist_ok=True)
             _os.environ["AIL_STATE_DIR"] = str(state_dir)
 
+        # `schedule.every` works wherever a long-running runtime is
+        # available. `ail up` provides one out of band; the evolve-server
+        # path is itself a long-running runtime, so we set up the same
+        # env handle here. The Scheduler thread is spawned below, after
+        # on_birth has had a chance to register a cadence (Telos +
+        # arche 2026-05-08, β-modified delegation).
+        if not _os.environ.get("AIL_SCHEDULE_FILE"):
+            schedule_file_path = (
+                (self.project_root or Path(".")) / ".ail" / "schedule.json"
+            )
+            schedule_file_path.parent.mkdir(parents=True, exist_ok=True)
+            _os.environ["AIL_SCHEDULE_FILE"] = str(schedule_file_path)
+
         # Infra-layer deny-first: activate the declared effects set for this server.
         declared = getattr(evolve_decl, "effects", None) or []
         self._server_evolve_effects = set(declared) if declared else None
@@ -2559,6 +2582,18 @@ class Executor(EffectsMixin):
                 {"_result": True, "ok": True, "value": prior_testament}, 1.0)
         self._invoke_lifecycle_hook("on_genesis", [testament_cv])
         self._invoke_lifecycle_hook("on_birth", [])
+
+        # Background scheduler — fires `on_tick` lifecycle hook every
+        # N seconds when the program registered a cadence via
+        # `perform schedule.every(N)` from on_genesis or on_birth.
+        # Symmetric with the per-request `before_tick`/`on_tick`/
+        # `after_tick` invocation below: same hook name, synthetic
+        # tick state, no `req` in scope. The Scheduler module already
+        # implements throttle-on-repeated-failure and the chat-side
+        # pause UI; we just supply an invoke callable that drives
+        # on_tick + counts errors per the same envelope `ail up` uses.
+        scheduler_thread = self._start_evolve_scheduler(
+            evolve_decl, executor_ref=self)
 
         flask_app = Flask(__name__)
         executor_ref = self
@@ -2822,7 +2857,65 @@ class Executor(EffectsMixin):
 
             return Response(body, status=status, mimetype=ct)
 
-        flask_app.run(host="0.0.0.0", port=port_val)
+        try:
+            flask_app.run(host="0.0.0.0", port=port_val)
+        finally:
+            if scheduler_thread is not None:
+                scheduler_thread.stop()
+
+    def _start_evolve_scheduler(self, evolve_decl, *, executor_ref):
+        """Spawn the Scheduler thread for an evolve-server.
+
+        Returns the started Scheduler, or None if no cadence has been
+        registered. We probe the schedule file (written by
+        `perform schedule.every(N)` during on_genesis / on_birth) and
+        only arm a thread when a positive cadence is present — keeps
+        servers that don't use scheduling free of an idle poll loop.
+
+        The invoke callable fires `on_tick` with synthetic tick state
+        (no request, so `before_tick`/`after_tick` for the per-request
+        envelope stay untouched). Failures are reported as
+        `(False, signature)` so Scheduler's auto-pause kicks in on the
+        same Physis rule the per-request handler uses.
+        """
+        import json as _json
+        import os as _os
+        from pathlib import Path as _Path
+        path_str = _os.environ.get("AIL_SCHEDULE_FILE")
+        if not path_str:
+            return None
+        path = _Path(path_str)
+        if not path.is_file():
+            # on_genesis / on_birth did not call schedule.every — nothing
+            # to drive. The env var is still set so a later effect can
+            # arm a cadence on demand; we simply skip the thread.
+            return None
+        try:
+            payload = _json.loads(path.read_text(encoding="utf-8"))
+            seconds = float(payload.get("seconds") or 0)
+        except (OSError, ValueError, TypeError):
+            return None
+        if seconds <= 0:
+            return None
+
+        from ..agentic.scheduler import Scheduler
+
+        def _invoke_tick():
+            try:
+                tick_state_cv = ConfidentValue(
+                    executor_ref._build_tick_state(), 1.0)
+                executor_ref._invoke_lifecycle_hook(
+                    "on_tick", [tick_state_cv])
+                return (True, "")
+            except Exception as e:
+                return (False, f"{type(e).__name__}: {e}")
+
+        sched = Scheduler(
+            schedule_file=path,
+            invoke=_invoke_tick,
+        )
+        sched.start()
+        return sched
 
     # --- Physis: inherit_testament effect ---
 

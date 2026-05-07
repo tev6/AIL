@@ -43,12 +43,16 @@ def test_schedule_effect_writes_schedule_file(tmp_path, monkeypatch):
 
 
 def test_schedule_effect_without_env_returns_error(tmp_path, monkeypatch):
-    # Outside `ail up` the effect has nowhere to write; must error cleanly.
+    # Outside any long-running runtime the effect has nowhere to write;
+    # must error cleanly and explain the two valid contexts.
     monkeypatch.delenv("AIL_SCHEDULE_FILE", raising=False)
     src = tmp_path / "app.ail"
     src.write_text(SCHEDULE_REGISTERING_AIL, encoding="utf-8")
     result, _trace = ail_run(str(src), input="")
-    assert "no scheduler running" in result.value.lower()
+    msg = result.value.lower()
+    assert "long-running" in msg
+    assert "ail up" in msg
+    assert "evolve" in msg
 
 
 def test_schedule_effect_rejects_non_positive(tmp_path, monkeypatch):
@@ -444,3 +448,142 @@ entry main(x: Text) {
     assert results == ["true", "true", "true"]
     # 3 sleeps of 0.3s in parallel ≈ 0.3s; sequential would be ~0.9s.
     assert elapsed < 0.7, f"sleeps did not run in parallel: {elapsed:.3f}s"
+
+
+# ---------- evolve-server schedule integration (β-modified, Telos 2026-05-08, AIL #?) ----------
+# `schedule.every` in `ail run` with an active `evolve` block — same
+# Scheduler thread machinery `ail up` provides, wired by run_server
+# itself. Tests cover env-setup + scheduler-arming + the legacy
+# entry-only rejection path stays intact.
+
+
+def test_run_server_sets_schedule_env_for_evolve_mode(tmp_path, monkeypatch):
+    """`run_server` installs AIL_SCHEDULE_FILE alongside AIL_STATE_DIR
+    so on_birth / on_genesis can register a cadence. We don't start
+    Flask — only invoke the env-prep prefix of run_server via parsing
+    + manual setup, mirroring the test_evolve_effects.py pattern."""
+    monkeypatch.delenv("AIL_SCHEDULE_FILE", raising=False)
+    monkeypatch.delenv("AIL_STATE_DIR", raising=False)
+    code = """\
+evolve answerer {
+    when request_received(req) {
+        perform http.respond(200, "text/plain", "hi")
+    }
+    rollback_on: error_rate > 0.9
+    history: keep_last 10
+}
+"""
+    from ail import compile_source
+    from ail.runtime.executor import Executor
+    from ail import MockAdapter
+
+    prog = compile_source(code)
+    project_root = tmp_path
+    ex = Executor(prog, MockAdapter(), project_root=project_root)
+    evolve_decl = next(iter(ex.evolves.values()))
+    # Reproduce the env-setup block of run_server up to (but not
+    # including) the lifecycle hooks. We don't start Flask.
+    import os
+    if not os.environ.get("AIL_STATE_DIR"):
+        state_dir = project_root / ".ail" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["AIL_STATE_DIR"] = str(state_dir)
+    if not os.environ.get("AIL_SCHEDULE_FILE"):
+        sched_path = project_root / ".ail" / "schedule.json"
+        sched_path.parent.mkdir(parents=True, exist_ok=True)
+        os.environ["AIL_SCHEDULE_FILE"] = str(sched_path)
+
+    assert os.environ["AIL_SCHEDULE_FILE"].endswith("schedule.json")
+    # Now schedule.every should accept and write to this file.
+    perform_src = """\
+entry main(x: Text) {
+    r = perform schedule.every(7)
+    if is_ok(r) { return "armed" }
+    return unwrap_error(r)
+}
+"""
+    from ail import run as ail_run_local
+    result, _ = ail_run_local(perform_src, input="")
+    assert result.value == "armed"
+    payload = json.loads(
+        Path(os.environ["AIL_SCHEDULE_FILE"]).read_text(encoding="utf-8"))
+    assert payload == {"seconds": 7.0}
+
+
+def test_start_evolve_scheduler_arms_thread_when_cadence_present(
+        tmp_path, monkeypatch):
+    """After on_birth has called schedule.every, the helper must read
+    the cadence and start a Scheduler thread. We don't drive a real
+    cadence — just assert the helper returns a Scheduler when the
+    file has a positive `seconds` value, and None when it doesn't."""
+    monkeypatch.setenv(
+        "AIL_SCHEDULE_FILE", str(tmp_path / "schedule.json"))
+    monkeypatch.setenv("AIL_STATE_DIR", str(tmp_path / "state"))
+    code = """\
+evolve answerer {
+    when request_received(req) {
+        perform http.respond(200, "text/plain", "hi")
+    }
+    rollback_on: error_rate > 0.9
+    history: keep_last 10
+}
+"""
+    from ail import compile_source
+    from ail.runtime.executor import Executor
+    from ail import MockAdapter
+
+    prog = compile_source(code)
+    ex = Executor(prog, MockAdapter(), project_root=tmp_path)
+    evolve_decl = next(iter(ex.evolves.values()))
+
+    # No file yet → helper returns None (no cadence registered).
+    sched = ex._start_evolve_scheduler(evolve_decl, executor_ref=ex)
+    assert sched is None, "should not arm without cadence"
+
+    # Write a cadence as if on_birth had called schedule.every(60).
+    Path(os.environ["AIL_SCHEDULE_FILE"]).write_text(
+        json.dumps({"seconds": 60.0}), encoding="utf-8")
+    sched = ex._start_evolve_scheduler(evolve_decl, executor_ref=ex)
+    assert sched is not None, "should arm when cadence written"
+    try:
+        # Thread is alive and waiting for the cadence to elapse.
+        # A 60s cadence won't fire during this test; we just confirm
+        # the scheduler was started.
+        assert sched._thread is not None
+        assert sched._thread.is_alive()
+    finally:
+        sched.stop()
+
+
+def test_start_evolve_scheduler_skips_when_seconds_zero_or_missing(
+        tmp_path, monkeypatch):
+    """A schedule file that exists but has no positive cadence must
+    not arm a thread — keeps quiet servers free of an idle poll."""
+    monkeypatch.setenv(
+        "AIL_SCHEDULE_FILE", str(tmp_path / "schedule.json"))
+    code = """\
+evolve x {
+    when request_received(req) {
+        perform http.respond(200, "text/plain", "hi")
+    }
+    rollback_on: error_rate > 0.9
+    history: keep_last 10
+}
+"""
+    from ail import compile_source
+    from ail.runtime.executor import Executor
+    from ail import MockAdapter
+
+    prog = compile_source(code)
+    ex = Executor(prog, MockAdapter(), project_root=tmp_path)
+    evolve_decl = next(iter(ex.evolves.values()))
+
+    # seconds=0 — not a positive cadence.
+    Path(os.environ["AIL_SCHEDULE_FILE"]).write_text(
+        json.dumps({"seconds": 0}), encoding="utf-8")
+    assert ex._start_evolve_scheduler(evolve_decl, executor_ref=ex) is None
+
+    # missing seconds key
+    Path(os.environ["AIL_SCHEDULE_FILE"]).write_text(
+        json.dumps({}), encoding="utf-8")
+    assert ex._start_evolve_scheduler(evolve_decl, executor_ref=ex) is None

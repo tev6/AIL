@@ -1317,6 +1317,8 @@ evolve qna_server {{
 
 5. **view.html MUST include a fetch safety net** (next).
 
+6. **Background ticks: `schedule.every` from `on_birth` / `on_genesis`.** evolve-server is itself a long-running runtime, so `perform schedule.every(N)` is valid — call it from a lifecycle hook (typical: `fn on_birth() {{ perform schedule.every(60) }}`) and the runtime will fire `on_tick(state)` every N seconds in addition to the per-request envelope. Use this for autonomous polling, retention sweeps, heartbeat to a registry. Same hook is also called per-request, so `on_tick` should be safe to invoke without a request context.
+
 **view.html safety net — MANDATORY when writing view.html for an evolve-server.**
 
 Non-developers panic at raw network errors. Add this `<script>` near the top of every `view.html` you author. It catches all `fetch()` failures, all non-JSON responses, all 5xx, and shows a friendly Korean overlay with a "채팅으로 돌아가기" link instead of letting the browser show "Unexpected token 'P'" or "Failed to fetch":
