@@ -4,6 +4,33 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-08 — `schedule.every` works inside `evolve` servers (Telos, β-modified)
+
+지금까지 `perform schedule.every(N)`은 `ail up`이 띄운 채팅 런타임 *안*에서만 등록이 됐습니다. `ail run` + `evolve { ... }`로 직접 띄운 서버는 자기 자신이 long-running 런타임인데도 스케줄러를 돌릴 수 없어, `on_birth`/`on_genesis`에서 등록을 시도하면 환경 변수 부재로 실패하던 자리.
+
+이번 트립으로 그 인위적 제약이 사라졌습니다. `evolve` 서버는 이제 `ail up`과 동일하게 lifecycle hook 직전에 `AIL_SCHEDULE_FILE` + `AIL_STATE_DIR`을 설치하고, `on_birth`이 반환된 직후 등록된 cadence를 읽어 스케줄러 스레드를 띄웁니다 — `on_tick` 합성 상태로 호출, 연속 실패 시 같은 auto-pause 봉투 적용.
+
+```ail
+evolve my_server {
+    listen: 8090
+    when on_birth() {
+        perform schedule.every(60)   // 60초마다 on_tick 호출
+        ...
+    }
+    when on_tick(s) {
+        // 백그라운드 작업 (Stoa Phase B autonomous tick·Mneme wake long-poll·subscriber 청소)
+    }
+}
+```
+
+같은 문법이 어떤 런타임 아래서든 같은 결과를 냅니다. HEAAL 안전망은 그대로(`schedule.every`는 여전히 long-running 런타임 *안*에서만 작동, `ail run` 단발 호출에서는 명시적 에러).
+
+테스트 3건 신규(`run_server`가 SCHEDULE_FILE 설치 / cadence 등록 시 스레드 무장 / 0이거나 부재 시 skip), reference card + authoring prompt 함께 갱신. 847 tests pass.
+
+이 변경은 Stoa Phase B의 autonomous tick과 Mneme wake long-poll이 모두 막혀 있던 게이트를 한 번에 풀어주는 substrate enabler — *AIL이 양 팀을 어떻게 떠받치는가*를 보여주는 사이클 8의 첫 deliverable입니다.
+
+---
+
 ## v1.72.1 — 2026-05-08 (사이클 7 wind-down — Arche)
 
 patch bump — *동작 변경 0*. 사이클 7 마지막 ship으로 inventory 두 건만 묶었습니다.
