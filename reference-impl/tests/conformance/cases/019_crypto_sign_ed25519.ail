@@ -1,0 +1,12 @@
+// Conformance: ed25519 signature determinism.
+// Same (secret_key_hex, message) → same signature hex (RFC 8032).
+// Locks Python crypto_sign_ed25519 to a fixed test vector. When Go/Rust
+// gain crypto.* builtins, drop the .skip-{go,rust} markers and this
+// case becomes a live cross-runtime parity check.
+
+entry main(x: Text) {
+    sk = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+    msg = "AIL conformance: ed25519"
+    r = crypto_sign_ed25519(sk, msg)
+    return unwrap(r)
+}

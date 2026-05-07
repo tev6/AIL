@@ -1,0 +1,10 @@
+// Conformance: crypto_random_bytes returns 2n hex chars for n input.
+// Bytes themselves are non-deterministic — we only assert the length
+// invariant (n=16 → 32 hex chars), which both runtimes must agree on
+// once Go/Rust gain crypto.* builtins.
+
+entry main(x: Text) {
+    r = crypto_random_bytes(16)
+    hex = unwrap(r)
+    return to_text(length(hex) == 32)
+}

@@ -13,9 +13,21 @@
 # also bundled with `ail-rs` release tarballs, so a single update keeps
 # field-test fixtures and conformance tests in sync).
 #
-# Header directives in each .ail file:
-#   // INPUT:  <one-line input>      (optional, empty if omitted)
-#   // OUTPUT: <expected stdout>     (required)
+# Two case formats are supported (per-program; either may be used):
+#
+#   (A) Inline directives in the .ail file:
+#         // INPUT:  <one-line input>      (optional, empty if omitted)
+#         // OUTPUT: <expected stdout>     (required)
+#
+#   (B) Sidecar files alongside <stem>.ail:
+#         <stem>.input        (optional)
+#         <stem>.expected     (required; trailing newline stripped before compare)
+#         <stem>.skip-<rt>    (optional; runtime <rt> ∈ {rust,go,python} skips
+#                              this case, file body used as the skip reason)
+#
+# Sidecar format mirrors reference-impl/tests/conformance (pytest harness),
+# so the same case dir works in both harnesses without duplication.
+# Inline takes precedence when both are present.
 #
 # Exit code: 0 if every program matches, 1 if any mismatch.
 
@@ -82,17 +94,37 @@ skipped=0
 
 for prog in "${CORPUS}"/*.ail; do
   total=$((total + 1))
+  stem="${prog%.ail}"
 
-  expected=$(grep -m1 '^// OUTPUT:' "$prog" | sed -E 's|^// OUTPUT:[[:space:]]*||' || true)
-  if [ -z "${expected:-}" ] && ! grep -q '^// OUTPUT:' "$prog"; then
-    echo "skip: $prog (no // OUTPUT: directive)"
+  # Per-runtime skip marker (sidecar format, mirrors pytest harness).
+  skip_marker="${stem}.skip-${RUNTIME}"
+  if [ -f "$skip_marker" ]; then
+    reason=$(tr -d '\n' < "$skip_marker")
+    [ -n "$reason" ] || reason="runtime ${RUNTIME} skip"
+    echo "skip: $prog (${reason})"
     skipped=$((skipped + 1))
     continue
   fi
 
-  input_line=$(grep -m1 '^// INPUT:' "$prog" || true)
-  if [ -n "$input_line" ]; then
-    input=$(echo "$input_line" | sed -E 's|^// INPUT:[[:space:]]*||')
+  # Expected output: inline // OUTPUT: takes precedence; fall back to
+  # <stem>.expected sidecar if present.
+  if grep -q '^// OUTPUT:' "$prog"; then
+    expected=$(grep -m1 '^// OUTPUT:' "$prog" | sed -E 's|^// OUTPUT:[[:space:]]*||')
+  elif [ -f "${stem}.expected" ]; then
+    # Bash command substitution strips trailing newlines — matches the
+    # pytest harness's .read_text().rstrip("\n") semantics.
+    expected=$(cat "${stem}.expected")
+  else
+    echo "skip: $prog (no // OUTPUT: directive or .expected sidecar)"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  # Input: inline // INPUT: takes precedence; fall back to <stem>.input.
+  if grep -q '^// INPUT:' "$prog"; then
+    input=$(grep -m1 '^// INPUT:' "$prog" | sed -E 's|^// INPUT:[[:space:]]*||')
+  elif [ -f "${stem}.input" ]; then
+    input=$(cat "${stem}.input")
   else
     input=""
   fi
