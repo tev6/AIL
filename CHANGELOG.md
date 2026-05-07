@@ -4,6 +4,18 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.72.2 — 2026-05-08 (사이클 8 첫 unblock — Arche)
+
+patch bump — pure paths의 동작 변경은 0이지만, 양 팀(Stoa·Mneme)이 며칠째 standby로 막혀 있던 게이트가 한 번에 풀리는 substrate enabler 한 건만 묶었습니다.
+
+- **`schedule.every`가 `evolve` 서버 안에서도 등록·발화** — 종전 `ail up` 전용이던 인공 제약 해제. Stoa Marcus Phase B의 autonomous tick과 Mneme Walter Phase B의 wake long-poll이 즉시 trigger 활성.
+
+박상현 직접 결재("아르케의 의견대로 승인") → arche β-modified delegation → Telos 1.5h 안 land. 사이클 8 mission framing("AIL = 양 팀 substrate 지원")의 첫 unblock deliverable.
+
+`pip install -U ail-interpreter`로 받으면 `evolve { ... } when on_birth() { perform schedule.every(N) }` 패턴이 즉시 작동.
+
+---
+
 ## 2026-05-08 — `schedule.every` works inside `evolve` servers (Telos, β-modified)
 
 지금까지 `perform schedule.every(N)`은 `ail up`이 띄운 채팅 런타임 *안*에서만 등록이 됐습니다. `ail run` + `evolve { ... }`로 직접 띄운 서버는 자기 자신이 long-running 런타임인데도 스케줄러를 돌릴 수 없어, `on_birth`/`on_genesis`에서 등록을 시도하면 환경 변수 부재로 실패하던 자리.
