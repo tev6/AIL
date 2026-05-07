@@ -10,13 +10,17 @@
 # 사전 조건:
 #   - VSCode `code` 명령어가 PATH에 있어야 함
 #     (없으면 VSCode → Cmd+Shift+P → "Shell Command: Install 'code' command in PATH" 실행)
-#   - worktree 5개 존재 (~/Desktop/code/personal/AIL{,-ergon,-homeros,-telos,-tekton})
+#   - worktree 5개 존재 (~/Desktop/code/personal/AIL/{arche,ergon,homeros,telos,tekton})
+#     없으면 먼저 발급:
+#       cd ~/Desktop/code/personal/AIL/arche
+#       bash community-tools/onboard.sh <name>
 #
 # Author: Homeros — 2026-04-28
+# Path 정합 + onboard.sh 안내: Ergon — 2026-05-08
 
 set -euo pipefail
 
-ROOT="$HOME/Desktop/code/personal"
+ROOT="$HOME/Desktop/code/personal/AIL"
 
 if ! command -v code >/dev/null 2>&1; then
     echo "❌ 'code' 명령어 없음."
@@ -25,17 +29,19 @@ if ! command -v code >/dev/null 2>&1; then
 fi
 
 for name in ergon telos tekton homeros; do
-    if [ ! -d "$ROOT/AIL-$name" ]; then
-        echo "❌ worktree 없음: $ROOT/AIL-$name"
-        echo "   먼저 'git worktree add ../AIL-$name $name' 으로 생성하세요."
+    if [ ! -d "$ROOT/$name" ]; then
+        echo "❌ worktree 없음: $ROOT/$name"
+        echo "   먼저 발급:"
+        echo "     cd $ROOT/arche"
+        echo "     bash community-tools/onboard.sh $name"
         exit 1
     fi
 done
 
 echo "🚀 CAST 4명 VSCode 창 띄우는 중..."
-code -n "$ROOT/AIL-ergon"
-code -n "$ROOT/AIL-telos"
-code -n "$ROOT/AIL-tekton"
-code -n "$ROOT/AIL-homeros"
+code -n "$ROOT/ergon"
+code -n "$ROOT/telos"
+code -n "$ROOT/tekton"
+code -n "$ROOT/homeros"
 
 echo "✅ 완료. 각 창에서 Claude Code 사이드바를 열면 해당 worktree 컨텍스트로 세션 시작됩니다."
