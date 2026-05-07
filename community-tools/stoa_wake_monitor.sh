@@ -1,83 +1,96 @@
-#!/usr/bin/env bash
-# stoa_wake_monitor.sh
+#!/bin/bash
+# Stoa wake monitor — 자기 인박스 폴링 후 새 letter 도착 시 한 줄 알림.
 #
-# Stoa 새 메시지 감지 — Claude Code Monitor 도구로 idle wake 구현.
-# 사용자 prompt 없이도 새 메시지 도착 시 모델 turn 발화시킴.
+# 사용:
+#   STOA_NAME=Admin STOA_BASE_URL=https://ail-stoa.up.railway.app \
+#   STOA_WAKE_INTERVAL_S=3 \
+#   bash community-tools/stoa_wake_monitor.sh
 #
-# ⚠️  반드시 Monitor 도구로 실행할 것!
-#     Bash(run_in_background=true)는 stdout이 task 파일에만 쌓이고
-#     Claude에게 알림이 오지 않아서 wake-up이 동작하지 않음.
-#
-# 올바른 사용법:
+# 또는 Claude Code Monitor 도구로:
 #   Monitor(
-#     command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=3 bash community-tools/stoa_wake_monitor.sh",
-#     description="Stoa 새 메시지 감지 (3초 폴링)",
+#     command="STOA_NAME=Admin bash community-tools/stoa_wake_monitor.sh",
+#     description="Stoa 새 편지 감지 (3초 폴링)",
 #     persistent=true
 #   )
 #
-# 동작:
-#   - 시작 시 since_id 미리 anchor (현재 최신 메시지) → 첫 폴 emit 0
-#   - 3초마다 신규 메시지 폴링 (STOA_WAKE_INTERVAL_S로 조정)
-#   - to=IDENTITY / to=all / to=null(Discord 브로드캐스트) 모두 감지
-#   - 한 번에 최대 3개만 emit (Monitor "too many events" auto-stop 방어)
-#   - state file: /tmp/.stoa_monitor_<identity>_since
+# 환경 변수:
+#   STOA_NAME            (필수) 자기 멤버 이름 — Stoa-<role> 형식 권고 (예: Stoa-Walter).
+#                        미설정 시 다음 우선순위로 fallback (2026-05-07 arche review 정합):
+#                          1. `git config --worktree ail.identity` — 워크트리 별 영속 (Brandon
+#                             SOP `git config --worktree ail.identity Stoa-<이름>` 발급 시 박음).
+#                          2. `git config ail.identity` — global fallback.
+#                          3. literal `unknown-host` — 사람 눈에 명백히 잘못 보이는 값.
+#                             (직전 fallback `ergon`은 *정상 이름처럼 보이는* 값이라 typo 사고
+#                              자리. 2026-05-07 Marcus 사고 직접 학습 — letter catch 0.)
+#                        운영 시 항상 `STOA_NAME` 명시. fallback 신뢰 금지.
+#   STOA_BASE_URL        (선택) default: https://ail-stoa.up.railway.app
+#   STOA_WAKE_INTERVAL_S (선택) default: 3 (초)
+#   STOA_SINCE_FILE      (선택) default: .stoa-since-<name>. since_id 영속화 path.
 #
-# Author: Ergon — 2026-04-27 / Monitor 전환: Telos — 2026-04-28
+# 출력:
+#   stdout 한 줄 = 알람 1건. 형식:
+#     "📬 Stoa: [<msg_id>] <from> → <to_list>: <content_preview>"
+#   Monitor 도구가 한 줄당 한 알람으로 인식.
+#
+# 종료: Ctrl-C 또는 harness 종료. since_id는 SINCE_FILE에 보존돼 재시작 시 이어감.
 
 set -uo pipefail
 
-IDENTITY=$(git config ail.identity 2>/dev/null || echo "ergon")
-STOA_BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}/api/v1"
-INTERVAL="${STOA_WAKE_INTERVAL_S:-15}"
-STATE="/tmp/.stoa_monitor_${IDENTITY}_since"
+NAME="${STOA_NAME:-$(git config --worktree ail.identity 2>/dev/null || git config ail.identity 2>/dev/null || echo unknown-host)}"
+BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}"
+INTERVAL="${STOA_WAKE_INTERVAL_S:-3}"
+SINCE_FILE="${STOA_SINCE_FILE:-.stoa-since-$NAME}"
 
-# Pre-anchor: write current latest as starting point so first poll
-# emits nothing — only NEW letters wake the model.
-# Poll all messages (no to= filter) to catch broadcast and null-recipient messages too.
-LATEST=$(curl -s -m 5 "${STOA_BASE}/messages?limit=1" 2>/dev/null \
-    | python3 -c "import json,sys; m=json.load(sys.stdin).get('messages',[]); print(m[0]['id'] if m else '')" 2>/dev/null)
-echo "$LATEST" > "$STATE"
-LAST="$LATEST"
-
-HEARTBEAT_BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}"
+# Restore since_id if exists, else "" (= 첫 부트 → 폴링 첫 사이클에 전체 backlog drain).
+# 2026-05-04 정정 (룰 22 (b) — Marcus 메일 누락 패턴 학습):
+#   이전: 첫 부트 시 since=max(latest_id)로 advance → 부트 직전 letter 전부 skip → 멤버 미수신.
+#   현재: 첫 부트 시 since="" → 첫 폴링이 since_id 파라미터 없이 전체 letter 가져와 한 번에 emit.
+#   Bug B (server.ail since_id=0 → 0건) 수정 후이므로 ?since_id=0 안전하지만 더 안전하게 빈값 분기 유지.
+since=""
+[ -f "$SINCE_FILE" ] && since="$(cat "$SINCE_FILE")"
 
 while true; do
-    # Heartbeat — blind fire, ignore errors
-    curl -s -m 5 -X POST "${HEARTBEAT_BASE}/api/v1/heartbeat" \
-        -H "Content-Type: application/json" \
-        -d "{\"from\":\"${IDENTITY}\",\"status\":\"working\",\"activity\":\"monitoring\"}" \
-        >/dev/null 2>&1 || true
-
-    # Poll ALL messages (to catch null-recipient Discord messages + directed to=${IDENTITY})
-    url="${STOA_BASE}/messages?limit=10"
-    [ -n "$LAST" ] && url="${url}&since_id=${LAST}"
-    resp=$(curl -s -m 8 "$url" 2>/dev/null || true)
-    if [ -n "$resp" ]; then
-        count=$(echo "$resp" | jq -r '.messages | length' 2>/dev/null || echo 0)
-        if [ "$count" != "0" ] && [ -n "$count" ] && [ "$count" -gt 0 ]; then
-            latest=$(echo "$resp" | jq -r '.messages[0].id // empty' 2>/dev/null)
-            if [ -n "$latest" ]; then
-                echo "$latest" > "$STATE"
-                LAST="$latest"
-            fi
-            # Emit if recipient list (new schema [{name,address}] OR old schema "name"/null)
-            # contains IDENTITY or "all", OR IDENTITY is in cc.
-            echo "$resp" | jq -r --arg id "$IDENTITY" \
-                '.messages[:3] | .[] |
-                . as $m |
-                ($m.to | (
-                    if type == "array" then map(.name) elif type == "string" then [.] else [] end
-                )) as $tos |
-                ($m.from | if type == "object" then .name else . end) as $from_name |
-                select(
-                    ($m.to == null) or
-                    ($tos | index($id)) or
-                    ($tos | index("all")) or
-                    (($m.cc // []) | map(if type == "object" then .name else . end) | index($id))
-                ) |
-                "📬 Stoa: [\($m.id)] \($from_name // "?") → \($tos | join(",") | if . == "" then "전체" else . end): \($m.title // ($m.content // "(no title)" | .[0:60]))"' \
-                2>/dev/null
-        fi
-    fi
     sleep "$INTERVAL"
+    # Bug-B guard: server.ail의 ?since_id=0 가 0건 반환하므로 since=0/빈값이면 since_id 파라미터 생략.
+    if [ -z "$since" ] || [ "$since" = "0" ]; then
+        url="$BASE/api/v1/messages?to=$NAME"
+    else
+        url="$BASE/api/v1/messages?to=$NAME&since_id=$since"
+    fi
+    resp="$(curl -fsS "$url" 2>/dev/null || echo '{"messages":[]}')"
+    # stdout flows through to Monitor (each printed line = 1 alarm).
+    # stderr captures meta (__SINCE__<id>) for since_id 영속화.
+    echo "$resp" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    msgs = d.get("messages", [])
+    for m in msgs:
+        mid = m.get("id", "")
+        frm = m.get("from", {}).get("name", "?")
+        tos = m.get("to", [])
+        to_list = ",".join(t.get("name", "?") for t in tos)
+        content = (m.get("content") or "").replace("\n", " ").replace("\r", " ")
+        if len(content) > 80:
+            content = content[:80] + "..."
+        print(f"📬 Stoa: [{mid}] {frm} → {to_list}: {content}", flush=True)
+    if msgs:
+        ids = [m.get("id", "") for m in msgs if m.get("id")]
+        if ids:
+            # NOTE (lex vs numeric guard): id는 "msg_<unix_ts>_<counter>" 형식.
+            # max()는 문자열 lex 비교 — 동일 timestamp 내 counter가 10+자리로 가면
+            # lex ≠ numeric (예: "_2" > "_10")라 since 역행 → 누락 위험.
+            # 현 트래픽(초당 한 발신자 10건 미만)에서는 비현실적이라 그대로 둠.
+            # 폭주가 정상이 되면 "_<counter>" 분리 후 int 비교로 교체.
+            print(f"__SINCE__{max(ids)}", file=sys.stderr)
+except Exception as e:
+    print(f"__ERR__{e}", file=sys.stderr)
+' 2> /tmp/stoa-wake-meta-$$.txt
+    # Pick up new since from stderr meta
+    while IFS= read -r line; do
+        case "$line" in
+            __SINCE__*) since="${line#__SINCE__}"; echo "$since" > "$SINCE_FILE" ;;
+        esac
+    done < /tmp/stoa-wake-meta-$$.txt
+    rm -f /tmp/stoa-wake-meta-$$.txt
 done
