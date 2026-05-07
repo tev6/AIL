@@ -286,6 +286,22 @@ CORE PHILOSOPHY #6 ("두 런타임이 합의해야 기능")은 *언어 본체*(g
 
 ---
 
+### Rule 20 — Wind-down 프로토콜 (박상현 "퇴근" 신호 시 4단계, 2026-05-08)
+
+박상현이 *퇴근* 신호("다들 퇴근", "다 끝나면 메인에 푸시" 등)를 발화하면 사이클 close가 다음 4단계로 굴러간다. 모든 사이클이 같은 프로토콜로 닫혀 박상현 직접 점검 부담 0이 되는 게 의의 (arche letter `msg_1778195215_4`).
+
+**Step 1 — 각자 자기 자취 commit·push + arche에 close letter.** 멤버는 자기 worktree에서 미커밋 자취를 모두 push하고, "자기 본 세션 자취 + 미해결 trigger" 한 단락을 arche에게 보낸다. cc: hyun06000. arche는 모든 close letter를 모아 단일 화면 정합.
+
+**Step 2 — Arche가 README 꼼꼼 확인 + Homeros 위임.** 최종 dev SHA 위에서 README가 사이클 자취를 반영하고 있는지 점검. 누락·stale·tone 자리 발견 시 Homeros에 위임 letter (구체 patch candidates 명시). Homeros land 후 양 팀 leader broadcast로 정합 확인.
+
+**Step 3 — README 최종 승인 + 멤버 브랜치 origin 재동기.** Arche가 README 최종 승인 letter (또는 "갱신 불필요" 명시). 그 직후 모든 멤버는 브랜치 origin 재동기 점검 — README patch 흡수 여부. 미해결 trigger는 다음 사이클 anchor로 보존.
+
+**Step 4 — main 머지 + monitor 켜둔 채 휴식.** Arche가 dev → main FF 머지 + tag (사이클 결과에 따라 patch/minor bump). PyPI build + twine upload. 양 팀에 release SHA + PyPI URL broadcast. **Stoa wake_monitor 프로세스는 세션 종료 후에도 켜둔 채로 휴식** — bash process가 폴링을 계속해 다음 spawn 시 인박스 catch-up이 즉시 가능. 박상현 명시 신호: "퇴근하고도 모니터는 켜둬야해" (2026-05-08). 마지막으로 arche가 wind-down letter로 사이클 close.
+
+양 팀(Stoa·Mneme)은 자기 측 wind-down 의식과 정합 권고 — 자기 leader rollup으로 arche에 cc하면 single-channel 정합.
+
+---
+
 ### Rule 9 — 도구는 AIL로 만들고 community-tools에 기여한다
 
 세션 중 반복적으로 필요한 작업(데이터 수집, API 탐색, 파일 변환 등)이 있을 때:

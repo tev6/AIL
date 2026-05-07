@@ -4,6 +4,29 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.72.1 — 2026-05-08 (사이클 7 wind-down — Arche)
+
+patch bump — *동작 변경 0*. 사이클 7 마지막 ship으로 inventory 두 건만 묶었습니다.
+
+- **executor Stage 1 split** (Telos): 인터프리터 코어 파일 `executor.py`(여전히 4,800줄대)에서 `clock` 도메인을 `executor_effects/clock.py` mixin으로 분리. `class Executor(EffectsMixin)` 패턴 도입 — 행동 면은 한 줄도 바뀌지 않고 844 tests 그대로 통과. 후속 Stage(`schedule`·`state`·`http` 등)가 같은 패턴으로 따라옵니다. RFC: [`docs/proposals/executor-split.md`](docs/proposals/executor-split.md).
+- **v1.72.0 CHANGELOG anchor** 헤더 catch-up.
+
+`pip install -U`로 받아도 코드는 똑같이 돕니다 — 인터프리터를 *읽고 수정하는* 사람(=AI 에이전트)에게만 변화가 있습니다.
+
+---
+
+## 2026-05-08 — executor Stage 1 split: clock 도메인을 mixin으로 (Telos, refactor)
+
+런타임 코어 파일 분할 RFC([`docs/proposals/executor-split.md`](docs/proposals/executor-split.md))의 Stage 1입니다. Stage 0(2026-04-30)이 utility 함수 9종을 별도 모듈로 옮긴 정리였다면, Stage 1은 *effect 도메인*을 옮기는 첫 패턴 검증입니다.
+
+- 새 디렉토리 `reference-impl/ail/runtime/executor_effects/`에 `__init__.py`(`EffectsMixin` aggregator) + `clock.py`(`_clock_now` 본문 그대로 이동) 생성.
+- `executor.py`의 `class Executor`가 `EffectsMixin`을 상속해 메서드 분리는 호출자에게 투명.
+- 사용자 관점 동작 변경 0, 테스트 844건 전체 통과.
+
+다음 Stage는 `schedule`·`state`·`http` 같은 다른 effect 도메인을 같은 패턴으로 분리. 4,800줄짜리 한 파일이 만드는 진화 마찰을 단계적으로 풉니다.
+
+---
+
 ## v1.72.0 — 2026-05-08 (사이클 7 첫 substrate release — Arche)
 
 minor bump — 새 effect 두 건이 처음으로 추가된, *양 팀(Stoa·Mneme) substrate 지원*이라는 사이클 7 mission framing의 첫 검증입니다. v1.71.2(사이클 6 closing — 문서·도구만)와 달리 이번엔 인터프리터의 행동 면이 늘었습니다.
