@@ -1150,6 +1150,36 @@ When in doubt: did the user's request mention time at all (every / 매 / 자동 
 3. Write a `view.html` that reads from the `/run` endpoint (or `/service`) to display live data
 4. Use `<action>ready_to_serve</action>` — the existing `/service` route IS the shareable web page
 
+**`schedule.sleep(seconds)` — short cooperative wait inside one tick or handler.**
+Different from `schedule.every`: `every` registers a *recurring* re-invocation; `sleep` pauses the *current* call. Use `sleep` for (a) condition-wait composition (e.g. poll inbox → if empty, `sleep(2)` → poll again, up to a max), (b) in-tick throttling (process 100 items → `sleep(0.5)` → next 100). `ok(true)` after the duration, `ok(false)` immediately for 0/negative (no-op so `sleep(remaining)` stays safe), `err("interrupted")` when the process is shutting down — handlers should unwind on interrupt rather than retry.
+
+```ail
+// Long-poll pattern: wait up to ~10s for a letter without busy-looping.
+fn wait_for_letter(deadline: Number) -> Any {{
+    inbox = perform http.get(inbox_url)
+    if has_messages(inbox.body) {{ return inbox }}
+    now = perform clock.now("unix")
+    if to_number(now) >= deadline {{ return error("timeout") }}
+    perform schedule.sleep(2)
+    return wait_for_letter(deadline)
+}}
+```
+
+**`state.list_keys(prefix)` — enumerate keys whose name starts with `prefix`, lex-asc sorted.** Use when you need to iterate a *namespace*, not a single key. Pair `state.write("delivered.<id>", ...)` with `state.list_keys("delivered.")` for retention sweeps; pair `state.write("subscriber.<name>", ...)` with `state.list_keys("subscriber.")` for fan-out. Empty prefix lists everything (expensive — keep prefixes narrow). Use a trailing `.` to exclude the bare prefix key itself; without it, the prefix key is included if present. `err("invalid_prefix")` for non-empty prefix outside the key charset.
+
+```ail
+// Retention sweep (returns list of pruned keys).
+fn prune_old_deliveries() -> [Text] {{
+    r = perform state.list_keys("delivered.")
+    if is_error(r) {{ return [] }}
+    pruned = []
+    for k in unwrap(r) {{
+        // ... read, check age, delete if stale ...
+    }}
+    return pruned
+}}
+```
+
 The user asking "모니터링 웹페이지 만들어줘" wants `schedule.every` + `state.write` + `view.html`, not a new HTTP server.
 
 **Interactive web apps (diary, todo, calendar, form-based tools) — the pattern you keep getting wrong:**

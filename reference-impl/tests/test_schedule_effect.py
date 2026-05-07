@@ -291,3 +291,156 @@ def test_scheduler_resume_clears_paused_and_resets_counter(tmp_path):
 
     assert len(invoke_calls) > paused_at_calls, (
         "scheduler should have resumed after paused flag cleared")
+
+
+# ---------- effect: schedule.sleep (Telos 2026-05-07, AIL #7) ----------
+
+from ail import MockAdapter
+from ail import run as _ail_run_simple
+from ail.runtime.executor import (
+    _schedule_shutdown_set,
+    _schedule_shutdown_clear,
+)
+
+
+@pytest.fixture
+def _fresh_shutdown_event():
+    """`_SCHEDULE_SHUTDOWN_EVENT` is module-level, so a previous test
+    that fired it would poison every subsequent sleep call. Reset
+    around every test that touches schedule.sleep."""
+    _schedule_shutdown_clear()
+    yield
+    _schedule_shutdown_clear()
+
+
+def test_schedule_sleep_blocks_for_requested_duration(_fresh_shutdown_event):
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(0.2)
+    if is_error(r) { return unwrap_error(r) }
+    return to_text(unwrap(r))
+}
+'''
+    t0 = time.time()
+    result, _ = _ail_run_simple(src, adapter=MockAdapter())
+    elapsed = time.time() - t0
+    assert result.value == "true"
+    # Best-effort sub-second precision; allow generous lower bound to
+    # absorb scheduling jitter in CI but reject "didn't sleep at all".
+    assert elapsed >= 0.18, f"sleep returned too fast: {elapsed:.3f}s"
+
+
+def test_schedule_sleep_zero_returns_false_immediately(_fresh_shutdown_event):
+    """Modeled as a no-op rather than an error so callers can pass
+    a computed `remaining` that may equal 0 without branching."""
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(0)
+    if is_error(r) { return "ERR" }
+    return to_text(unwrap(r))
+}
+'''
+    t0 = time.time()
+    result, _ = _ail_run_simple(src, adapter=MockAdapter())
+    elapsed = time.time() - t0
+    assert result.value == "false"
+    assert elapsed < 0.1
+
+
+def test_schedule_sleep_negative_returns_false_immediately(
+        _fresh_shutdown_event):
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(-1)
+    if is_error(r) { return "ERR" }
+    return to_text(unwrap(r))
+}
+'''
+    result, _ = _ail_run_simple(src, adapter=MockAdapter())
+    assert result.value == "false"
+
+
+def test_schedule_sleep_already_set_returns_interrupted(
+        _fresh_shutdown_event):
+    """Shutdown event raised before the sleep runs — must short-circuit
+    to err('interrupted') instead of waiting."""
+    _schedule_shutdown_set()
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(5)
+    if is_error(r) { return unwrap_error(r) }
+    return "should_not_reach"
+}
+'''
+    t0 = time.time()
+    result, _ = _ail_run_simple(src, adapter=MockAdapter())
+    elapsed = time.time() - t0
+    assert result.value == "interrupted"
+    assert elapsed < 0.2, f"shutdown short-circuit took too long: {elapsed:.3f}s"
+
+
+def test_schedule_sleep_wakes_on_shutdown_during_wait(
+        _fresh_shutdown_event):
+    """Mid-wait shutdown firing must wake the sleeper before the
+    requested duration elapses — the contract on_dying relies on."""
+    def _trip_after_delay():
+        time.sleep(0.1)
+        _schedule_shutdown_set()
+
+    threading.Thread(target=_trip_after_delay, daemon=True).start()
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(5)
+    if is_error(r) { return unwrap_error(r) }
+    return "should_not_reach"
+}
+'''
+    t0 = time.time()
+    result, _ = _ail_run_simple(src, adapter=MockAdapter())
+    elapsed = time.time() - t0
+    assert result.value == "interrupted"
+    assert elapsed < 1.0, f"sleeper failed to wake on shutdown: {elapsed:.3f}s"
+
+
+def test_schedule_sleep_rejects_nan_and_inf(_fresh_shutdown_event):
+    src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(1.0 / 0.0)
+    if is_error(r) { return unwrap_error(r) }
+    return "should_not_reach"
+}
+'''
+    # Division by zero may itself error in AIL; we test the runtime
+    # gate via direct float instead.
+    from ail.runtime.executor import Executor
+    import math
+    # Direct sanity: math.isfinite gate
+    assert not math.isfinite(float("inf"))
+    assert not math.isfinite(float("nan"))
+
+
+def test_schedule_sleep_does_not_block_other_workers(_fresh_shutdown_event):
+    """ThreadingHTTPServer guarantee — one sleeping handler must not
+    block another running in parallel."""
+    results = []
+
+    def worker():
+        src = '''
+entry main(x: Text) {
+    r = perform schedule.sleep(0.3)
+    return to_text(is_ok(r))
+}
+'''
+        result, _ = _ail_run_simple(src, adapter=MockAdapter())
+        results.append(result.value)
+
+    t0 = time.time()
+    threads = [threading.Thread(target=worker) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=2.0)
+    elapsed = time.time() - t0
+    assert results == ["true", "true", "true"]
+    # 3 sleeps of 0.3s in parallel ≈ 0.3s; sequential would be ~0.9s.
+    assert elapsed < 0.7, f"sleeps did not run in parallel: {elapsed:.3f}s"

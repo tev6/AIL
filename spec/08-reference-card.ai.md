@@ -660,6 +660,13 @@ Built-in effects:
   - `state.has(key: Text) -> Boolean` — true if the key has a value.
   - `state.delete(key: Text) -> Result[Boolean]` — ok(true) if
     removed, ok(false) if not present.
+  - `state.list_keys(prefix: Text) -> Result[[Text]]` — enumerate
+    keys whose name begins with `prefix`, lex-asc sorted. Empty
+    string lists every key. Snapshot semantics; concurrent writes
+    after the call are not reflected. `err("invalid_prefix")` for
+    a non-empty prefix that violates the key charset. Use a
+    trailing `.` (e.g. `"delivered."`) to enumerate a namespace
+    without including the namespace key itself.
 
     Keys are alphanumeric plus `_ - .`; anything else is rejected.
     State persists across requests inside an agentic project (under
@@ -715,6 +722,15 @@ Built-in effects:
     `state.write` so each tick stores a result and GET / reads it.
     Seconds in (0, 86400]. Outside `ail up` it returns an explanatory
     error. Latest call wins.
+  - `schedule.sleep(seconds: Number) -> Result[Boolean]` —
+    cooperative wait. `ok(true)` once the duration elapses;
+    `ok(false)` immediately for `0` or negative input (modeled as
+    a no-op so `schedule.sleep(remaining)` is safe when
+    `remaining` may compute to 0); `err("invalid duration")` for
+    NaN/Inf; `err("interrupted")` when the process is shutting
+    down. Use for long-poll / condition-wait composition (poll
+    inbox + sleep + re-poll) and for in-tick throttling. Other
+    workers in the same instance keep running.
   - `queue.push(msg: Record) -> Result[Text]` — enqueue a message
     onto the project's append-only queue (`<project>/.ail/queue.jsonl`).
     Returns the assigned `msg_id` (e.g. `"msg_0001"`). Any program in

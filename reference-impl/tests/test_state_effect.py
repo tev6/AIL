@@ -145,6 +145,115 @@ entry main(x: Text) {
     assert files == ["k.json"]
 
 
+# --- state.list_keys (Telos 2026-05-07, AIL #9) ---------------
+
+def test_state_list_keys_returns_sorted(tmp_path):
+    src = '''
+entry main(x: Text) {
+    perform state.write("foo.b", 2)
+    perform state.write("foo.a", 1)
+    r = perform state.list_keys("foo.")
+    if is_error(r) { return unwrap_error(r) }
+    keys = unwrap(r)
+    return join(keys, ",")
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert result.value == "foo.a,foo.b"
+
+
+def test_state_list_keys_empty_prefix_lists_all(tmp_path):
+    src = '''
+entry main(x: Text) {
+    perform state.write("alpha", 1)
+    perform state.write("beta", 2)
+    r = perform state.list_keys("")
+    if is_error(r) { return unwrap_error(r) }
+    keys = unwrap(r)
+    return join(keys, ",")
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert result.value == "alpha,beta"
+
+
+def test_state_list_keys_no_match_returns_empty(tmp_path):
+    src = '''
+entry main(x: Text) {
+    r = perform state.list_keys("nothing.")
+    if is_error(r) { return "ERR" }
+    keys = unwrap(r)
+    return to_text(length(keys))
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert result.value == "0"
+
+
+def test_state_list_keys_prefix_self_included(tmp_path):
+    """RFC AC-3 / S4: prefix without trailing separator includes the
+    prefix key itself if it exists, alongside descendants."""
+    src = '''
+entry main(x: Text) {
+    perform state.write("foo", 0)
+    perform state.write("foo.a", 1)
+    perform state.write("foo.b", 2)
+    r = perform state.list_keys("foo")
+    if is_error(r) { return unwrap_error(r) }
+    keys = unwrap(r)
+    return join(keys, ",")
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert result.value == "foo,foo.a,foo.b"
+
+
+def test_state_list_keys_trailing_separator_excludes_self(tmp_path):
+    """RFC §의미론 S3: prefix WITH trailing separator excludes the
+    bare prefix key — namespace-only enumeration."""
+    src = '''
+entry main(x: Text) {
+    perform state.write("foo", 0)
+    perform state.write("foo.a", 1)
+    r = perform state.list_keys("foo.")
+    if is_error(r) { return unwrap_error(r) }
+    keys = unwrap(r)
+    return join(keys, ",")
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert result.value == "foo.a"
+
+
+def test_state_list_keys_invalid_charset_errors(tmp_path):
+    """RFC AC-7 / S1: non-empty prefix with a forbidden character
+    returns err('invalid_prefix') without scanning the store."""
+    src = '''
+entry main(x: Text) {
+    r = perform state.list_keys("bad prefix!")
+    if is_error(r) { return unwrap_error(r) }
+    return "should_not_reach"
+}
+'''
+    result, _ = _run(src, state_dir=tmp_path)
+    assert "invalid_prefix" in result.value
+
+
+def test_state_list_keys_no_state_dir_errors():
+    """Outside an agentic project the effect cannot anchor anywhere."""
+    if "AIL_STATE_DIR" in os.environ:
+        del os.environ["AIL_STATE_DIR"]
+    src = '''
+entry main(x: Text) {
+    r = perform state.list_keys("")
+    if is_error(r) { return unwrap_error(r) }
+    return "should_not_reach"
+}
+'''
+    result, _ = _run(src)
+    assert "state directory not configured" in result.value
+
+
 def test_state_cannot_be_called_from_pure_fn():
     """All perform calls — including state — are forbidden in pure fn."""
     import pytest
