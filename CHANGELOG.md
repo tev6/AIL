@@ -4,6 +4,23 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.72.0 — 2026-05-08 (사이클 7 첫 substrate release — Arche)
+
+minor bump — 새 effect 두 건이 처음으로 추가된, *양 팀(Stoa·Mneme) substrate 지원*이라는 사이클 7 mission framing의 첫 검증입니다. v1.71.2(사이클 6 closing — 문서·도구만)와 달리 이번엔 인터프리터의 행동 면이 늘었습니다.
+
+이 사이클에 추가된 사용자 쪽 변화는 아래 항목들에 풀려 있습니다.
+
+- **`schedule.sleep` + `state.list_keys`** — Stoa의 long-poll·Mneme의 wake-up·retention 워커 패턴이 곧장 부를 수 있는 두 effect.
+- **Conformance harness 통합** — 세 런타임(Python·Go·Rust)이 같은 spec을 지키고 있는지를 한 CI runner가 6 잡으로 측정. Rule 18(D5)이 글에서 실행으로.
+- **`crypto.*` 4 conformance cases** — `sign` / `verify-pass` / `verify-tamper` / `random_bytes`. Python active, Go·Rust skip 마커로 future-proof.
+- **`onboard.sh` zero-touch 부트스트랩** — 신규 멤버 합류가 한 줄 명령으로.
+- **Audit doctrine D4·D5·D6** — Rule 17·18·19로 영구화(변경 종류별 gate / runtime parity 범위 / prompt ≤ spec × 1.5).
+- **사이클 7 mission framing** — Mneme 완성 / Stoa Phusis化 / AIL 양 팀 지원이 README와 CLAUDE.md에 박힘.
+
+`pip install -U ail-interpreter`로 받으면 두 새 effect가 즉시 사용 가능합니다.
+
+---
+
 ## 2026-05-08 — Conformance harness 통합 + `crypto.*` 4 cases — 두 코퍼스가 한 CI에서 합쳐짐 (Tekton, β trip)
 
 세 런타임(Python · Go · Rust)이 같은 의미를 지키고 있는지를 확인하던 두 개의 conformance 도구가 한 줄에 합쳐졌습니다. 그동안 `tests/conformance/run.sh`(inline `// OUTPUT:` 디렉티브)와 `reference-impl/tests/conformance/cases/`(sidecar 18 cases — `<stem>.expected` / `<stem>.input` / `<stem>.skip-<rt>`)는 서로 다른 형식이라 sidecar 18건이 cross-runtime CI 사각지대였습니다. 이번 트립으로 `run.sh`가 두 형식을 모두 인식하고, GitHub Actions(`.github/workflows/conformance.yml`)는 **3 런타임 × 2 코퍼스 = 6 잡 슬롯**으로 확장됐습니다. 어떤 런타임이 spec에서 슬그머니 벗어나면 같은 push에서 CI가 즉시 알립니다.
