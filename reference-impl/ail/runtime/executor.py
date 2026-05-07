@@ -103,6 +103,7 @@ def _schedule_shutdown_clear() -> None:
 
 
 from .calibration import Calibrator, default_calibrator
+from .executor_effects import EffectsMixin
 from ..stdlib import resolve as resolve_import, ImportResolutionError
 from pathlib import Path
 
@@ -135,7 +136,7 @@ _AIL_RUN_DEPTH_WARN = 3
 _AIL_RUN_DEPTH_LIMIT = 8
 
 
-class Executor:
+class Executor(EffectsMixin):
     def __init__(self, program: Program, adapter: ModelAdapter,
                  ask_human=None, metric_fn=None, approve_review=None,
                  calibrator: Optional[Calibrator] = None,
@@ -1483,35 +1484,7 @@ class Executor:
 
     # --- clock effect (L2 case study 2026-04-23 — fills the "hardcoded
     # timestamp" gap authors hit when INTENT.md mentions "현재 시각").
-    def _clock_now(self, args: list[ConfidentValue],
-                   kwargs: dict[str, ConfidentValue],
-                   origin: Origin) -> ConfidentValue:
-        """Return the current wall-clock time as an ISO-8601 UTC string.
-
-        Shape:
-            perform clock.now()            -> "2026-04-23T15:02:34Z"
-            perform clock.now("iso")       -> same as above
-            perform clock.now("unix")      -> "1776879154" (seconds since epoch)
-
-        Returning a plain Text (not a Result) because clock access does
-        not fail on any platform we support. The value carries an
-        effect-origin node so provenance queries can tell that a
-        timestamp came from clock.now rather than being hardcoded.
-
-        Deliberately no `tz` argument in v0 — non-developers won't
-        know to pass one, and UTC is the right default. A pure fn
-        library can format for a locale later.
-        """
-        import time
-        fmt = (args[0].value if args else "iso")
-        if isinstance(fmt, str):
-            fmt = fmt.lower()
-        if fmt in ("unix", "epoch", "seconds"):
-            value = str(int(time.time()))
-        else:
-            # iso / default
-            value = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        return ConfidentValue(value, 1.0, origin=origin)
+    # _clock_now lives in executor_effects/clock.py (Stage 1 of split RFC)
 
     # --- state effect (L2 v2 case study Gap #4 — cross-request memory).
     # State is process-restart-safe key/value persistence. Each key maps
