@@ -67,7 +67,8 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "file.read", "file.write",
     "clock.now",
     "state.read", "state.write", "state.has", "state.delete",
-    "schedule.every",
+    "state.list_keys",
+    "schedule.every", "schedule.sleep",
     "queue.push", "queue.take", "queue.done", "queue.retry",
     "env.read",
     "human.approve",
@@ -82,6 +83,25 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "mneme.save", "mneme.load", "mneme.log",
     "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
 })
+import threading as _threading
+
+# Process-wide shutdown event for cooperative wait (`schedule.sleep`).
+# Set by `_invoke_lifecycle_hook` immediately before `on_dying` is invoked,
+# so any thread blocked in `schedule.sleep` wakes with `err("interrupted")`
+# before lifecycle effects (mneme.save, log flush, …) try to run — avoids
+# deadlock if on_dying's body itself does not depend on the sleeping work.
+_SCHEDULE_SHUTDOWN_EVENT = _threading.Event()
+
+
+def _schedule_shutdown_set() -> None:
+    _SCHEDULE_SHUTDOWN_EVENT.set()
+
+
+def _schedule_shutdown_clear() -> None:
+    """Test/embed helper. Server processes never call this — they die."""
+    _SCHEDULE_SHUTDOWN_EVENT.clear()
+
+
 from .calibration import Calibrator, default_calibrator
 from ..stdlib import resolve as resolve_import, ImportResolutionError
 from pathlib import Path
@@ -698,8 +718,12 @@ class Executor:
             return self._state_has(args, kwargs, origin)
         if name == "state.delete":
             return self._state_delete(args, kwargs, origin)
+        if name == "state.list_keys":
+            return self._state_list_keys(args, kwargs, origin)
         if name == "schedule.every":
             return self._schedule_every(args, kwargs, origin)
+        if name == "schedule.sleep":
+            return self._schedule_sleep(args, kwargs, origin)
         if name == "queue.push":
             return self._queue_push(args, kwargs, origin)
         if name == "queue.take":
@@ -1627,6 +1651,52 @@ class Executor:
                 f"{type(e).__name__}: {e}", origin)
         return self._result_ok(True, origin)
 
+    def _state_list_keys(self, args, kwargs, origin):
+        """state.list_keys(prefix: Text) -> Result[[Text]]
+
+        Enumerate keys whose name begins with `prefix`, lex-asc sorted.
+        Empty prefix lists every key. Charset for non-empty prefixes
+        matches the regex used by `_state_key_path` so list / read /
+        write share one definition of legal keys; an invalid charset
+        returns `err("invalid_prefix")`.
+
+        Snapshot semantics: result reflects the directory at call time.
+        Concurrent writes after the call are not included; concurrent
+        deletes during the call may or may not be reflected (best
+        effort) — callers that follow up with `state.read` must handle
+        `err("not found")` for keys that vanished between the calls.
+
+        Per-file backing means cost is O(n) per call; for retention or
+        subscriber lists with thousands of keys this is acceptable for
+        L1 conformance. A SQLite/LMDB backing migration is filed as a
+        follow-up RFC and changes only this method's body.
+        """
+        import re
+        if not args:
+            return self._result_err(
+                "state.list_keys needs a prefix argument", origin)
+        prefix = args[0].value
+        if not isinstance(prefix, str):
+            return self._result_err("invalid_prefix", origin)
+        if prefix and not re.match(r"^[A-Za-z0-9_\-.]+$", prefix):
+            return self._result_err("invalid_prefix", origin)
+        d = self._state_dir()
+        if d is None:
+            return self._result_err(
+                "state directory not configured (set AIL_STATE_DIR or "
+                "run inside an agentic project via `ail up`)", origin)
+        keys = []
+        try:
+            for p in d.glob("*.json"):
+                key = p.stem
+                if key.startswith(prefix):
+                    keys.append(key)
+        except OSError as e:
+            return self._result_err(
+                f"could not list state: {type(e).__name__}: {e}", origin)
+        keys.sort()
+        return self._result_ok(keys, origin)
+
     # --- env effect — read OS environment variables as Result[Text].
     # Gives AIL programs a way to pick up credentials (Mastodon token,
     # webhook URL, API key) without hardcoding them in source. The
@@ -2100,6 +2170,44 @@ class Executor:
                 f"{type(e).__name__}: {e}", origin)
         return self._result_ok(True, origin)
 
+    def _schedule_sleep(self, args, kwargs, origin):
+        """schedule.sleep(seconds: Number) -> Result[Boolean]
+
+        Cooperative wait. Yields the current thread for `seconds`,
+        leaving other workers in a ThreadingHTTPServer untouched.
+
+        - `ok(true)`  — full duration elapsed.
+        - `ok(false)` — seconds was 0 or negative; returned immediately.
+                        Modeled as a no-op rather than an error so
+                        `schedule.sleep(remaining)` patterns stay clean
+                        when `remaining` may compute to 0.
+        - `err("invalid duration")` — NaN or Inf input.
+        - `err("interrupted")` — process is shutting down (on_dying or
+                                 on_death hook entered). Sleeping
+                                 worker should unwind cleanly.
+        """
+        import math
+        if not args:
+            return self._result_err(
+                "schedule.sleep needs a seconds argument", origin)
+        raw = args[0].value
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            return self._result_err(
+                f"schedule.sleep: seconds must be a number (got {raw!r})",
+                origin)
+        if not math.isfinite(seconds):
+            return self._result_err("invalid duration", origin)
+        if seconds <= 0:
+            return self._result_ok(False, origin)
+        if _SCHEDULE_SHUTDOWN_EVENT.is_set():
+            return self._result_err("interrupted", origin)
+        interrupted = _SCHEDULE_SHUTDOWN_EVENT.wait(seconds)
+        if interrupted:
+            return self._result_err("interrupted", origin)
+        return self._result_ok(True, origin)
+
     # --- queue.* (Telos + Arche 2026-04-29 rebuild) -------------
 
     def _queue_path(self, origin):
@@ -2289,6 +2397,13 @@ class Executor:
         on_dying, on_letter. Errors are logged, not raised — a broken
         hook must not kill the evolve loop.
         """
+        # T1 review (Telos 2026-05-07): wake any thread blocked in
+        # schedule.sleep BEFORE on_dying runs, so its body can call
+        # effects without contending with sleeping workers. on_death
+        # is `pure fn` so it does not need the same guarantee, but
+        # setting both is harmless and the pattern stays simple.
+        if hook_name in ("on_dying", "on_death"):
+            _SCHEDULE_SHUTDOWN_EVENT.set()
         if hook_name not in self.fns:
             return None
         try:
