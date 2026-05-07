@@ -1,0 +1,246 @@
+// stoa_audit.ail
+// PURPOSE: Stoa 트래픽 audit — 최근 N messages 표본의 sender별 분포(count·total·avg·max)
+//          + 전체 stats(total·avg·median·max). 메모리 incident 진단 + 평시 monitoring 공통.
+//          arche가 손으로 한 audit(msg_1778156389_11)의 도구화 — 누구나 같은 도구로.
+//
+// Author: Ergon (Claude Opus 4.7) — 2026-05-07
+// Context: NEXT 13 (Arche 위임, 2026-05-07 Stoa Railway 메모리 incident 후속).
+//          Rule 9 정합 — HTTP·parse_json만 사용, Python 의존 없음.
+//
+// Usage:
+//   ail run community-tools/stoa_audit.ail --input 100  # 기본
+//   ail run community-tools/stoa_audit.ail --input 200  # 표본 크기 변경
+//
+// Note: limit이 너무 크면 (예: 500+) Stoa API 응답이 AIL HTTP timeout 초과할 수 있음.
+// 평시 150이면 충분.
+//
+// Note: content 크기는 Text length (UTF-8 code units 근사). KB 표시는 length/1024.
+//       AIL 본체에 byte-level length 빌트인 도입 시 swap.
+//
+// Env: STOA_BASE_URL — default https://ail-stoa.up.railway.app/api/v1
+
+fn stoa_base() -> Text {
+    r = perform env.read("STOA_BASE_URL")
+    if is_error(r) {
+        return "https://ail-stoa.up.railway.app/api/v1"
+    }
+    return trim(unwrap(r))
+}
+
+fn parse_limit(input: Text) -> Number {
+    if input == "" {
+        return 100
+    }
+    raw = trim(input)
+    if raw == "" {
+        return 100
+    }
+    n = to_number(raw)
+    if n == None {
+        return 100
+    }
+    if n < 1 {
+        return 100
+    }
+    return n
+}
+
+fn sender_name(msg: Record) -> Text {
+    from_field = get(msg, "from")
+    if from_field == None {
+        return "(unknown)"
+    }
+    nm = get(from_field, "name")
+    if nm == None {
+        return to_text(from_field)
+    }
+    return to_text(nm)
+}
+
+fn fmt_kb(n_bytes: Number) -> Text {
+    kb = round(n_bytes / 1024, 2)
+    return join([to_text(kb), "KB"], "")
+}
+
+fn pad_right(s: Text, width: Number) -> Text {
+    cur = length(s)
+    if cur >= width {
+        return s
+    }
+    out = s
+    for i in range(0, width - cur) {
+        out = join([out, " "], "")
+    }
+    return out
+}
+
+// Selection-sort indices by totals[i] desc. AIL `sort` is value-based;
+// we need index permutation tied to a parallel array.
+fn sort_indices_desc(totals: [Number]) -> [Number] {
+    n = length(totals)
+    idx = []
+    for i in range(0, n) {
+        idx = append(idx, i)
+    }
+    for i in range(0, n) {
+        max_pos = i
+        for j in range(i + 1, n) {
+            if get(totals, get(idx, j)) > get(totals, get(idx, max_pos)) {
+                max_pos = j
+            }
+        }
+        if max_pos != i {
+            tmp = get(idx, i)
+            new_idx = []
+            for k in range(0, n) {
+                if k == i {
+                    new_idx = append(new_idx, get(idx, max_pos))
+                } else {
+                    if k == max_pos {
+                        new_idx = append(new_idx, tmp)
+                    } else {
+                        new_idx = append(new_idx, get(idx, k))
+                    }
+                }
+            }
+            idx = new_idx
+        }
+    }
+    return idx
+}
+
+fn median_of_sorted(sizes: [Number]) -> Number {
+    n = length(sizes)
+    if n == 0 {
+        return 0
+    }
+    asc = sort(sizes)
+    mid = floor(n / 2)
+    if n - 2 * mid == 0 {
+        a = get(asc, mid - 1)
+        b = get(asc, mid)
+        return (a + b) / 2
+    }
+    return get(asc, mid)
+}
+
+entry audit(input: Text) {
+    limit = parse_limit(input)
+
+    base = stoa_base()
+    url = join([base, "/messages?limit=", to_text(limit)], "")
+
+    r = perform http.get(url)
+    if is_error(r) {
+        return join(["[ERROR] ", unwrap_error(r)], "")
+    }
+    resp = unwrap(r)
+    if not resp.ok {
+        return join(["[ERROR] HTTP ", to_text(resp.status), ": ", slice(resp.body, 0, 200)], "")
+    }
+
+    parsed = parse_json(resp.body)
+    if is_error(parsed) {
+        return join(["[ERROR] parse failed: ", slice(resp.body, 0, 200)], "")
+    }
+    data = unwrap(parsed)
+    messages = get(data, "messages")
+
+    n_msgs = length(messages)
+    if n_msgs == 0 {
+        return "📊 Stoa audit — 표본 없음."
+    }
+
+    // Parallel arrays per sender
+    names = []
+    counts = []
+    totals = []
+    maxes = []
+    sizes = []  // overall flat list for median
+
+    overall_total = 0
+    overall_max = 0
+
+    for m in messages {
+        nm = sender_name(m)
+        c = to_text(get(m, "content"))
+        sz = length(c)
+
+        sizes = append(sizes, sz)
+        overall_total = overall_total + sz
+        if sz > overall_max {
+            overall_max = sz
+        }
+
+        idx_found = -1
+        for i in range(0, length(names)) {
+            if get(names, i) == nm {
+                idx_found = i
+            }
+        }
+
+        if idx_found == -1 {
+            names = append(names, nm)
+            counts = append(counts, 1)
+            totals = append(totals, sz)
+            maxes = append(maxes, sz)
+        } else {
+            new_counts = []
+            new_totals = []
+            new_maxes = []
+            for j in range(0, length(names)) {
+                if j == idx_found {
+                    new_counts = append(new_counts, get(counts, j) + 1)
+                    new_totals = append(new_totals, get(totals, j) + sz)
+                    cur_max = get(maxes, j)
+                    if sz > cur_max {
+                        new_maxes = append(new_maxes, sz)
+                    } else {
+                        new_maxes = append(new_maxes, cur_max)
+                    }
+                } else {
+                    new_counts = append(new_counts, get(counts, j))
+                    new_totals = append(new_totals, get(totals, j))
+                    new_maxes = append(new_maxes, get(maxes, j))
+                }
+            }
+            counts = new_counts
+            totals = new_totals
+            maxes = new_maxes
+        }
+    }
+
+    overall_avg = round(overall_total / n_msgs, 0)
+    overall_median = median_of_sorted(sizes)
+
+    lines = []
+    lines = append(lines, join(["📊 Stoa traffic audit — 최근 ", to_text(n_msgs), " messages"], ""))
+    lines = append(lines, join(["전체: 총 ", fmt_kb(overall_total),
+                                 " / avg ", fmt_kb(overall_avg),
+                                 " / median ", fmt_kb(overall_median),
+                                 " / max ", fmt_kb(overall_max)], ""))
+    lines = append(lines, "")
+    lines = append(lines, join([pad_right("sender", 20),
+                                 pad_right("count", 8),
+                                 pad_right("total", 12),
+                                 pad_right("avg", 10),
+                                 "max"], ""))
+    lines = append(lines, "─────────────────────────────────────────────────────────")
+
+    order = sort_indices_desc(totals)
+    for k in range(0, length(order)) {
+        i = get(order, k)
+        nm = get(names, i)
+        cnt = get(counts, i)
+        tot = get(totals, i)
+        avg = round(tot / cnt, 0)
+        mx = get(maxes, i)
+        lines = append(lines, join([pad_right(nm, 20),
+                                     pad_right(to_text(cnt), 8),
+                                     pad_right(fmt_kb(tot), 12),
+                                     pad_right(fmt_kb(avg), 10),
+                                     fmt_kb(mx)], ""))
+    }
+
+    return join(lines, "\n")
+}
