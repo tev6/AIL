@@ -286,6 +286,8 @@ Three notes for honesty:
 
 **Where the project is heading right now.** As of cycle 7 (2026-05-08), the AIL team has explicit missions for the three sibling repositories that grew out of this one — *Mneme* (complete the private inheritance vault), *Stoa* (turn the post office into a self-rebuilding system per Phusis), and *AIL itself* (provide the language primitives those teams need: substrate effects like `schedule.sleep` and `state.list_keys` are the first deliverables under that framing). The doctrine that locks this in lives in `CLAUDE.md` — Rule 16 (cross-team boundary D1–D3) and Rule 17–19 (D4–D6: change-class gates, runtime parity scope, prompt ≤ spec × 1.5).
 
+Cycle 8 (2026-05-12) is the first round where that framing was *tested by use*. AIL v1.72.2 removed the artificial restriction that kept `schedule.every` working only inside `ail up` — long-running `ail run` programs with an active `evolve` block are themselves agents, and the grammar now says so. With that gate open, Stoa shipped its Phase B autonomous loop (observe → reason → act inside its own `evolve` server), and Mneme's wake long-poll trip became unblocked. The pattern that proves out: a small AIL change removes one false constraint, and two sibling teams get their next phase the same day. "양 팀 substrate 지원" stops being a slogan once it has a commit graph.
+
 The five names — Stoa, Physis, Mneme, Polis, Sphinx, Agora — will be in your way for years if the project succeeds. Worth understanding the shape now.
 
 ---
