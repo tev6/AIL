@@ -490,8 +490,11 @@ class Executor(EffectsMixin):
                             denied_in_ctx.add(str(d))
                     elif isinstance(raw, str):
                         denied_in_ctx.add(raw)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "context.deny_effects iteration failed for "
+                    "effect=%s: %r", stmt.effect, e)
         if stmt.effect in denied_in_ctx:
             self.trace.record("perform_denied",
                               effect=stmt.effect,
@@ -677,8 +680,10 @@ class Executor(EffectsMixin):
                     else:
                         preview = " " + _truncate(v, 100)
                 self.log_callback(f"→ perform {name}{preview}")
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "log_callback failed for perform %s: %r", name, e)
 
         if name in ("human_ask", "ask_human"):
             question = (args[0].value if args else kwargs.get("question", ConfidentValue("?", 1.0)).value)
@@ -1376,7 +1381,10 @@ class Executor(EffectsMixin):
                 return None
             try:
                 return p.read_text(encoding="utf-8")
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "mneme.load: could not read %s: %r", p, e)
                 return None
 
         rec = {
@@ -2365,8 +2373,13 @@ class Executor(EffectsMixin):
         if counter_path.exists():
             try:
                 return _json.loads(counter_path.read_text())["generation"]
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "physis: _counter.json parse failed for "
+                    "evolve=%s (%s): %r — falling back to gen 1, "
+                    "evolution state may be corrupted",
+                    evolve_name, counter_path, e)
         return 1
 
     def _invoke_lifecycle_hook(self, hook_name: str,
@@ -2660,8 +2673,16 @@ class Executor(EffectsMixin):
                                 _json.dumps({"received": True,
                                              "id": body_obj["id"]}))
                             handled_as_letter = True
-                    except Exception:
-                        # Not parseable as a letter — fall through.
+                    except Exception as e:
+                        # Not parseable as a letter — fall through to
+                        # the user's `when` handler. Log so a
+                        # corrupted POST /inbox payload still leaves
+                        # a trail in case the letter was real but
+                        # malformed.
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "on_letter dispatch: payload not parseable "
+                            "as letter, falling through: %r", e)
                         handled_as_letter = False
 
                 if handled_as_letter:
@@ -3795,7 +3816,14 @@ class Executor(EffectsMixin):
                                       origin=merged_origin)
             try:
                 out = _apply_binop(expr.op, left.value, right.value)
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "BinaryOp %r failed: %s %s %s — %r "
+                    "(returning None downstream)",
+                    expr.op,
+                    type(left.value).__name__, expr.op,
+                    type(right.value).__name__, e)
                 out = None
             return ConfidentValue(out, min(left.confidence, right.confidence),
                                   origin=merged_origin)
@@ -4692,8 +4720,11 @@ class Executor(EffectsMixin):
         if self.log_callback is not None:
             try:
                 self.log_callback(f"→ intent {intent.name}")
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "log_callback failed for intent %s: %r",
+                    intent.name, e)
         self.trace.record("intent_call", name=intent.name,
                           args=[a.value for a in args])
         self.trace.enter()
