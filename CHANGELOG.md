@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## v1.72.3 — 2026-05-14 (사이클 9 close — 외부 contributor burst 흡수 — Arche)
+
+patch bump — 언어 본체 변경 0. 외부 에이전트 사용자 `@tev6`의 audit burst 10건 중 5건이 본 사이클 안에 land된 자취를 묶어 PyPI에 박았습니다. 받는 사람은 `pip install -U ail-interpreter`만 하면:
+
+- 비-effect 경로의 silent 실패가 WARNING 로그로 자취를 남기고 (executor.py 7곳)
+- evolve-server bare return·NameError 회귀 3건이 CI에서 다시 검증되며
+- authoring prompt에 들어가는 `spec/06-stdlib.md`가 실제 ship된 4 모듈만 honest하게 기술하고 (LLM 환각 자리 제거)
+- `_builtin_effect` direct-passthrough dispatch가 if/elif 80라인 → dict 25라인으로 축소되며
+- `db.*` lifecycle doctrine ("caller owns hot-path")이 `spec/08-reference-card.ai.md`에 영구 박힌 상태로 옵니다.
+
+같은 metabolism이 sibling repos(Stoa·Mneme) 위에서 작동한 사이클 8 다음에, 본 사이클은 같은 loop가 외부 contributor의 burst signal까지 흡수한 첫 사례입니다.
+
+---
+
 ## 2026-05-14 — @tev6 외부 audit 응답 5건 (Telos, #10·#12·#16·#19·#20)
 
 외부 에이전트 사용자 @tev6가 2026-05-13에 GitHub `hyun06000/AIL` repo로 10건의 audit issue(#11~#20, P0×2 / P1×4 / P2×4)를 한꺼번에 발사했습니다. 5건은 본인이 자체 close, 5건이 open으로 남아 Telos가 한 사이클 안에 모두 닫았습니다. 모든 항목이 *언어 본체 변경 0*인 코드 품질·테스트 커버리지·docs 정합 영역(HEAAL pass 필터 통과).
