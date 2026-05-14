@@ -1,0 +1,467 @@
+# spec/effects.canonical.yaml — single source of truth for AIL effect surface
+#
+# RFC: docs/proposals/effect-conformance.md (D7 doctrine, cycle 10)
+# Author: Tekton, 2026-05-14
+#
+# Schema:
+#   name:        canonical effect name (scope.action)
+#   tier:        core | substrate
+#   signature:   AIL type signature
+#   determinism: replayable | replayable_with_seed | ledger | approval_record | external
+#   side_effect: none | state_write | state_delete | schedule_register | subprogram_launch |
+#                log_emit | network_io | fs_write | external_input | external_io
+#   capabilities: [Text]  — capability tokens for `with context allow_effects`
+#   since:        AIL version that introduced this effect
+#
+# Runtime contract:
+#   - All three runtimes (Python / Go / Rust) MUST register every `tier: core` effect
+#     and pass the conformance corpus (Phase 2+).
+#   - `tier: substrate` effects: Python is reference. Go/Rust expose signature as
+#     `NotImplementedHost` stub (Phase 4).
+#   - Boot fails if an effect dispatched at runtime is not present in this file.
+
+# ============================================================================
+# CORE — 16 entries / 8 scopes (Phase 0 freeze, Telos pass 2026-05-14)
+# ============================================================================
+
+- name: clock.now
+  tier: core
+  signature: "() -> Result[Number]"
+  determinism: replayable
+  side_effect: none
+  capabilities: ["clock"]
+  since: "1.0.0"
+
+- name: clock.epoch_ms
+  tier: core
+  signature: "() -> Result[Number]"
+  determinism: replayable
+  side_effect: none
+  capabilities: ["clock"]
+  since: "1.0.0"
+
+- name: state.read
+  tier: core
+  signature: "(key: Text) -> Result[Any]"
+  determinism: ledger
+  side_effect: none
+  capabilities: ["state"]
+  since: "1.0.0"
+
+- name: state.write
+  tier: core
+  signature: "(key: Text, value: Any) -> Result[Boolean]"
+  determinism: ledger
+  side_effect: state_write
+  capabilities: ["state"]
+  since: "1.0.0"
+
+- name: state.has
+  tier: core
+  signature: "(key: Text) -> Result[Boolean]"
+  determinism: ledger
+  side_effect: none
+  capabilities: ["state"]
+  since: "1.0.0"
+
+- name: state.delete
+  tier: core
+  signature: "(key: Text) -> Result[Boolean]"
+  determinism: ledger
+  side_effect: state_delete
+  capabilities: ["state"]
+  since: "1.0.0"
+
+- name: state.list_keys
+  tier: core
+  signature: "(prefix: Text) -> Result[[Text]]"
+  determinism: ledger
+  side_effect: none
+  capabilities: ["state"]
+  since: "1.72.0"
+
+- name: env.read
+  tier: core
+  signature: "(name: Text) -> Result[Text]"
+  determinism: replayable
+  side_effect: none
+  capabilities: ["env"]
+  since: "1.0.0"
+
+- name: schedule.sleep
+  tier: core
+  signature: "(seconds: Number) -> Result[Boolean]"
+  determinism: replayable_with_seed
+  side_effect: none
+  capabilities: ["schedule"]
+  since: "1.72.0"
+
+- name: schedule.every
+  tier: core
+  signature: "(interval: Text, action: Fn) -> Result[Boolean]"
+  determinism: replayable_with_seed
+  side_effect: schedule_register
+  capabilities: ["schedule"]
+  since: "1.10.0"
+
+- name: file.read
+  tier: core
+  signature: "(path: Text) -> Result[Text]"
+  determinism: replayable
+  side_effect: none
+  capabilities: ["file"]
+  since: "1.0.0"
+
+- name: file.write
+  tier: core
+  signature: "(path: Text, content: Text) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: fs_write
+  capabilities: ["file"]
+  since: "1.0.0"
+
+- name: file.delete
+  tier: core
+  signature: "(path: Text) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: fs_write
+  capabilities: ["file"]
+  since: "1.0.0"
+
+- name: file.exists
+  tier: core
+  signature: "(path: Text) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: none
+  capabilities: ["file"]
+  since: "1.0.0"
+
+# log.* is currently rendered via host logger in Python; spec-level semantics
+# is "fixture buffer is replayable". Production sink routing is a host config
+# concern, not part of the language surface.
+- name: log.info
+  tier: core
+  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: log_emit
+  capabilities: ["log"]
+  since: "1.0.0"
+
+- name: log.warn
+  tier: core
+  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: log_emit
+  capabilities: ["log"]
+  since: "1.0.0"
+
+- name: log.error
+  tier: core
+  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: log_emit
+  capabilities: ["log"]
+  since: "1.0.0"
+
+- name: log.debug
+  tier: core
+  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
+  determinism: replayable
+  side_effect: log_emit
+  capabilities: ["log"]
+  since: "1.0.0"
+
+- name: ail.run
+  tier: core
+  signature: "(path: Text, input: Any?) -> Result[Any]"
+  determinism: replayable
+  side_effect: subprogram_launch
+  capabilities: ["ail"]
+  since: "1.20.0"
+
+# ============================================================================
+# SUBSTRATE — Python reference, Go/Rust = NotImplementedHost stub
+# ============================================================================
+
+- name: http.get
+  tier: substrate
+  signature: "(url: Text, headers: Map?) -> Result[Map]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: http.post
+  tier: substrate
+  signature: "(url: Text, body: Text, headers: Map?) -> Result[Map]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: http.post_json
+  tier: substrate
+  signature: "(url: Text, body: Any, headers: Map?) -> Result[Map]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: http.put_json
+  tier: substrate
+  signature: "(url: Text, body: Any, headers: Map?) -> Result[Map]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: http.respond
+  tier: substrate
+  signature: "(status: Number, body: Any) -> Result[Boolean]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: http.graphql
+  tier: substrate
+  signature: "(url: Text, query: Text, variables: Map?) -> Result[Map]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["network"]
+  since: "1.10.0"
+
+- name: gh.run
+  tier: substrate
+  signature: "(args: [Text]) -> Result[Map]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["gh"]
+  since: "1.10.0"
+
+- name: gh.pr_create
+  tier: substrate
+  signature: "(title: Text, body: Text, base: Text?) -> Result[Map]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["gh", "network"]
+  since: "1.10.0"
+
+- name: gh.pr_list
+  tier: substrate
+  signature: "(filters: Map?) -> Result[[Map]]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["gh", "network"]
+  since: "1.10.0"
+
+- name: gh.pr_view
+  tier: substrate
+  signature: "(number: Number) -> Result[Map]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["gh", "network"]
+  since: "1.10.0"
+
+- name: gh.issue_list
+  tier: substrate
+  signature: "(filters: Map?) -> Result[[Map]]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["gh", "network"]
+  since: "1.10.0"
+
+- name: git.commit
+  tier: substrate
+  signature: "(message: Text) -> Result[Text]"
+  determinism: external
+  side_effect: fs_write
+  capabilities: ["git"]
+  since: "1.10.0"
+
+- name: git.push
+  tier: substrate
+  signature: "(remote: Text?, branch: Text?) -> Result[Boolean]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["git", "network"]
+  since: "1.10.0"
+
+- name: git.pull
+  tier: substrate
+  signature: "(remote: Text?, branch: Text?) -> Result[Boolean]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["git", "network"]
+  since: "1.10.0"
+
+- name: db.query
+  tier: substrate
+  signature: "(sql: Text, params: [Any]?) -> Result[[Map]]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["db"]
+  since: "1.30.0"
+
+- name: db.execute
+  tier: substrate
+  signature: "(sql: Text, params: [Any]?) -> Result[Number]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["db"]
+  since: "1.30.0"
+
+- name: email.send
+  tier: substrate
+  signature: "(to: Text, subject: Text, body: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["email", "network"]
+  since: "1.40.0"
+
+- name: queue.push
+  tier: substrate
+  signature: "(name: Text, item: Any) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["queue"]
+  since: "1.40.0"
+
+- name: queue.take
+  tier: substrate
+  signature: "(name: Text) -> Result[Any]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["queue"]
+  since: "1.40.0"
+
+- name: queue.done
+  tier: substrate
+  signature: "(name: Text, item_id: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["queue"]
+  since: "1.40.0"
+
+- name: queue.retry
+  tier: substrate
+  signature: "(name: Text, item_id: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["queue"]
+  since: "1.40.0"
+
+- name: mneme.save
+  tier: substrate
+  signature: "(owner: Text, kind: Text, value: Any) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["mneme", "network"]
+  since: "1.50.0"
+
+- name: mneme.load
+  tier: substrate
+  signature: "(owner: Text, kind: Text) -> Result[Any]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["mneme", "network"]
+  since: "1.50.0"
+
+- name: mneme.log
+  tier: substrate
+  signature: "(owner: Text, event: Map) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["mneme", "network"]
+  since: "1.50.0"
+
+- name: crypto.keygen
+  tier: substrate
+  signature: "() -> Result[Map]"
+  determinism: external
+  side_effect: external_input
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto.sign
+  tier: substrate
+  signature: "(message: Text, secret_key: Text) -> Result[Text]"
+  determinism: external
+  side_effect: none
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto.verify
+  tier: substrate
+  signature: "(message: Text, signature: Text, public_key: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: none
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto.random_bytes
+  tier: substrate
+  signature: "(n: Number) -> Result[Text]"
+  determinism: external
+  side_effect: external_input
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: secrets.get
+  tier: substrate
+  signature: "(name: Text) -> Result[Text]"
+  determinism: external
+  side_effect: external_input
+  capabilities: ["secrets"]
+  since: "1.40.0"
+
+- name: secrets.set
+  tier: substrate
+  signature: "(name: Text, value: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["secrets"]
+  since: "1.40.0"
+
+- name: secrets.list
+  tier: substrate
+  signature: "() -> Result[[Text]]"
+  determinism: external
+  side_effect: none
+  capabilities: ["secrets"]
+  since: "1.40.0"
+
+- name: secrets.revoke
+  tier: substrate
+  signature: "(name: Text) -> Result[Boolean]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["secrets"]
+  since: "1.40.0"
+
+- name: human.approve
+  tier: substrate
+  signature: "(plan: Text, notify: [Text]?) -> Result[Boolean]"
+  determinism: approval_record
+  side_effect: external_input
+  capabilities: ["human", "network"]
+  since: "1.50.0"
+
+- name: image.embed
+  tier: substrate
+  signature: "(path: Text) -> Result[[Number]]"
+  determinism: external
+  side_effect: external_io
+  capabilities: ["image"]
+  since: "1.40.0"
+
+- name: search.web
+  tier: substrate
+  signature: "(query: Text) -> Result[[Map]]"
+  determinism: external
+  side_effect: network_io
+  capabilities: ["search", "network"]
+  since: "1.40.0"
+
+# stoa.* — to be added when Sphinx authentication lands (Ergon §6.4 nit 1).
+# Reserved scope; currently no entries.
