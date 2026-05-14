@@ -4,6 +4,43 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-14 — Effect-conformance harness Phase 0 (Tekton, RFC D7)
+
+오늘까지 AIL의 effect 표면은 **이중 진실**이었습니다 — Python executor에는 38개 effect가 등록되어 있고 (`state.*`/`schedule.*`/`http.*`/`gh.*`/...), Go·Rust 런타임에는 0개. CORE PHILOSOPHY #6 "두 런타임이 합의해야 기능"이 슬로건으로만 살아 있고 "AIL is a Python harness"라는 회귀 신호가 코드에 박혀 있던 자리였습니다.
+
+이 자리를 닫기 위해 **D7 doctrine** + **[`spec/effects.canonical.yaml`](spec/effects.canonical.yaml)** + **[effect-conformance RFC](docs/proposals/effect-conformance.md)** 가 한 사이클에 같이 land했습니다.
+
+**무엇이 달라지는가:**
+
+- **`spec/effects.canonical.yaml`이 effect 표면의 단일 진실이 됩니다.** 42개 effect (core 12 / substrate 30) 각각의 시그니처·tier·determinism·side_effect·capabilities·since 버전이 한 파일에 박혀 있고, 사양·런타임·conformance harness 모두 이 한 파일을 읽습니다. yaml에 없는데 런타임 dispatch가 있으면 빌드 실패, 반대도 마찬가지 (양방향 static gate).
+
+- **Effect가 두 tier로 갈립니다.**
+  - **Core (12개)** — `clock.now` · `state.{read,write,has,delete,list_keys}` · `env.read` · `schedule.{sleep,every}` · `file.{read,write}` · `ail.run`. *결정성·재현성·언어 의미론 직결*. fixture만 주입하면 deterministic replay 가능. **세 런타임(Python·Go·Rust) 모두 구현 의무.**
+  - **Substrate (30개)** — `http.*`/`gh.*`/`git.*`/`mneme.*`/`db.*`/`email.*`/`queue.*`/`secrets.*`/`human.approve`/`image.embed`/`search.web`/`stoa.*`. *호스트 통합·외부 시스템 의존*. Python reference만 강제, Go/Rust는 `NotImplementedHost` stub으로 명시 에러.
+
+  판별 기준: "이 effect 없이 deterministic replay와 Phase-0 학습 코퍼스 작성이 가능한가". 가능하면 substrate.
+
+- **`crypto.*`는 effect가 아니라 builtin입니다** (Rule 16 D2). canonical envelope·서명 owner는 Stoa 사이드카가 가져가고, AIL은 primitive(ed25519 sign/verify/keygen, random_bytes)만 보유. 별도 `spec/builtins.canonical.yaml`은 사이클 11+ RFC 자리.
+
+- **`allow_effects` context 필드 grammar 합의** (`spec/02-context.md §9b`). Context가 capability *grant*가 아니라 deny-first *gate* — `trust_level`(§9a)와 동일 패턴.
+  ```ail
+  context intent_safe extends default {
+      allow_effects: ["clock.*", "state.*", "log.*", "http.get"]
+  }
+  with context intent_safe {
+      perform http.post("...")  // Result-error("effect not allowed")
+  }
+  ```
+  와일드카드 `<scope>.*`는 core tier만 허용 (substrate는 enumeration만 — 새 substrate effect 추가 시 의도 외 자동 허용 방지).
+
+- **Conformance harness 도면.** 양방향 static gate(yaml ↔ runtime 1:1) + dynamic gate(`conformance/corpus/*.ail` 12 케이스, 세 런타임 출력+ledger byte-identical)가 사이클 12~13에 CI에 켜질 자리.
+
+**이번 land는 spec·RFC·yaml만, 동작 변경 0**. PyPI cut 없음. 하지만 다음 사이클들의 자취 — Python codegen 마이그레이션(사이클 11), Go runtime core 16개 effect + corpus(12~13), Rust runtime + `allow_effects` grammar(14+) — 이 한 파일에 박힌 표면 위에서 굴러갑니다. Tekton의 원 미션(Rust 이식)도 Phase 2/3에 자연스럽게 fold됩니다.
+
+CAST 4인 정합 (D7 doctrine pass: arche · ergon · telos · tekton, 양방향 static gate · §6.4 substrate gate · §6.3 wildcard 정책 모두 land 전 review). 사이클 10 가장 무거운 land.
+
+---
+
 ## v1.72.3 — 2026-05-14 (사이클 9 close — 외부 contributor burst 흡수 — Arche)
 
 patch bump — 언어 본체 변경 0. 외부 에이전트 사용자 `@tev6`의 audit burst 10건 중 5건이 본 사이클 안에 land된 자취를 묶어 PyPI에 박았습니다. 받는 사람은 `pip install -U ail-interpreter`만 하면:
