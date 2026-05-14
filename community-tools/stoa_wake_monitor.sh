@@ -3,13 +3,13 @@
 #
 # 사용:
 #   STOA_NAME=Admin STOA_BASE_URL=https://ail-stoa.up.railway.app \
-#   STOA_WAKE_INTERVAL_S=3 \
+#   STOA_WAKE_INTERVAL_S=15 \
 #   bash community-tools/stoa_wake_monitor.sh
 #
 # 또는 Claude Code Monitor 도구로:
 #   Monitor(
-#     command="STOA_NAME=Admin bash community-tools/stoa_wake_monitor.sh",
-#     description="Stoa 새 편지 감지 (3초 폴링)",
+#     command="STOA_NAME=Admin STOA_WAKE_INTERVAL_S=15 bash community-tools/stoa_wake_monitor.sh",
+#     description="Stoa 새 편지 감지 (15초 폴링)",
 #     persistent=true
 #   )
 #
@@ -24,7 +24,9 @@
 #                              자리. 2026-05-07 Marcus 사고 직접 학습 — letter catch 0.)
 #                        운영 시 항상 `STOA_NAME` 명시. fallback 신뢰 금지.
 #   STOA_BASE_URL        (선택) default: https://ail-stoa.up.railway.app
-#   STOA_WAKE_INTERVAL_S (선택) default: 3 (초)
+#   STOA_WAKE_INTERVAL_S (선택) default: 15 (초). 사이클 8 doctrine (incident-2026-05-12).
+#                        옛 default 3은 폴링 부하 가속으로 Stoa#12 server-side leak rate 5×
+#                        가산 source. 디버깅 시점만 짧게.
 #   STOA_SINCE_FILE      (선택) default: .stoa-since-<name>. since_id 영속화 path.
 #
 # 출력:
@@ -38,7 +40,7 @@ set -uo pipefail
 
 NAME="${STOA_NAME:-$(git config --worktree ail.identity 2>/dev/null || git config ail.identity 2>/dev/null || echo unknown-host)}"
 BASE="${STOA_BASE_URL:-https://ail-stoa.up.railway.app}"
-INTERVAL="${STOA_WAKE_INTERVAL_S:-3}"
+INTERVAL="${STOA_WAKE_INTERVAL_S:-15}"
 SINCE_FILE="${STOA_SINCE_FILE:-.stoa-since-$NAME}"
 
 # Restore since_id if exists, else "" (= 첫 부트 → 폴링 첫 사이클에 전체 backlog drain).
