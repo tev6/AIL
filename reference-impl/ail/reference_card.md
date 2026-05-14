@@ -814,6 +814,17 @@ Built-in effects:
     — a list of rows where each row is a list of column values. Empty
     result is `ok([])`. Column names are not returned. Use for indexed
     reads (e.g., `since_id` polling) instead of loading a whole JSON blob.
+
+    **Lifecycle doctrine (AIL #10):** each `db.execute` / `db.query` call
+    opens a fresh `sqlite3` connection and closes it in a `finally`
+    block. There is no module-level pool. This is safe under load and
+    leaks no Python objects — but it does pay open / `PRAGMA journal_mode
+    =WAL` / close cost on every call. In a long-running runtime (`ail up`
+    or `ail run` with `evolve`), the *caller* owns hot-path discipline:
+    don't re-run schema bootstraps inside per-request handlers; guard
+    repeat `db.execute("CREATE TABLE IF NOT EXISTS ...")` with a once-per-
+    process flag in `state.*` or a module-level cache; budget your
+    request handler's DB calls the way you'd budget HTTP calls.
   - `git.commit(repo_path: Text, message: Text, paths: [Text]?) -> Result[Text]` —
     stage `paths` (or all changes if `None`) in the repo and commit.
     Returns `ok(commit_sha)` or `error(stderr)`. Auth + user.name come
