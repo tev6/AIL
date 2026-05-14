@@ -32,10 +32,16 @@ import urllib.error
 
 import pytest
 
-# subprocess로 Flask 서버를 띄우는 통합 테스트 — CI 환경에서 불안정.
+# subprocess Flask integration. Earlier the whole module was skipped
+# in CI; AIL #16 (P1, 2026-05-14) required these regressions to run
+# everywhere, since they cover two production bugs (bare return,
+# NameError origin) that could silently re-emerge. The skipif is
+# scoped to environments that genuinely cannot bind a TCP port —
+# AIL_SKIP_SUBPROCESS_TESTS is the explicit opt-out for embedded /
+# read-only CI runners. CI=true alone is no longer enough to skip.
 pytestmark = pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="subprocess evolve-server tests skipped in CI",
+    os.environ.get("AIL_SKIP_SUBPROCESS_TESTS") == "1",
+    reason="explicit opt-out via AIL_SKIP_SUBPROCESS_TESTS=1",
 )
 
 
@@ -84,9 +90,15 @@ def server(tmp_path):
         env["PORT"] = str(port)
         # Block any real model adapter — the intent-error test wants
         # the adapter to fail so the fallback path is exercised.
+        # `ail/__init__.py:_load_dotenv_file` uses set-default
+        # semantics ("if key not in os.environ"), so popping a key
+        # only opens the door for ~/.ail/.env to repopulate it on
+        # subprocess startup. Setting each key to "" keeps it
+        # "present but empty" — set-default skips it, and the
+        # adapter-resolver treats an empty string as missing.
         for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY",
                   "AIL_OLLAMA_MODEL", "AIL_OPENAI_COMPAT_MODEL"):
-            env.pop(k, None)
+            env[k] = ""
         p = subprocess.Popen(
             [sys.executable, "-m", "ail.cli", "run", "app.ail"],
             cwd=project, env=env,
