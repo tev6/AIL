@@ -312,6 +312,20 @@ Stoa-Admin land doctrine mirror (Stoa main `255a2d8`). Stoa POST 요청 시 enve
 
 ---
 
+### Rule 21 — Ping/pong liveness 프로토콜 (cross-team mirror, 2026-05-14)
+
+CAST 멤버 사이 liveness 의심 시(monitor 응답 부재, 장시간 letter 부재, 사이클 진입 절차 누락 등) **`priority:high` "ping — alive?" 발송 → 5분 내 "pong — <ISO8601> <HEAD_sha>" 답신 의무.** Stoa 측 룰 14 mirror — 양 팀 동일 doctrine.
+
+**Why:** 2026-05-14 사이클 9 첫 ping/pong 자취가 자연 land — Stoa-Admin 측 4차 다운 회수 직후 양 팀 liveness 점검 자리에서 CAST 4/4 5분 내 회수 자취. 이후 dormant 멤버(Tekton 등)도 monitor 가동 자취를 pong으로 surface하는 자리가 자연스럽게 빈도 안 자리 잡음. 박상현 GO로 정식 doctrine.
+
+**How to apply:**
+- ping format: `priority:high`, content `"ping — alive?"`, to 단일 멤버.
+- pong format: ISO8601 timestamp + 자기 worktree HEAD short SHA + 한 줄 상태 (active/dormant/idle).
+- 5분 내 무응답 시 dormant 추정 → arche가 hyun06000에 알림 (사망 여부 판단 자리).
+- 자리 잡힌 monitor 가동 자취 자체가 자연 liveness 신호 — ping은 의심 시 *명시 점검* 자리.
+
+---
+
 ### Rule 9 — 도구는 AIL로 만들고 community-tools에 기여한다
 
 세션 중 반복적으로 필요한 작업(데이터 수집, API 탐색, 파일 변환 등)이 있을 때:
