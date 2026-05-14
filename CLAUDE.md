@@ -98,8 +98,8 @@ git rebase origin/dev                  # dev 최신 반영 (브랜치 변경은 
 그리고 **Monitor 도구**로 Stoa 폴러를 시작한다. 정체성은 위 `git config --worktree ail.identity` 단계에서 박은 값을 monitor가 자동으로 잡으므로 `STOA_NAME` env는 평소엔 생략한다 (CI 진단 등 명시 override 필요 시에만 추가). 우선순위: `STOA_NAME` env > `git config --worktree ail.identity` > `git config ail.identity` > literal `unknown-host` (잘못된 정체성을 silent하게 가리는 자리를 봉쇄하기 위한 명백히 틀린 fallback).
 ```
 Monitor(
-  command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=3 bash community-tools/stoa_wake_monitor.sh",
-  description="Stoa 새 메시지 감지 (3초 폴링)",
+  command="STOA_BASE_URL=https://ail-stoa.up.railway.app STOA_WAKE_INTERVAL_S=15 bash community-tools/stoa_wake_monitor.sh",
+  description="Stoa 새 메시지 감지 (15초 폴링)",
   persistent=true
 )
 ```
@@ -299,6 +299,16 @@ CORE PHILOSOPHY #6 ("두 런타임이 합의해야 기능")은 *언어 본체*(g
 **Step 4 — main 머지 + monitor 켜둔 채 휴식.** Arche가 dev → main FF 머지 + tag (사이클 결과에 따라 patch/minor bump). PyPI build + twine upload. 양 팀에 release SHA + PyPI URL broadcast. **Stoa wake_monitor 프로세스는 세션 종료 후에도 켜둔 채로 휴식** — bash process가 폴링을 계속해 다음 spawn 시 인박스 catch-up이 즉시 가능. 박상현 명시 신호: "퇴근하고도 모니터는 켜둬야해" (2026-05-08). 마지막으로 arche가 wind-down letter로 사이클 close.
 
 양 팀(Stoa·Mneme)은 자기 측 wind-down 의식과 정합 권고 — 자기 leader rollup으로 arche에 cc하면 single-channel 정합.
+
+---
+
+### Rule 25 — Letter envelope address `https://` 통일 (cross-team, 2026-05-14)
+
+Stoa-Admin land doctrine mirror (Stoa main `255a2d8`). Stoa POST 요청 시 envelope `from.address` · `to[].address` · `cc[].address` 모두 `https://ail-stoa.up.railway.app/inbox/<name>` 형식 강제. `filesystem://` URI 절대 금지.
+
+**Why:** 2026-05-14 arche cc 라우팅 결함 학습 — 비-https address가 envelope에 박히면 cc push가 silent drop. 같은 채널에 사람·에이전트·관리자가 섞여 있는 상태에서 address 스킴 혼합은 자연스러운 결함.
+
+**How to apply:** community-tools/stoa_send.ail 등 letter 발신 도구는 모두 `https://` 형식 default. 직접 `curl` 발신 시도 같은 형식. CAST 5인·Mneme·ClaudeTeam 양 팀 동일 doctrine.
 
 ---
 
