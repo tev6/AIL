@@ -21,7 +21,11 @@
 #   - Boot fails if an effect dispatched at runtime is not present in this file.
 
 # ============================================================================
-# CORE — 16 entries / 8 scopes (Phase 0 freeze, Telos pass 2026-05-14)
+# CORE — 12 entries / 6 scopes (shipped-truth, Telos review 2026-05-14)
+#
+# Phase 0 의도: yaml은 *현 executor가 실제 dispatch하는* effect 표면만 박는다.
+# Planned effect (log.*, clock.epoch_ms, file.delete/exists, gh.run 등)는
+# RFC §5 Phase 로드맵 자리이고 yaml entry는 *land된 turn*에 같이 추가된다.
 # ============================================================================
 
 - name: clock.now
@@ -32,18 +36,10 @@
   capabilities: ["clock"]
   since: "1.0.0"
 
-- name: clock.epoch_ms
-  tier: core
-  signature: "() -> Result[Number]"
-  determinism: replayable
-  side_effect: none
-  capabilities: ["clock"]
-  since: "1.0.0"
-
 - name: state.read
   tier: core
   signature: "(key: Text) -> Result[Any]"
-  determinism: ledger
+  determinism: replayable
   side_effect: none
   capabilities: ["state"]
   since: "1.0.0"
@@ -59,7 +55,7 @@
 - name: state.has
   tier: core
   signature: "(key: Text) -> Result[Boolean]"
-  determinism: ledger
+  determinism: replayable
   side_effect: none
   capabilities: ["state"]
   since: "1.0.0"
@@ -75,7 +71,7 @@
 - name: state.list_keys
   tier: core
   signature: "(prefix: Text) -> Result[[Text]]"
-  determinism: ledger
+  determinism: replayable
   side_effect: none
   capabilities: ["state"]
   since: "1.72.0"
@@ -120,64 +116,14 @@
   capabilities: ["file"]
   since: "1.0.0"
 
-- name: file.delete
-  tier: core
-  signature: "(path: Text) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: fs_write
-  capabilities: ["file"]
-  since: "1.0.0"
-
-- name: file.exists
-  tier: core
-  signature: "(path: Text) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: none
-  capabilities: ["file"]
-  since: "1.0.0"
-
-# log.* is currently rendered via host logger in Python; spec-level semantics
-# is "fixture buffer is replayable". Production sink routing is a host config
-# concern, not part of the language surface.
-- name: log.info
-  tier: core
-  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: log_emit
-  capabilities: ["log"]
-  since: "1.0.0"
-
-- name: log.warn
-  tier: core
-  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: log_emit
-  capabilities: ["log"]
-  since: "1.0.0"
-
-- name: log.error
-  tier: core
-  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: log_emit
-  capabilities: ["log"]
-  since: "1.0.0"
-
-- name: log.debug
-  tier: core
-  signature: "(message: Text, fields: Map?) -> Result[Boolean]"
-  determinism: replayable
-  side_effect: log_emit
-  capabilities: ["log"]
-  since: "1.0.0"
-
 - name: ail.run
   tier: core
   signature: "(path: Text, input: Any?) -> Result[Any]"
   determinism: replayable
   side_effect: subprogram_launch
-  capabilities: ["ail"]
+  capabilities: ["ail", "subprogram"]
   since: "1.20.0"
+  # `ail.run` 자식 context 명시 시 부모 `allow_effects`와 교집합 (§9b 정합).
 
 # ============================================================================
 # SUBSTRATE — Python reference, Go/Rust = NotImplementedHost stub
@@ -229,14 +175,6 @@
   determinism: external
   side_effect: network_io
   capabilities: ["network"]
-  since: "1.10.0"
-
-- name: gh.run
-  tier: substrate
-  signature: "(args: [Text]) -> Result[Map]"
-  determinism: external
-  side_effect: external_io
-  capabilities: ["gh"]
   since: "1.10.0"
 
 - name: gh.pr_create
@@ -375,37 +313,10 @@
   capabilities: ["mneme", "network"]
   since: "1.50.0"
 
-- name: crypto.keygen
-  tier: substrate
-  signature: "() -> Result[Map]"
-  determinism: external
-  side_effect: external_input
-  capabilities: ["crypto"]
-  since: "1.71.0"
-
-- name: crypto.sign
-  tier: substrate
-  signature: "(message: Text, secret_key: Text) -> Result[Text]"
-  determinism: external
-  side_effect: none
-  capabilities: ["crypto"]
-  since: "1.71.0"
-
-- name: crypto.verify
-  tier: substrate
-  signature: "(message: Text, signature: Text, public_key: Text) -> Result[Boolean]"
-  determinism: external
-  side_effect: none
-  capabilities: ["crypto"]
-  since: "1.71.0"
-
-- name: crypto.random_bytes
-  tier: substrate
-  signature: "(n: Number) -> Result[Text]"
-  determinism: external
-  side_effect: external_input
-  capabilities: ["crypto"]
-  since: "1.71.0"
+# NOTE: `crypto.*` (ed25519 sign/verify/keygen, random_bytes) are *builtins*,
+# not effects (Rule 16 D2; executor.py:4382-4513 builtin dispatch). They will
+# be tracked in a separate `spec/builtins.canonical.yaml` (RFC cycle 11+).
+# Envelope/canonical/RFC-001 §6 serialization is the Stoa sidecar's domain.
 
 - name: secrets.get
   tier: substrate
@@ -444,7 +355,7 @@
   signature: "(plan: Text, notify: [Text]?) -> Result[Boolean]"
   determinism: approval_record
   side_effect: external_input
-  capabilities: ["human", "network"]
+  capabilities: ["human", "stoa"]
   since: "1.50.0"
 
 - name: image.embed
