@@ -137,6 +137,52 @@ _AIL_RUN_DEPTH_LIMIT = 8
 
 
 class Executor(EffectsMixin):
+    # Effect-name → method-name table for the direct-passthrough
+    # branch of `_builtin_effect`. Adding a single-method effect now
+    # means: one line here + the _<method>(args, kwargs, origin)
+    # definition + an entry in ALLOWED_EFFECTS. The previous if/elif
+    # chain spanning ~80 lines was AIL #20 (P2). HTTP request methods
+    # and `secrets.*` still go through their own dispatch above this
+    # table because they need extra context (HTTP verb / effect name)
+    # the table cannot carry.
+    _DIRECT_EFFECT_METHODS = {
+        "http.graphql":      "_http_graphql",
+        "http.respond":      "_http_respond",
+        "file.read":         "_file_read",
+        "file.write":        "_file_write",
+        "clock.now":         "_clock_now",
+        "state.read":        "_state_read",
+        "state.write":       "_state_write",
+        "state.has":         "_state_has",
+        "state.delete":      "_state_delete",
+        "state.list_keys":   "_state_list_keys",
+        "schedule.every":    "_schedule_every",
+        "schedule.sleep":    "_schedule_sleep",
+        "queue.push":        "_queue_push",
+        "queue.take":        "_queue_take",
+        "queue.done":        "_queue_done",
+        "queue.retry":       "_queue_retry",
+        "env.read":          "_env_read",
+        "human.approve":     "_human_approve",
+        "search.web":        "_search_web",
+        "ail.run":           "_ail_run",
+        "inherit_testament": "_inherit_testament",
+        "image.embed":       "_image_embed",
+        "email.send":        "_email_send",
+        "db.execute":        "_db_execute",
+        "db.query":          "_db_query",
+        "git.commit":        "_git_commit",
+        "git.push":          "_git_push",
+        "git.pull":          "_git_pull",
+        "gh.pr_list":        "_gh_pr_list",
+        "gh.pr_view":        "_gh_pr_view",
+        "gh.pr_create":      "_gh_pr_create",
+        "gh.issue_list":     "_gh_issue_list",
+        "mneme.save":        "_mneme_save",
+        "mneme.load":        "_mneme_load",
+        "mneme.log":         "_mneme_log",
+    }
+
     def __init__(self, program: Program, adapter: ModelAdapter,
                  ask_human=None, metric_fn=None, approve_review=None,
                  calibrator: Optional[Calibrator] = None,
@@ -698,6 +744,9 @@ class Executor(EffectsMixin):
                 except Exception:
                     pass
             return ConfidentValue(None, 1.0, origin=origin)
+        # HTTP family — request methods need an extra positional/kwarg
+        # so they stay as direct calls rather than going through the
+        # direct-passthrough dict.
         if name == "http.get":
             return self._http_effect("GET", args, kwargs, origin)
         if name == "http.post":
@@ -706,79 +755,20 @@ class Executor(EffectsMixin):
             return self._http_post_json(args, kwargs, origin, method="POST")
         if name == "http.put_json":
             return self._http_post_json(args, kwargs, origin, method="PUT")
-        if name == "http.graphql":
-            return self._http_graphql(args, kwargs, origin)
-        if name == "http.respond":
-            return self._http_respond(args, kwargs, origin)
-        if name == "file.read":
-            return self._file_read(args, kwargs, origin)
-        if name == "file.write":
-            return self._file_write(args, kwargs, origin)
-        if name == "clock.now":
-            return self._clock_now(args, kwargs, origin)
-        if name == "state.read":
-            return self._state_read(args, kwargs, origin)
-        if name == "state.write":
-            return self._state_write(args, kwargs, origin)
-        if name == "state.has":
-            return self._state_has(args, kwargs, origin)
-        if name == "state.delete":
-            return self._state_delete(args, kwargs, origin)
-        if name == "state.list_keys":
-            return self._state_list_keys(args, kwargs, origin)
-        if name == "schedule.every":
-            return self._schedule_every(args, kwargs, origin)
-        if name == "schedule.sleep":
-            return self._schedule_sleep(args, kwargs, origin)
-        if name == "queue.push":
-            return self._queue_push(args, kwargs, origin)
-        if name == "queue.take":
-            return self._queue_take(args, kwargs, origin)
-        if name == "queue.done":
-            return self._queue_done(args, kwargs, origin)
-        if name == "queue.retry":
-            return self._queue_retry(args, kwargs, origin)
-        if name == "env.read":
-            return self._env_read(args, kwargs, origin)
-        if name == "human.approve":
-            return self._human_approve(args, kwargs, origin)
-        if name == "search.web":
-            return self._search_web(args, kwargs, origin)
-        if name == "ail.run":
-            return self._ail_run(args, kwargs, origin)
-        if name == "inherit_testament":
-            return self._inherit_testament(args, kwargs, origin)
-        if name == "image.embed":
-            return self._image_embed(args, kwargs, origin)
-        if name == "email.send":
-            return self._email_send(args, kwargs, origin)
-        if name == "db.execute":
-            return self._db_execute(args, kwargs, origin)
-        if name == "db.query":
-            return self._db_query(args, kwargs, origin)
-        if name == "git.commit":
-            return self._git_commit(args, kwargs, origin)
-        if name == "git.push":
-            return self._git_push(args, kwargs, origin)
-        if name == "git.pull":
-            return self._git_pull(args, kwargs, origin)
-        if name == "gh.pr_list":
-            return self._gh_pr_list(args, kwargs, origin)
-        if name == "gh.pr_view":
-            return self._gh_pr_view(args, kwargs, origin)
-        if name == "gh.pr_create":
-            return self._gh_pr_create(args, kwargs, origin)
-        if name == "gh.issue_list":
-            return self._gh_issue_list(args, kwargs, origin)
-        if name == "mneme.save":
-            return self._mneme_save(args, kwargs, origin)
-        if name == "mneme.load":
-            return self._mneme_load(args, kwargs, origin)
-        if name == "mneme.log":
-            return self._mneme_log(args, kwargs, origin)
+
+        # secrets.* funnels through a single dispatcher that needs the
+        # effect name to disambiguate.
         if name in ("secrets.get", "secrets.set",
                     "secrets.list", "secrets.revoke"):
             return self._secrets_dispatch(name, args, kwargs, origin)
+
+        # Direct-passthrough effects: effect name → method name. New
+        # single-method effects only need one entry here plus the
+        # _<method> definition + ALLOWED_EFFECTS entry. Defense in
+        # depth: _exec_perform's deny-first check already gates this.
+        method_name = self._DIRECT_EFFECT_METHODS.get(name)
+        if method_name is not None:
+            return getattr(self, method_name)(args, kwargs, origin)
         # Defense in depth: _exec_perform's deny-first check should
         # already have caught this. If we reached here, an internal
         # caller (e.g., explicit `_builtin_effect("foo", ...)`) tried
