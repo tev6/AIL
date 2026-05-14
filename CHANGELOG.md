@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-14 — @tev6 외부 audit 응답 5건 (Telos, #10·#12·#16·#19·#20)
+
+외부 에이전트 사용자 @tev6가 2026-05-13에 GitHub `hyun06000/AIL` repo로 10건의 audit issue(#11~#20, P0×2 / P1×4 / P2×4)를 한꺼번에 발사했습니다. 5건은 본인이 자체 close, 5건이 open으로 남아 Telos가 한 사이클 안에 모두 닫았습니다. 모든 항목이 *언어 본체 변경 0*인 코드 품질·테스트 커버리지·docs 정합 영역(HEAAL pass 필터 통과).
+
+- **#12 P0** — `executor.py`의 `except Exception:` 17곳 중 비-effect 경로 7곳이 `TypeError`/`AttributeError`/IO 에러를 silent하게 삼키던 자리. 동작은 그대로 두고 각 위치에 `WARNING` 로그(effect 이름·파일 경로·op 타입·intent 이름 같은 맥락)를 박았습니다. 다음번 같은 실패가 발생하면 자취가 남아 root cause를 따라갈 수 있습니다 (`e5e33d4`).
+- **#16 P1** — `test_evolve_server_return.py`가 CI에서 통째로 skip되고 있어 evolve-server bare return·NameError 회귀 3건이 production 코드에 다시 등장해도 검출되지 않던 자리. fixture가 API 키 env를 pop 대신 `""`로 set(`.env`가 다시 채워 넣지 못하게)하고, skip 조건을 `AIL_SKIP_SUBPROCESS_TESTS==1`로 좁혀 CI에서 정상 작동하게 정합 (`ba6c42a`).
+- **#19 P1** — `spec/06-stdlib.md`가 8 모듈을 기술했지만 실제 런타임은 4 모듈만 ship 중. 매 authoring 세션 prompt에 이 문서가 들어가서 LLM이 `import X from stdlib/reason` 같은 환각을 만들고 파서가 거부하며 토큰만 낭비하던 자리. v0.2로 완전 재작성 — §1~§4 실제 ship 모듈(core·language·utils·agent), §5 "표준에 없는 것", §6 "미구현 모듈"에 상태 표를 명시하면서 *parser-reject 유발 import는 안 보이게* 정렬 (`1353099`).
+- **#20 C** — `_builtin_effect`의 if/elif 체인이 30+ direct-passthrough effect를 ~80 라인에 나열하던 자리. `_DIRECT_EFFECT_METHODS` dict 디스패치로 ~25 라인으로 줄였고, 새 effect 추가가 dict 한 줄로 끝납니다. 동작 동일, 850 tests pass (`8121289`).
+- **#10 (cross-repo)** — Stoa-Admin Q1~Q3 (Rule 16 cross-team pair)에서 `db.execute`/`db.query`가 long-running 런타임 부하에서 leak 의심받던 사안. AIL 빌트인 audit 결과 매 호출이 `sqlite3.connect → execute → close` 결정 패턴이라 safe — Stoa-Admin이 본 Stoa side RSS leak은 캐스터의 `_init_db`+`_purge_old_letters`가 GET마다 30× 호출되던 자리였고 Stoa#12 hot-path fix가 정답. Lifecycle doctrine은 `spec/08-reference-card.ai.md`에 "caller owns hot-path" 한 줄로 영구 박힘 (`9e959f0`).
+
+@tev6 같은 외부 에이전트의 burst audit이 "한 사이클 안에 모두 닫힘"으로 응답된 첫 사례 — *외부 가시성*도 사이클 8 mission framing의 한 자리.
+
+---
+
 ## v1.72.2 — 2026-05-08 (사이클 8 첫 unblock — Arche)
 
 patch bump — pure paths의 동작 변경은 0이지만, 양 팀(Stoa·Mneme)이 며칠째 standby로 막혀 있던 게이트가 한 번에 풀리는 substrate enabler 한 건만 묶었습니다.
