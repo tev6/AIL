@@ -1,137 +1,129 @@
 # AIL Specification — 06: Standard Library
 
-**Version:** 0.1 draft
+**Version:** 0.2 — implementation-accurate (Telos 2026-05-14, AIL #19)
 
-The standard library is a curated set of intents, contexts, and effects that any conforming runtime MUST make available. It is deliberately small. The goal is to ship a minimum that lets programs do useful work without every program needing to redefine basic building blocks.
+The standard library is a curated set of intents and pure helpers that every conforming runtime ships. It is deliberately small — programs should be able to do useful work without redefining basic building blocks, and AI authors should be able to learn the full surface in a single pass.
 
-Items are grouped by module. Each module has a path; a program imports:
+Items are grouped by module. A program imports a name:
 
 ```ail
 import summarize from "stdlib/language"
-import context default from "stdlib/core"
+import word_count from "stdlib/utils"
 ```
+
+The current runtime ships **four modules**: `stdlib/core`, `stdlib/language`, `stdlib/utils`, `stdlib/agent`. Earlier drafts listed six more modules (`reason`, `effects`, `time`, `trace`, `confidence`, `planner`) — those are *not implemented* and are documented in §6 below as future work, not as part of the conforming surface.
 
 ---
 
 ## 1. `stdlib/core`
 
-Foundational types and contexts.
-
-### Contexts
-
-- **`default`** — the context active when no other is. Fields: `register`, `cost_budget`, `latency_budget`, `weight`, `audience`, `language`, `trace`. See [02-context.md §2](02-context.md) for full schema.
-- **`strict`** — extends `default` with tighter budgets and hard constraints on determinism. Suitable for high-stakes flows.
-- **`exploratory`** — extends `default` with relaxed budgets and soft constraints. Suitable for drafts and prototypes.
-
-### Types
-
-- **`Confidence`** — number in `[0, 1]`.
-- **`Distribution[T]`** — PMF over `T`.
-- **`Interval[T]`** — `(low, high)` pair over an ordered `T`.
-- **`Set[T]`** — multiple candidates with per-item confidence.
+Foundational intents that every program can rely on.
 
 ### Intents
 
-- **`identity(x: T) -> T`** — returns `x`. Useful as a default target in `branch`.
-- **`refuse(reason: Text) -> Never`** — aborts the current intent with a declared refusal reason. Recorded in trace; distinct from a failure.
+- **`identity(x: Text) -> Text`** — returns `x`. Useful as a default target in `branch` or as a baseline in evolve harnesses.
+- **`refuse(reason: Text) -> Text`** — aborts the current intent with a declared refusal reason. Recorded in trace; distinct from a failure.
+
+### Contexts and types
+
+Contexts (`default`, `strict`, `exploratory`) and confidence-bearing types (`Distribution`, `Interval`, `Set`) are described in [02-context.md §2](02-context.md) and [03-confidence.md](03-confidence.md). They are part of the language, not separate stdlib modules.
 
 ---
 
 ## 2. `stdlib/language`
 
-Operations on natural-language text.
+Operations on natural-language text. Every intent here is calibratable and evolvable.
 
-- **`summarize(source: Text, max: Number) -> Text`** — produces a summary within the token limit. Context-aware (register, audience, weight).
-- **`translate(source: Text, to: Language, from: Language?) -> Text`** — translates text. Infers source language from context or detection if unspecified.
-- **`classify(text: Text, labels: [Label]) -> Distribution[Label]`** — returns a distribution over the provided labels.
-- **`extract(source: Text, schema: Schema) -> Record`** — structured extraction. Schema violations raise `ExtractionFailed`.
+- **`summarize(source: Text, max_tokens: Number) -> Text`** — produces a summary within the token limit. Context-aware (register, audience, weight).
+- **`translate(source: Text, target_language: Text) -> Text`** — translates text. Infers source language.
+- **`classify(text: Text, labels: Text) -> Text`** — returns the best-matching label from a comma-separated list.
+- **`extract(source: Text, schema_description: Text) -> Text`** — structured extraction. Returns a JSON-ish text record.
 - **`rewrite(source: Text, instruction: Text) -> Text`** — applies a rewrite instruction.
-- **`embed(source: Text) -> Vector`** — returns an embedding. The embedding space is identified in the return type; incompatible embeddings cannot be compared.
 
-All of these intents have associated `calibrate_on` signals and support `evolve` rules.
-
----
-
-## 3. `stdlib/reason`
-
-Operations for structured reasoning.
-
-- **`decompose(goal: Text, context: Context) -> [Subgoal]`** — breaks a goal into subgoals. Used by planner intents.
-- **`verify(claim: Text, evidence: [Text]) -> Confidence`** — assesses whether the evidence supports the claim. Returns a calibrated confidence.
-- **`compare(a: T, b: T, criteria: [Criterion]) -> Comparison`** — structured comparison under named criteria.
-- **`critique(artifact: T, rubric: Rubric) -> Critique`** — returns strengths, weaknesses, and suggestions.
-- **`consensus(answers: [T]) -> (value: T, agreement: Confidence)`** — finds the consensus of multiple candidate answers.
+All five carry adapter-driven LLM calls. `evolve` blocks may wrap any of them to track quality drift.
 
 ---
 
-## 4. `stdlib/effects`
+## 3. `stdlib/utils`
 
-Pre-declared effects commonly needed. Importing these provides declarations only; the host decides whether to supply an implementation.
+Pure functions over text, numbers, and lists. No effects, no LLM calls — callable from `pure fn` bodies. The current set:
 
-- **`http.get(url: URL) -> Response`** — read-only. `authorization: declared_policy`, `observable_by: [admin_log]`.
-- **`http.post(url: URL, body: Bytes) -> Response`** — write. `authorization: required`, `observable_by: [user, admin_log]`.
-- **`db.read(query: Query) -> Rows`** — read from a database. Host-provided.
-- **`db.write(statement: Statement) -> Outcome`** — write to a database. `authorization: required`.
-- **`file.read(path: Path) -> Bytes`** — read-only.
-- **`file.write(path: Path, content: Bytes) -> Outcome`** — `authorization: required`, `reversibility: compensate: file.restore`.
-- **`message.send(to: Address, content: Message) -> Receipt`** — `authorization: required and human_confirmation` for first-time recipients; `required` for repeat.
-- **`human.ask(question: Text, expect: Schema) -> Answer`** — delegate a decision to a human. The canonical way to pull a human into the loop. `budget: from context.human_interaction_budget`.
+### Text
 
----
+- **`word_count(text: Text) -> Number`** — whitespace-split count.
+- **`char_count(text: Text) -> Number`** — character count.
+- **`is_empty(text: Text) -> Boolean`** — true for `""` or all-whitespace.
+- **`repeat(text: Text, times: Number) -> Text`** — concatenate `text` `times` times.
+- **`pad_left(text: Text, target_length: Number, pad_char: Text) -> Text`** — left-pad with a single character.
+- **`contains(text: Text, sub: Text) -> Boolean`** — substring presence.
+- **`count_occurrences(text: Text, sub: Text) -> Number`** — non-overlapping occurrences.
+- **`truncate(text: Text, max: Number) -> Text`** — first `max` characters.
+- **`to_upper_first(text: Text) -> Text`** — uppercase the first character.
+- **`plural_count(n: Number, singular: Text, plural: Text) -> Text`** — `"1 item"` / `"3 items"` style format.
+- **`is_numeric(text: Text) -> Boolean`** — true iff every character is a digit.
 
-## 5. `stdlib/time`
+### Numbers
 
-- **`now() -> Time`** — current time. Does not advance within a single intent call.
-- **`deadline(in: Duration) -> Time`** — returns a deadline relative to `now()`.
-- **`within(deadline: Time, do: Intent) -> Result | Timeout`** — runs an intent with a deadline.
-- **`schedule(at: Time, do: Intent) -> Handle`** — schedules an intent for later execution. Requires `authorization: required`.
+- **`clamp(value: Number, lo: Number, hi: Number) -> Number`** — saturate into the range.
+- **`sum_list(numbers: [Number]) -> Number`** — total.
+- **`average(numbers: [Number]) -> Number`** — mean; empty list returns 0.
 
----
+### Lists
 
-## 6. `stdlib/trace`
+- **`flatten(nested: [[Any]]) -> [Any]`** — one level of flattening.
+- **`unique(items: [Any]) -> [Any]`** — preserve-order dedupe.
+- **`zip_lists(a: [Any], b: [Any]) -> [[Any]]`** — pair shortest-of-two.
+- **`take(items: [Any], n: Number) -> [Any]`** — first `n` items.
 
-- **`trace.current() -> Trace`** — the trace of the currently-executing intent.
-- **`trace.attach(key: Text, value: Any)`** — attach a key-value pair to the current trace entry.
-- **`trace.span(name: Text, do: Intent) -> T`** — run an intent inside a named trace span.
-- **`trace.get(id: TraceId) -> Trace`** — retrieve a past trace. Authorization required for traces not owned by the caller.
+### CSV
 
----
-
-## 7. `stdlib/confidence`
-
-Pure functions on confidence values. See [03-confidence.md §8](03-confidence.md).
-
-- **`and(c1, c2, ...) -> Confidence`**
-- **`or(c1, c2, ...) -> Confidence`**
-- **`not(c) -> Confidence`**
-- **`calibrate(raw: Number, model: ModelId, context: Context) -> Confidence`**
-- **`ece(samples: [(prediction, outcome)]) -> Number`** — Expected Calibration Error
+- **`csv_to_rows(csv: Text) -> [[Text]]`** — parse a simple comma-separated table (no quoting).
+- **`rows_to_csv(rows: [[Text]]) -> Text`** — inverse.
 
 ---
 
-## 8. `stdlib/planner`
+## 4. `stdlib/agent`
 
-Higher-level composition.
+The three-phase **plan → act → reflect** loop, packaged as three intents. Each intent prompts the adapter to think about one phase only; the program glues them together. This is the canonical shape for agentic programs that need explicit reasoning steps rather than a single end-to-end call.
 
-- **`plan(goal: Text) -> Plan`** — decomposes a goal into a plan of intent calls. The plan is reviewable before execution.
-- **`execute(plan: Plan) -> Result`** — runs a plan. Respects all effects and authorizations inside.
-- **`revise(plan: Plan, feedback: Feedback) -> Plan`** — produces an updated plan given feedback.
+- **`plan(state: Record) -> Text`** — given the current state (typically a record of inputs, history, goal), return a short plan. Should be re-runnable as new information arrives.
+- **`act(plan_description: Text) -> Record`** — execute one step of the plan and return the observable result as a record.
+- **`reflect(action_result: Record) -> Record`** — observe the action's outcome and return a record describing what to keep, what to change, and whether the goal is reached.
 
-Plans are a structured data type, not free text. This is important: a plan is inspectable, diffable, and revisable without re-running the planner.
+Both `state` and the records returned by `act` / `reflect` are open-shape — programs decide the fields. Pair with `state.read` / `state.write` for memory across iterations and with `evolve` for quality tracking over many runs.
 
 ---
 
-## 9. What is not in the standard library
+## 5. What is not in the standard library
 
 Deliberately omitted:
 
-- **General-purpose I/O beyond the listed effects.** Ad-hoc I/O invites untraced side effects.
-- **Concurrency primitives.** The runtime manages concurrency; programs do not fork threads.
-- **Cryptographic primitives.** Effects that need crypto call out to host-provided effects with their own authorization.
-- **Machine-learning training.** AIL is for authoring intent. Training is an external activity whose artifacts become models that AIL may invoke via effects.
-- **UI primitives.** Rendering belongs in the host.
+- **General-purpose I/O beyond the effects listed in [05-effects.md](05-effects.md).** Ad-hoc I/O invites untraced side effects. The effect surface is the contract — anything outside it does not happen in a conforming program.
+- **Concurrency primitives.** The runtime manages concurrency; programs do not fork threads. Long-running work uses `schedule.every` + `on_tick` in evolve-server mode, not stdlib calls.
+- **Cryptographic primitives.** Crypto lives at the builtin layer (`crypto_*_ed25519`, `crypto_random_bytes`) — not as stdlib intents — so signatures and key material never pass through an LLM adapter. See [05-effects.md](05-effects.md).
+- **Machine-learning training.** AIL is for authoring intent; training is an external activity whose artifacts become models that AIL invokes via the adapter.
+- **UI primitives.** Rendering belongs in the host. evolve-server programs write static HTML files (`view.html`) and let the runtime serve them.
 
 A program needing any of these uses a host-provided effect or refuses to run on hosts that do not provide it.
+
+---
+
+## 6. Future modules — not yet implemented
+
+The 0.1 draft listed six additional modules that never landed in the runtime. They are kept here as a known design space rather than as part of the conforming surface, so AI authors writing `import X from "stdlib/Y"` do not hallucinate a module name that the runtime will reject at parse time.
+
+Status as of v1.72.2:
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| `stdlib/reason` | not implemented | `decompose` / `verify` / `compare` / `critique` / `consensus`. Programs needing these compose them ad-hoc as project-local intents or via `stdlib/agent`'s `plan` + `reflect`. |
+| `stdlib/effects` | not implemented | Effect declarations live in [05-effects.md](05-effects.md) as a flat surface — importing them as a stdlib module would duplicate that contract. |
+| `stdlib/time` | not implemented | The `clock.now` effect and `schedule.every` / `schedule.sleep` cover the current use cases. `within(deadline, do: Intent)` and `schedule(at: Time, do: Intent)` are open design space. |
+| `stdlib/trace` | not implemented | The runtime trace is part of every program automatically; explicit `trace.span` / `trace.attach` would expose it for programmatic inspection. No conforming runtime exposes the trace as a value yet. |
+| `stdlib/confidence` | not implemented | Confidence is a first-class value (every `ConfidentValue` carries one); pure helpers `and` / `or` / `not` / `calibrate` / `ece` are spec'd but not bundled. Programs roll their own when needed. |
+| `stdlib/planner` | not implemented | `plan(goal: Text) -> Plan` would require a structured `Plan` type the runtime can re-execute. `stdlib/agent` covers the loop with three text-returning intents instead. |
+
+Adding any of these is an RFC-shaped task: the spec section here gets removed from "not yet implemented" status, the runtime ships the implementations, the reference card and authoring prompt are updated in the same PR (CLAUDE.md Rule 5), and the version stamp at the top of this file bumps.
 
 ---
 

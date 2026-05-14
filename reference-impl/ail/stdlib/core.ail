@@ -3,7 +3,7 @@
 // These are the universal primitives: identity for pass-through,
 // refuse for declared refusals. More are added here only when they
 // are genuinely universal; specialized intents live in other stdlib
-// modules (stdlib/language, stdlib/reason, etc.).
+// modules (stdlib/language, stdlib/utils, stdlib/agent).
 
 intent identity(x: Text) -> Text {
     goal: return the input value unchanged
