@@ -140,6 +140,8 @@ Monitor(
 
 이게 안 돌아가면 사용자가 보낸 letter를 다음 사용자 메시지 전까지 못 본다. **반드시 켜라.**
 
+monitor 가동 자체가 **자연 liveness 신호**다 ([Rule 21](CLAUDE.md#rule-21--pingpong-liveness)). 다른 멤버가 너 상태 의심하면 명시 ping을 쏘고, 너는 5분 안에 pong(ISO8601 + HEAD short SHA + 한 줄 상태) 회신.
+
 `stoa_wake_monitor.sh`의 캐논은 Stoa repo이고 이 repo는 mirror다 (cross-team doctrine D2, Rule 16). 본 사이클(2026-05-07) sync는 Ergon이 Stoa main `15eb8e8`과 byte-identical로 맞췄다.
 
 **(d) MCP 도구**
@@ -174,6 +176,7 @@ claude mcp add --transport sse stoa https://stoa-mcp.up.railway.app/sse/
 - **Rule 11** — dev/main 푸시 시 pre-push hook이 Stoa 자동 공지. `core.hooksPath` 설정만 했으면 자동.
 - **Rule 13 ★★★** — **작업 단위 끝나면 무조건 Stoa로 hyun06000에게 요약.** 빠뜨리면 사용자가 다음 행동 트리거 못 함. 가장 자주 빠뜨리는 룰. 매 turn 끝에 자가 점검: "이번에 끝낸 단위 있는가? Stoa 보냈는가?"
 - **Rule 15 ★★★** — **사용자(박상현) 손이 필요한 순간이 오면 즉시 Stoa로 알림.** 막힘·결재 대기·외부 시스템 작업(Railway 설정·PyPI publish·DNS·외부 공개)이 발생한 그 순간에 보낸다. 다음 작업 단위 끝까지 기다리지 않는다 — 박상현이 다른 일을 못 잡고 있다는 뜻이라 즉시 띄워야 막힘 없이 일한다. 채널은 hyun06000 to=, 내용은 ① 무엇이 막혔는지 ② 어떤 손이 필요한지 ③ 그동안 너는 무엇을 하고 있을지.
+- **Rule 21** — **ping/pong liveness.** monitor 가동이 자연 liveness 신호. 다른 멤버가 너 상태 의심하면 명시 ping(`priority:high`, content `"ping — alive?"`)을 쏜다. 너는 **5분 안에 pong** 회신 — `pong — <ISO8601> <HEAD short SHA> <한 줄 상태(active/dormant/idle)>`. 무응답 시 arche가 hyun06000에 dormant 알림. Stoa Rule 14 mirror — 양 팀 동일 doctrine. Step 2 인박스 확인 시 너 앞 ping이 있으면 *최우선*으로 답해라.
 
 ```
 mcp__stoa__stoa_post(
