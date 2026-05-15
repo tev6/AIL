@@ -419,6 +419,12 @@ crypto_keygen_ed25519() -> Result[[Text, Text]]
                                                 // ok([secret_key_hex, public_key_hex]) — both 64-char hex (32 bytes)
 crypto_random_bytes(n: Number) -> Result[Text]
                                                 // ok(2n-char hex) of cryptographically secure bytes; n in (0, 4096]
+crypto_hash_password(plaintext: Text) -> Result[Text]
+                                                // ok(PHC string: $argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>).
+                                                // Random salt per call; argon2id defaults (m=64MiB, t=3, p=1).
+crypto_verify_password(plaintext: Text, phc: Text) -> Result[Boolean]
+                                                // ok(true) on match, ok(false) on any mismatch including malformed PHC.
+                                                // Constant-time comparison. Pattern-match a single Result shape.
 ```
 All four are pure — no I/O, no LLM. `parse_json` returns a Record for JSON objects,
 a List for arrays, Text / Number / Boolean primitives; use `get(value, key)`

@@ -1,0 +1,92 @@
+# spec/builtins.canonical.yaml — single source of truth for AIL builtin surface
+#
+# RFC: docs/proposals/builtins-canonical.md (사이클 11 land)
+# Author: Telos, 2026-05-15
+# Context: companion to spec/effects.canonical.yaml (사이클 10, D7).
+#
+# WHY a separate yaml from effects:
+#   Effects (`perform foo(...)`) flow through the executor's effect
+#   dispatch path: capability gate, deny-first context, ledger record,
+#   side-effect tag. Builtins are direct function calls in expression
+#   position — no `perform`, no capability binding, no ledger event.
+#   Rule 16 D2 doctrine (2026-05-07) names `crypto.*` as builtin
+#   *primitives*, not effects; the 사이클 10 effect-conformance
+#   review (Telos msg_1778747472_38) surfaced that the four ed25519
+#   primitives had been mis-placed in effects.canonical.yaml. This
+#   yaml restores the boundary.
+#
+# Schema:
+#   name:        canonical builtin name (snake_case with optional
+#                algorithm suffix, e.g. `crypto_sign_ed25519`)
+#   surface:     `function_call`  — invoked as `name(args)` in an
+#                                   expression, returns Result[T]
+#   signature:   AIL type signature
+#   determinism: `pure` | `replayable` | `external_input`
+#                  pure          — same args → same result, no I/O
+#                                  (sign/verify given fixed inputs)
+#                  replayable    — deterministic under fixture
+#                                  injection (hash funcs with
+#                                  fixed salt)
+#                  external_input — pulls entropy or other external
+#                                  state (keygen, random, salt-using
+#                                  password hashes)
+#   capabilities: [Text] — capability tokens (currently advisory; no
+#                          gate is wired at the builtin layer yet)
+#   since:       AIL version that introduced the primitive
+#
+# Runtime contract:
+#   - Python is the reference implementation. Go/Rust runtimes may
+#     defer builtin parity to a later phase; unlike core effects,
+#     builtins are not part of the conformance corpus today.
+#   - Boot fails if a builtin dispatched at runtime is not present in
+#     this file (static gate, Phase 1 — same path as the effects yaml).
+
+# ============================================================================
+# CRYPTO — ed25519 signature primitives (Rule 16 D2)
+# ============================================================================
+
+- name: crypto_sign_ed25519
+  surface: function_call
+  signature: "(secret_key_hex: Text, message: Text) -> Result[Text]"
+  determinism: pure
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto_verify_ed25519
+  surface: function_call
+  signature: "(public_key_hex: Text, signature_hex: Text, message: Text) -> Result[Boolean]"
+  determinism: pure
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto_keygen_ed25519
+  surface: function_call
+  signature: "() -> Result[[Text]]"
+  determinism: external_input
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+- name: crypto_random_bytes
+  surface: function_call
+  signature: "(n: Number) -> Result[Text]"
+  determinism: external_input
+  capabilities: ["crypto"]
+  since: "1.71.0"
+
+# ============================================================================
+# CRYPTO — argon2id password hashing (issue #8, Mneme RFC-001 §5 unblock)
+# ============================================================================
+
+- name: crypto_hash_password
+  surface: function_call
+  signature: "(plaintext: Text) -> Result[Text]"
+  determinism: external_input
+  capabilities: ["crypto"]
+  since: "1.73.0"
+
+- name: crypto_verify_password
+  surface: function_call
+  signature: "(plaintext: Text, phc: Text) -> Result[Boolean]"
+  determinism: pure
+  capabilities: ["crypto"]
+  since: "1.73.0"
