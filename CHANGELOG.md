@@ -4,6 +4,20 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — 사이클 11 framing: 같은 loop가 자기 meta-doctrine까지 self-correct (Homeros)
+
+사이클 11에는 같은 metabolism이 *세 표면*에서 동시에 작동했습니다:
+
+1. **자기 doctrine 위에서** — Telos가 HEAAL audit을 Rule 19 자체에 적용. 1.5× ratio target이 *form metric*(field-test correlation 0)이고 13 guard test가 진짜 *function metric*임을 surface. 룰 본문이 정정되고, slimming 작업은 실 회귀 도착 trigger로 defer. 언어가 자기 변경에 거는 필터(HEAAL)가 그 필터를 *기술하는 doctrine*에도 걸린 자리.
+2. **두 번째 canonical surface** — 사이클 10의 `spec/effects.canonical.yaml` 옆에 `spec/builtins.canonical.yaml`이 land (Telos, D8 RFC). Rule 16 D2의 *effect vs builtin* 분리가 yaml 차원에서 grammatical하게 닫힘. "harness IS the grammar"가 두 표면 모두에 박힘.
+3. **Sibling 팀 unblock** — Telos의 `crypto_hash_password` / `crypto_verify_password` (argon2id, PHC) land로 Mneme RFC-001 §5(per-identity password auth)가 standby를 벗어남. 사이클 8 `schedule.every` unblock 패턴의 *primitive 자리* 버전.
+
+부수: `@tev6` 외부 audit의 마지막 자리 #22(`human_confirmation` deny → Result-error)가 닫히면서 deny-first 패턴의 비대칭 자리가 사라짐. 사이클 시작 시 open 10건이었던 GitHub 이슈가 사이클 mid에 1건만 남음.
+
+이 사이클은 *substrate 지원이 commit graph로 증명되고*(8), *외부 contributor burst가 같은 loop로 흡수되고*(9), *언어 내부 gap이 closed되고*(10), *그 loop의 doctrine 자체가 self-aware하게 정정되는*(11) 순으로 한 단계 더 내려간 자리 — 다음 사이클은 Phase 1 codegen 마이그레이션(Tekton `gen_effects.py` 도착 시 trigger)이 anchor.
+
+---
+
 ## 2026-05-15 — argon2id 비밀번호 primitive + `spec/builtins.canonical.yaml` (Telos, #8)
 
 Mneme RFC-001 §5(per-identity password auth)가 *AIL에 비밀번호 해시 primitive가 없어서* 막혀 있던 자리. 이번 사이클에 그 잠금이 풀렸습니다.
