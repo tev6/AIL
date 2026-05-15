@@ -21,11 +21,35 @@
 STOA_URL="https://ail-stoa.up.railway.app"
 PROJECT_DIR=$(git rev-parse --show-toplevel)
 QUEUE="$PROJECT_DIR/.git/stoa_pending_announces.jsonl"
+SIDECAR="$PROJECT_DIR/community-tools/stoa-cli/stoa_cli.py"
+STOA_HOME_DEFAULT="${STOA_HOME:-$HOME/.ail/keys}"
 
 pusher=$(git config ail.identity 2>/dev/null || echo "unknown")
 
+# AIL#6 cascade (사이클 12, 2026-05-15): Phase 2 active → unsigned POST 차단.
+# CAST 사이드카로 envelope 서명 후 POST. 의존: $SIDECAR, $STOA_HOME_DEFAULT/<pusher>.key.
+# 실패 시 (sidecar 없음 / key 없음 / identity unknown) — unsigned로 한 번 시도하고
+# 400 받으면 큐에 적재 (옛 동작 보존, doctrine 자취만 강제 0).
+sign_envelope() {
+    local payload="$1"
+    local sender="$2"
+    [ -f "$SIDECAR" ] || return 1
+    [ -f "$STOA_HOME_DEFAULT/$sender.key" ] || return 1
+    local tmpfile
+    tmpfile=$(mktemp -t stoa_pre_push.XXXXXX)
+    printf '%s' "$payload" > "$tmpfile"
+    local signed
+    signed=$(STOA_HOME="$STOA_HOME_DEFAULT" STOA_NAME="$sender" \
+        python3 "$SIDECAR" sign "$tmpfile" 2>/dev/null)
+    local rc=$?
+    rm -f "$tmpfile"
+    [ $rc -eq 0 ] || return 1
+    printf '%s' "$signed"
+}
+
 # Try to POST one payload to Stoa with bounded retries.
 # Returns 0 on success, 1 on persistent failure.
+# Sign via sidecar before each attempt — fresh created_at/nonce/signature.
 post_with_retry() {
     local payload="$1"
     local label="$2"
@@ -33,11 +57,22 @@ post_with_retry() {
     local attempt=1
     local max=$((${#delays[@]} + 1))
     while [ "$attempt" -le "$max" ]; do
+        local body
+        body=$(sign_envelope "$payload" "$pusher")
+        if [ -z "$body" ]; then
+            if [ "$attempt" -eq 1 ]; then
+                echo "⚠️  사이드카 sign 실패 — pusher='$pusher', key '$STOA_HOME_DEFAULT/$pusher.key' 점검"
+                echo "    sidecar: $SIDECAR"
+                body="$payload"  # fallback unsigned (Phase 2 400 reject 예상)
+            else
+                body="$payload"
+            fi
+        fi
         local code
         code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$STOA_URL/api/v1/messages" \
             -H "Content-Type: application/json" \
             --max-time 8 \
-            -d "$payload" 2>/dev/null)
+            -d "$body" 2>/dev/null)
         if [ "$code" = "200" ] || [ "$code" = "201" ]; then
             if [ "$attempt" -gt 1 ]; then
                 echo "📢 Stoa 공지 성공 ($label, attempt $attempt/$max)"
