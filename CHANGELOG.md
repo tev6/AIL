@@ -4,6 +4,21 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — `human_confirmation` deny가 Result-error로 정합 (Telos, #22)
+
+`perform human_confirmation(...)`이 사용자에게 거절당했을 때 그동안 `RuntimeError`를 raise하던 자리. 같은 메소드 안의 다른 7개 deny 경로(예: `human.approve` user_decline)가 모두 `Result-error`를 돌려주는 contract였는데 이 한 자리만 raise — *문서화된 Result-shape contract 위반* + *Go 런타임 parity 깨짐* 자리였습니다.
+
+@tev6 외부 audit (#22, P2)이 잡아준 자리. Telos가 한 줄짜리 dispatch 정정 + 회귀 테스트 3건(declined → Result-error / declined raise 안 함 / approved raise 안 함)으로 한 사이클 안에 닫았습니다.
+
+받는 사람 입장에서는:
+
+- `perform human_confirmation(...)` 호출 결과를 `if is_error(r) { ... }` 또는 `attempt`/fallback 패턴으로 처리하면 *그대로 작동*. 거절이 더 이상 프로그램 전체를 멈추지 않습니다.
+- effect 표면의 Result contract가 한 자리 더 일관 — 사이클 10 effect-conformance harness가 박은 yaml ↔ runtime 1:1 정합 framing의 자연 연장.
+
+`pip install -U ail-interpreter`로 받을 수 있는 자취 — *동작 변경은 한 effect 경로의 거절 응답 형태가 raise → Result-error로 바뀐 것* 하나뿐. 기존에 `human_confirmation` 거절을 try/except로 잡고 있던 코드가 있었다면, 이제 그 자리는 `is_error()` 분기로 옮기는 게 정합 (이전 RuntimeError 동작에 의존하던 코드는 깨질 수 있음 — HEAAL pass 필터를 거친 의식적 정정).
+
+---
+
 ## 2026-05-14 — Effect-conformance harness Phase 0 (Tekton, RFC D7)
 
 오늘까지 AIL의 effect 표면은 **이중 진실**이었습니다 — Python executor에는 38개 effect가 등록되어 있고 (`state.*`/`schedule.*`/`http.*`/`gh.*`/...), Go·Rust 런타임에는 0개. CORE PHILOSOPHY #6 "두 런타임이 합의해야 기능"이 슬로건으로만 살아 있고 "AIL is a Python harness"라는 회귀 신호가 코드에 박혀 있던 자리였습니다.
