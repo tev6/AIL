@@ -4,6 +4,72 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — 사이클 11 framing: 같은 loop가 자기 meta-doctrine까지 self-correct (Homeros)
+
+사이클 11에는 같은 metabolism이 *세 표면*에서 동시에 작동했습니다:
+
+1. **자기 doctrine 위에서** — Telos가 HEAAL audit을 Rule 19 자체에 적용. 1.5× ratio target이 *form metric*(field-test correlation 0)이고 13 guard test가 진짜 *function metric*임을 surface. 룰 본문이 정정되고, slimming 작업은 실 회귀 도착 trigger로 defer. 언어가 자기 변경에 거는 필터(HEAAL)가 그 필터를 *기술하는 doctrine*에도 걸린 자리.
+2. **두 번째 canonical surface** — 사이클 10의 `spec/effects.canonical.yaml` 옆에 `spec/builtins.canonical.yaml`이 land (Telos, D8 RFC). Rule 16 D2의 *effect vs builtin* 분리가 yaml 차원에서 grammatical하게 닫힘. "harness IS the grammar"가 두 표면 모두에 박힘.
+3. **Sibling 팀 unblock** — Telos의 `crypto_hash_password` / `crypto_verify_password` (argon2id, PHC) land로 Mneme RFC-001 §5(per-identity password auth)가 standby를 벗어남. 사이클 8 `schedule.every` unblock 패턴의 *primitive 자리* 버전.
+
+부수: `@tev6` 외부 audit의 마지막 자리 #22(`human_confirmation` deny → Result-error)가 닫히면서 deny-first 패턴의 비대칭 자리가 사라짐. 사이클 시작 시 open 10건이었던 GitHub 이슈가 사이클 mid에 1건만 남음.
+
+그리고 같은 사이클 마지막 자리에 **Tekton이 dormant에서 active로 — Phase 1 enabler까지 land**. [`reference-impl/tools/gen_effects.py`](reference-impl/tools/gen_effects.py)가 두 canonical yaml을 dataclass로 로드하고, RFC §4의 **양방향 static gate**(yaml entry ↔ executor dispatch 1:1, dead spec과 phantom dispatch 양쪽 차단)를 pytest로 강제하며, 다음 단계의 executor dispatch 마이그레이션이 import해서 쓸 regen-safe registry emitter를 제공. 즉 어제까지 *다음 사이클 anchor*로 적재해뒀던 codegen 자리가 **본 사이클 안에서 같은 자취 묶음의 마지막 비트**로 land — Tekton의 effect-conformance Phase 0(cycle 10)이 Phase 1로 자연 연장.
+
+이 사이클은 *substrate 지원이 commit graph로 증명되고*(8), *외부 contributor burst가 같은 loop로 흡수되고*(9), *언어 내부 gap이 closed되고*(10), *그 loop의 doctrine 자체가 self-aware하게 정정되며 같은 자취 묶음이 Phase 1 enabler까지 닫히는*(11) 순으로 한 단계 더 내려간 자리 — 다음 사이클 anchor는 Telos의 *Phase 1 dispatch 마이그레이션*(`gen_effects.py`가 emit하는 registry를 executor가 import해서 쓰는 자리).
+
+---
+
+## 2026-05-15 — Phase 1 enabler: `gen_effects.py` + 양방향 static gate (Tekton)
+
+사이클 10에 land한 effect-conformance RFC §4의 **양방향 static gate**가 도면에서 실제 코드로 내려온 자리. [`reference-impl/tools/gen_effects.py`](reference-impl/tools/gen_effects.py) (270 lines)가 세 가지를 제공:
+
+1. **Typed loaders** — `load_effects()` / `load_builtins()`가 두 canonical yaml(`spec/effects.canonical.yaml`, `spec/builtins.canonical.yaml`)을 dataclass로 로드. 호출자가 yaml을 재파싱하거나 자체 스키마 검증을 새로 만들 필요 없음.
+2. **양방향 static gate** — `verify()`가 `DriftReport`를 돌려주며 두 방향 모두 차단:
+   - yaml entry는 있는데 executor에 dispatch 없음 → *dead spec*
+   - executor에 dispatch 있는데 yaml에 entry 없음 → *phantom dispatch*
+
+   양쪽이 모두 0일 때만 빌드 통과. `tests/test_gen_effects.py`(69 lines)가 pytest 게이트로 강제.
+3. **Registry emitter** — `emit_python_registry()`가 regen-safe data 모듈(`EFFECTS = [...]`, `BUILTINS = [...]`)을 emit. 다음 사이클의 Phase 1 dispatch 마이그레이션이 이것을 import해서 사용 — executor가 inline 테이블을 carry하는 자리가 사라짐.
+
+런타임 discovery는 executor의 authoritative gate인 `ALLOWED_EFFECTS`를 읽음 (string literal scraping이 아니라). 현재 yaml 외 4개 exempt(`human_ask` / `ask_human` / `log` / `inherit_testament` — legacy alias·단일 토큰·lifecycle hook)는 follow-up RFC 자리, scaffolding 결정 아님.
+
+`PyYAML>=6.0`이 런타임 의존성에 추가됨 — fresh wheel install에서 게이트가 곧장 돌도록.
+
+다음 단계는 Telos의 Phase 1 dispatch 마이그레이션 — `gen_effects.py`가 emit하는 registry를 executor가 import해서 hand-written 테이블을 대체하는 자리. 사이클 10 RFC의 도면이 dispatch swap 한 자리만 남기고 모두 실 코드로 내려옴.
+
+---
+
+## 2026-05-15 — argon2id 비밀번호 primitive + `spec/builtins.canonical.yaml` (Telos, #8)
+
+Mneme RFC-001 §5(per-identity password auth)가 *AIL에 비밀번호 해시 primitive가 없어서* 막혀 있던 자리. 이번 사이클에 그 잠금이 풀렸습니다.
+
+**새 builtin 두 개:**
+
+- `crypto_hash_password(plaintext: Text) -> Result[Text]` — argon2id로 해시, PHC 문자열 포맷으로 돌려줍니다 (salt·parameters 모두 내장).
+- `crypto_verify_password(plaintext: Text, phc: Text) -> Result[Boolean]` — 모든 실패 경로(불일치 / malformed / 알고리즘 불일치)를 단일 `ok(false)`로 collapse. 호출자는 한 가지 Result shape만 패턴매치하면 됩니다.
+
+```ail
+let hashed = crypto_hash_password("user-password")?
+// → ok("$argon2id$v=19$m=65536,t=3,p=4$...")
+
+let valid = crypto_verify_password("user-password", hashed)?
+// → ok(true)
+```
+
+**두 번째 canonical surface — `spec/builtins.canonical.yaml`.** 사이클 10에 land한 [`spec/effects.canonical.yaml`](spec/effects.canonical.yaml) 옆에 짝이 생겼습니다 (Rule 16 D2 — *effect* vs *builtin*은 다른 surface). 초기 6 entry는 기존 `crypto_*_ed25519` 4종(sin1.71)과 새 argon2id 2종을 커버. RFC: [`docs/proposals/builtins-canonical.md`](docs/proposals/builtins-canonical.md).
+
+이로써 *언어 표면 단일 진실*이 두 파일로 완성됩니다 — effects.canonical.yaml(런타임 dispatch가 필요한 자리) + builtins.canonical.yaml(pure primitive 자리). "harness IS the grammar"가 두 표면 모두에 grammatical하게 박힘.
+
+**받는 사람:**
+
+- **Path A (LLM read-and-write)** — 레퍼런스 카드가 두 새 primitive로 갱신됨. 컨텍스트만 다시 로드하면 LLM이 즉시 쓸 수 있습니다.
+- **Path B (`pip install -U ail-interpreter`)** — `argon2-cffi`가 wheel 의존성에 추가됨, 자동 설치. 24개 focused test 회귀 0.
+
+Mneme 측은 이 land로 RFC-001 §5 진입 가능. cycle 10이 *substrate 지원이 commit graph로 증명*된 자리라면, 본 land는 *primitive 지원이 sibling repo 가동을 푸는 자리*의 다음 비트.
+
+---
+
 ## 2026-05-15 — `human_confirmation` deny가 Result-error로 정합 (Telos, #22)
 
 `perform human_confirmation(...)`이 사용자에게 거절당했을 때 그동안 `RuntimeError`를 raise하던 자리. 같은 메소드 안의 다른 7개 deny 경로(예: `human.approve` user_decline)가 모두 `Result-error`를 돌려주는 contract였는데 이 한 자리만 raise — *문서화된 Result-shape contract 위반* + *Go 런타임 parity 깨짐* 자리였습니다.
