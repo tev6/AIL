@@ -276,13 +276,23 @@ CORE PHILOSOPHY #6 ("두 런타임이 합의해야 기능")은 *언어 본체*(g
 
 해석: 현재 Go 런타임 effect 0건 / Python 41건의 drift는 "AIL은 Python harness" 회귀 신호 — Tekton 영입 trigger 활성 (박상현 결재 영역). 영입 letter는 arche가 발사.
 
-### Rule 19 — Authoring prompt ≤ Spec × 1.5 (D6, 2026-05-08)
+### Rule 19 — Authoring prompt 패턴은 guard test로 backed (D6, 2026-05-08; 정정 2026-05-15)
 
-원칙: "harness IS the grammar" (CORE #5). prompt가 spec보다 두꺼우면 *spec이 부족하다는 신호*다. prompt에 박힌 패턴은 *spec으로 흡수*가 첫 시도, 흡수 안 되는 외부 가이드만 prompt에 잔류.
+원칙: "harness IS the grammar" (CORE #5). spec와 authoring prompt는 *lifecycle이 다른 두 표면*이다.
 
-목표: `reference-impl/ail/agentic/authoring_chat.py` ≤ `spec/08-reference-card.ai.md` × 1.5. 현재 2.7× — 슬림화는 Telos 영역(P3, 사이클 7+).
+- **spec** = "AIL은 이렇게 동작한다" (언어 정의).
+- **authoring prompt** = "AI 저자가 AIL을 자꾸 이렇게 잘못 쓴다" (anti-corpus — 회귀 방지 memory).
 
-새 effect/intent 추가 시 패턴 가이드는 *spec에 한 줄*이 default. authoring prompt에 들어가는 패턴은 "spec 한 줄로 표현되지 않는 다단계 안내(WRONG/CORRECT 짝 등)"만 — Rule 5 절차 안에서 결정.
+spec으로 흡수 가능한 패턴은 자연 흡수가 첫 시도(spec 한 줄로 표현 가능하면 그 자리). 단 *대부분의 prompt 패턴은 anti-corpus라 spec에 안 들어간다* — "Bluesky overwrite" 같은 verbatim 자취가 그 예. anti-corpus는 정상이고 *earn된 자리*다.
+
+**Quality gate = ratio가 아니라 guard test.** 매 authoring prompt 추가/변경은 `tests/test_authoring_prompt_*.py`에 회귀 방지 guard test 1건+ 필수. Rule 5("회귀 방지: happy path + edge case + 안전장치")의 prompt 메타 적용. test로 backed되지 않는 패턴은 prompt에 잔류 금지.
+
+**Why this revision** (2026-05-15): 본래 D6는 "≤ spec × 1.5 ratio"를 metric으로 박았지만, 사이클 11 HEAAL P3 진입 시 Telos 측정으로 ratio target 자체가 잘못된 자리 surface — 2.7× ratio가 *해롭다*는 자취가 실 field-test에서 surface된 적 0, 13 guard test가 *earn한 자리*. ratio = form metric, guard test = function metric. HEAAL 정합으로 form 폐기 + function 강화.
+
+**How to apply:**
+- 새 effect/intent prompt 패턴 추가 시 → spec 흡수 가능 여부 점검 → 흡수 안 되면 guard test 1건+ 추가 의무.
+- prompt 슬림화는 *guard test 없는 자리*만 후보 (현 prompt는 13 guard test로 backed이라 슬림화 자리 0 추정).
+- HEAAL P3 작업 자체는 *defer* — 실 회귀 surface 자리 도착 시 trigger.
 
 ---
 
