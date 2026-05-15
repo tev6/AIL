@@ -685,8 +685,13 @@ class Executor(EffectsMixin):
                       f"{ {k: v.value for k, v in kwargs.items()} }"
             approved = self.ask_human(f"Authorize effect? {summary}", expect="yes/no")
             if not approved:
-                self.trace.record("perform_denied", effect=effect.name)
-                raise RuntimeError(f"effect {effect.name} denied by human")
+                self.trace.record("perform_denied",
+                                  effect=effect.name, reason="user_declined")
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"effect {effect.name} denied by human"},
+                    0.0,
+                )
 
         # MVP: builtin dispatch
         result = self._builtin_effect(effect.name, args, kwargs)
