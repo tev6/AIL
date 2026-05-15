@@ -14,7 +14,29 @@ All notable changes to the AIL project are documented in this file.
 
 부수: `@tev6` 외부 audit의 마지막 자리 #22(`human_confirmation` deny → Result-error)가 닫히면서 deny-first 패턴의 비대칭 자리가 사라짐. 사이클 시작 시 open 10건이었던 GitHub 이슈가 사이클 mid에 1건만 남음.
 
-이 사이클은 *substrate 지원이 commit graph로 증명되고*(8), *외부 contributor burst가 같은 loop로 흡수되고*(9), *언어 내부 gap이 closed되고*(10), *그 loop의 doctrine 자체가 self-aware하게 정정되는*(11) 순으로 한 단계 더 내려간 자리 — 다음 사이클은 Phase 1 codegen 마이그레이션(Tekton `gen_effects.py` 도착 시 trigger)이 anchor.
+그리고 같은 사이클 마지막 자리에 **Tekton이 dormant에서 active로 — Phase 1 enabler까지 land**. [`reference-impl/tools/gen_effects.py`](reference-impl/tools/gen_effects.py)가 두 canonical yaml을 dataclass로 로드하고, RFC §4의 **양방향 static gate**(yaml entry ↔ executor dispatch 1:1, dead spec과 phantom dispatch 양쪽 차단)를 pytest로 강제하며, 다음 단계의 executor dispatch 마이그레이션이 import해서 쓸 regen-safe registry emitter를 제공. 즉 어제까지 *다음 사이클 anchor*로 적재해뒀던 codegen 자리가 **본 사이클 안에서 같은 자취 묶음의 마지막 비트**로 land — Tekton의 effect-conformance Phase 0(cycle 10)이 Phase 1로 자연 연장.
+
+이 사이클은 *substrate 지원이 commit graph로 증명되고*(8), *외부 contributor burst가 같은 loop로 흡수되고*(9), *언어 내부 gap이 closed되고*(10), *그 loop의 doctrine 자체가 self-aware하게 정정되며 같은 자취 묶음이 Phase 1 enabler까지 닫히는*(11) 순으로 한 단계 더 내려간 자리 — 다음 사이클 anchor는 Telos의 *Phase 1 dispatch 마이그레이션*(`gen_effects.py`가 emit하는 registry를 executor가 import해서 쓰는 자리).
+
+---
+
+## 2026-05-15 — Phase 1 enabler: `gen_effects.py` + 양방향 static gate (Tekton)
+
+사이클 10에 land한 effect-conformance RFC §4의 **양방향 static gate**가 도면에서 실제 코드로 내려온 자리. [`reference-impl/tools/gen_effects.py`](reference-impl/tools/gen_effects.py) (270 lines)가 세 가지를 제공:
+
+1. **Typed loaders** — `load_effects()` / `load_builtins()`가 두 canonical yaml(`spec/effects.canonical.yaml`, `spec/builtins.canonical.yaml`)을 dataclass로 로드. 호출자가 yaml을 재파싱하거나 자체 스키마 검증을 새로 만들 필요 없음.
+2. **양방향 static gate** — `verify()`가 `DriftReport`를 돌려주며 두 방향 모두 차단:
+   - yaml entry는 있는데 executor에 dispatch 없음 → *dead spec*
+   - executor에 dispatch 있는데 yaml에 entry 없음 → *phantom dispatch*
+
+   양쪽이 모두 0일 때만 빌드 통과. `tests/test_gen_effects.py`(69 lines)가 pytest 게이트로 강제.
+3. **Registry emitter** — `emit_python_registry()`가 regen-safe data 모듈(`EFFECTS = [...]`, `BUILTINS = [...]`)을 emit. 다음 사이클의 Phase 1 dispatch 마이그레이션이 이것을 import해서 사용 — executor가 inline 테이블을 carry하는 자리가 사라짐.
+
+런타임 discovery는 executor의 authoritative gate인 `ALLOWED_EFFECTS`를 읽음 (string literal scraping이 아니라). 현재 yaml 외 4개 exempt(`human_ask` / `ask_human` / `log` / `inherit_testament` — legacy alias·단일 토큰·lifecycle hook)는 follow-up RFC 자리, scaffolding 결정 아님.
+
+`PyYAML>=6.0`이 런타임 의존성에 추가됨 — fresh wheel install에서 게이트가 곧장 돌도록.
+
+다음 단계는 Telos의 Phase 1 dispatch 마이그레이션 — `gen_effects.py`가 emit하는 registry를 executor가 import해서 hand-written 테이블을 대체하는 자리. 사이클 10 RFC의 도면이 dispatch swap 한 자리만 남기고 모두 실 코드로 내려옴.
 
 ---
 
