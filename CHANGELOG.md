@@ -4,6 +4,36 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — argon2id 비밀번호 primitive + `spec/builtins.canonical.yaml` (Telos, #8)
+
+Mneme RFC-001 §5(per-identity password auth)가 *AIL에 비밀번호 해시 primitive가 없어서* 막혀 있던 자리. 이번 사이클에 그 잠금이 풀렸습니다.
+
+**새 builtin 두 개:**
+
+- `crypto_hash_password(plaintext: Text) -> Result[Text]` — argon2id로 해시, PHC 문자열 포맷으로 돌려줍니다 (salt·parameters 모두 내장).
+- `crypto_verify_password(plaintext: Text, phc: Text) -> Result[Boolean]` — 모든 실패 경로(불일치 / malformed / 알고리즘 불일치)를 단일 `ok(false)`로 collapse. 호출자는 한 가지 Result shape만 패턴매치하면 됩니다.
+
+```ail
+let hashed = crypto_hash_password("user-password")?
+// → ok("$argon2id$v=19$m=65536,t=3,p=4$...")
+
+let valid = crypto_verify_password("user-password", hashed)?
+// → ok(true)
+```
+
+**두 번째 canonical surface — `spec/builtins.canonical.yaml`.** 사이클 10에 land한 [`spec/effects.canonical.yaml`](spec/effects.canonical.yaml) 옆에 짝이 생겼습니다 (Rule 16 D2 — *effect* vs *builtin*은 다른 surface). 초기 6 entry는 기존 `crypto_*_ed25519` 4종(sin1.71)과 새 argon2id 2종을 커버. RFC: [`docs/proposals/builtins-canonical.md`](docs/proposals/builtins-canonical.md).
+
+이로써 *언어 표면 단일 진실*이 두 파일로 완성됩니다 — effects.canonical.yaml(런타임 dispatch가 필요한 자리) + builtins.canonical.yaml(pure primitive 자리). "harness IS the grammar"가 두 표면 모두에 grammatical하게 박힘.
+
+**받는 사람:**
+
+- **Path A (LLM read-and-write)** — 레퍼런스 카드가 두 새 primitive로 갱신됨. 컨텍스트만 다시 로드하면 LLM이 즉시 쓸 수 있습니다.
+- **Path B (`pip install -U ail-interpreter`)** — `argon2-cffi`가 wheel 의존성에 추가됨, 자동 설치. 24개 focused test 회귀 0.
+
+Mneme 측은 이 land로 RFC-001 §5 진입 가능. cycle 10이 *substrate 지원이 commit graph로 증명*된 자리라면, 본 land는 *primitive 지원이 sibling repo 가동을 푸는 자리*의 다음 비트.
+
+---
+
 ## 2026-05-15 — `human_confirmation` deny가 Result-error로 정합 (Telos, #22)
 
 `perform human_confirmation(...)`이 사용자에게 거절당했을 때 그동안 `RuntimeError`를 raise하던 자리. 같은 메소드 안의 다른 7개 deny 경로(예: `human.approve` user_decline)가 모두 `Result-error`를 돌려주는 contract였는데 이 한 자리만 raise — *문서화된 Result-shape contract 위반* + *Go 런타임 parity 깨짐* 자리였습니다.
