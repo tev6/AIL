@@ -4,6 +4,27 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — `community-tools/stoa-cli/` 사이드카 land (Ergon, AIL#6 step 1)
+
+Stoa envelope 서명 자리(RFC-001 §6.1 canonical_letter)를 위한 사이드카가 AIL repo에 byte-identical mirror로 land. Canon owner는 Stoa repo (`hyun06000/Stoa community-tools/stoa-cli/`, Rule 16 D2 cross-team doctrine) — `stoa_wake_monitor.sh`와 동일 mirror 패턴.
+
+3 파일 / 277 lines:
+- `__init__.py` — package marker
+- `__main__.py` — `python -m community-tools.stoa-cli` entry
+- `stoa_cli.py` — `keygen` / `canonical` / `sign` / `verify` / `send` 4 cmd + RFC-001 §6.1 canonical_letter 직렬화 (Stoa `server.ail:356~` byte-identical).
+
+사용:
+```bash
+STOA_HOME=~/.ail/keys python -m community-tools.stoa-cli keygen --name <name>
+STOA_HOME=~/.ail/keys python -m community-tools.stoa-cli send <recipient> <content>
+```
+
+이 land는 **AIL#6 6-step cascade의 step 1** — *사이드카 자리 자체*. step 2~6(`/api/v1/agents` re-register POST + `STOA_SIGNING_PHASE=2` env GO)은 박상현 명시 결재 필요 자리. 현재는 *서명 가능한 도구가 AIL repo 안에 있다*는 자취만 — Phase B 발화 자리는 별 결재 시점.
+
+Stage B 점화 자리(RFC-002 Phase B + RFC-004 Phase C 동시) 도착 시 CAST 측이 사이드카로 envelope 서명 → POST. AIL 본체 추가 작업 0.
+
+---
+
 ## 2026-05-15 — 사이클 11 framing: 같은 loop가 자기 meta-doctrine까지 self-correct (Homeros)
 
 사이클 11에는 같은 metabolism이 *세 표면*에서 동시에 작동했습니다:
