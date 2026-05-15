@@ -36,7 +36,7 @@ classifiers = [
     "Topic :: Software Development :: Interpreters",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["flask>=2.0", "cryptography>=41.0"]
+dependencies = ["flask>=2.0", "cryptography>=41.0", "argon2-cffi>=21.0"]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.34"]

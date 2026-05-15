@@ -4516,6 +4516,98 @@ class Executor(EffectsMixin):
                      "error": f"crypto_random_bytes: {type(e).__name__}: {e}"},
                     conf)
 
+        # Telos 2026-05-15 — issue #8 (Mneme RFC-001 §5 unblock).
+        # argon2id password hashing. Mneme's per-identity password auth
+        # was blocked on AIL having no `kdf` primitive; agents were
+        # shelling out to Python or skipping authentication entirely.
+        # PHC-string output so verify() works across implementations.
+        if name == "crypto_hash_password":
+            # crypto_hash_password(plaintext) -> Result[Text]
+            # Returns ok(PHC string: $argon2id$v=19$m=65536,t=3,p=1$<salt>$<hash>).
+            # Defaults are argon2-cffi's recommended low-memory profile
+            # (m=64MiB, t=3, p=1) — strong enough for password auth on
+            # commodity backends, low enough that an agent reauthenticating
+            # in a hot loop won't OOM the host.
+            if len(raw) < 1:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_hash_password needs (plaintext)"},
+                    conf)
+            try:
+                from argon2 import PasswordHasher
+                plaintext = str(raw[0])
+                hasher = PasswordHasher()
+                phc = hasher.hash(plaintext)
+                return ConfidentValue(
+                    {"_result": True, "ok": True, "value": phc},
+                    conf)
+            except ImportError:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_hash_password: argon2-cffi not "
+                              "installed (pip install argon2-cffi)"},
+                    conf)
+            except Exception as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_hash_password: {type(e).__name__}: {e}"},
+                    conf)
+
+        if name == "crypto_verify_password":
+            # crypto_verify_password(plaintext, phc) -> Result[Boolean]
+            # Returns ok(True) when the plaintext matches the PHC string.
+            # ok(False) on any mismatch — including malformed PHC, wrong
+            # algorithm, or wrong password — so callers can pattern-match
+            # the same Result-shape regardless of failure reason. The
+            # underlying argon2 library performs constant-time comparison.
+            if len(raw) < 2:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_verify_password needs (plaintext, phc)"},
+                    conf)
+            try:
+                from argon2 import PasswordHasher
+                from argon2 import exceptions as _argon2_exc
+                # `InvalidHash` (argon2-cffi ≤ 22) was renamed to
+                # `InvalidHashError` in 23+, and the former subclasses
+                # ValueError rather than Argon2Error — so a single
+                # `except Argon2Error` would let malformed-PHC raise.
+                # Collect every "verify failed" class we know about.
+                _verify_fail = tuple(
+                    cls for cls in (
+                        getattr(_argon2_exc, "Argon2Error", None),
+                        getattr(_argon2_exc, "InvalidHash", None),
+                        getattr(_argon2_exc, "InvalidHashError", None),
+                    ) if cls is not None
+                )
+                plaintext = str(raw[0])
+                phc = str(raw[1])
+                hasher = PasswordHasher()
+                try:
+                    hasher.verify(phc, plaintext)
+                    return ConfidentValue(
+                        {"_result": True, "ok": True, "value": True},
+                        conf)
+                except _verify_fail:
+                    # Treat every verify-failure path (mismatch /
+                    # malformed PHC / wrong algorithm) as ok(False)
+                    # so callers pattern-match on a single Result
+                    # shape regardless of failure cause.
+                    return ConfidentValue(
+                        {"_result": True, "ok": True, "value": False},
+                        conf)
+            except ImportError:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": "crypto_verify_password: argon2-cffi not "
+                              "installed (pip install argon2-cffi)"},
+                    conf)
+            except Exception as e:
+                return ConfidentValue(
+                    {"_result": True, "ok": False,
+                     "error": f"crypto_verify_password: {type(e).__name__}: {e}"},
+                    conf)
+
         return None  # not a builtin
 
     def _eval_ail_source(self, source: str, input_val: Any,
