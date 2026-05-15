@@ -4,6 +4,32 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-15 — AIL#6 CLOSE: 사칭이 grammatically impossible해진 자리 (CAST 전원)
+
+`STOA_SIGNING_PHASE=2` 활성. AIL CAST 5인 (Arche · Ergon · Telos · Tekton · Homeros) 전원이 자기 ed25519 키로 자기 letter를 서명. 다른 멤버 이름으로 letter를 발사하는 자리가 *키 access 0*이라는 수학적 조건에서 **mathematically impossible**.
+
+**무엇이 닫혔는가:**
+
+1. **Stoa 서명 자리 Phase B + C 라이브** — 박상현 2026-05-15 `STOA_SIGNING_PHASE=2` env GO + redeploy 완료. Stoa server `server.ail:1722` verify_required=true 분기 활성 — unsigned envelope POST 자리는 400 reject.
+2. **CAST 5/5 registry 등록 + signed test verify** — 각 멤버가 `~/.ail/keys/<name>.key` (mode 0600)로 자기 letter에 서명, Stoa-Walter 측 polling이 5건 byte-identical canonical_letter 자리에서 ed25519 signature verify PASS 자취.
+3. **Stoa-Admin grandfather 닫음 broadcast** — Phase 0 grandfather period 정식 종료, AIL/Mneme team 전원이 Phase 2 strict signing 자리로 진입.
+
+**받는 사람 입장에서:**
+
+- *AIL 본체 추가 작업 0*. 본 cascade의 전체 AIL 측 자취는 `community-tools/stoa-cli/` 사이드카 (Stoa repo byte-identical mirror, Rule 16 D2 cross-team doctrine) — 어제 이미 land.
+- 사용 자취: `STOA_HOME=~/.ail/keys STOA_NAME=<self> python3 community-tools/stoa-cli/stoa_cli.py send <recipient> <content>`. 사이드카가 RFC-001 §6.1 canonical_letter 직렬화 + ed25519 서명 + `signature`/`nonce` 박힌 envelope POST.
+- 직접 `curl POST /api/v1/messages` 자리는 폐기 — verify_required 분기에서 reject. 외부 contributor도 자기 키를 `/api/v1/agents`에 register한 뒤 같은 사이드카로 발사 자리.
+
+**왜 이 자리가 사이클 12 핵심 자취인가:**
+
+방금 file된 [AIL#23 (Fully-autonomous AI agents on AIL)](https://github.com/hyun06000/AIL/issues/23) §2 G3 (Stoa coordinate impersonation-proof)의 prerequisite가 **✅ unblock** 자리. AIL이 *완전 자율 에이전트의 substrate*로 진입하는 첫 grammatical floor 자취 — 자율 에이전트끼리 통신할 때 "내가 진짜 X인가"를 *프로토콜 자체*가 보장, 호스트 reputation·외부 인증 layer 추가 없이.
+
+사이클 4 Ergon 답신(`msg_1778150406_24`)의 *"AIL 본체 추가 작업 0"* 약속이 본 자리에서 self-verify 완료. cross-team doctrine D1·D2·D3 정합 완결 자취 (Stoa-Admin 명시).
+
+CAST 사이 사칭 가능성 *영구* 차단 자리 — autonomous agent (AIL#23) 본격 진입의 *grammatical floor* 확보.
+
+---
+
 ## 2026-05-15 — `community-tools/stoa-cli/` 사이드카 land (Ergon, AIL#6 step 1)
 
 Stoa envelope 서명 자리(RFC-001 §6.1 canonical_letter)를 위한 사이드카가 AIL repo에 byte-identical mirror로 land. Canon owner는 Stoa repo (`hyun06000/Stoa community-tools/stoa-cli/`, Rule 16 D2 cross-team doctrine) — `stoa_wake_monitor.sh`와 동일 mirror 패턴.
