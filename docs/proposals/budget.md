@@ -39,11 +39,12 @@ perform budget.remaining(category: Text) -> Result[Number]
   // (i.e., never charged AND no ceiling configured).
 
 perform budget.reset(category: Text) -> Result[Number]
-  // Period roll-over. Returns ok(new_ceiling). Caller is the
-  // scheduler — typically an agent's `on_period_rollover` lifecycle
-  // hook or a separate roll-over agent. The runtime does NOT
-  // auto-rollover on a wall clock; period boundaries are explicit
-  // events the agent surfaces.
+  // Period roll-over. Returns ok(ceiling) — reset itself does not
+  // change the ceiling, it just zeroes `consumed` so the full
+  // ceiling is available again. Caller is the scheduler — typically
+  // an agent's `on_period_rollover` lifecycle hook or a separate
+  // roll-over agent. The runtime does NOT auto-rollover on a wall
+  // clock; period boundaries are explicit events the agent surfaces.
 ```
 
 Both `charge` and `reset` write to the ledger; `remaining` does not.
@@ -90,24 +91,31 @@ state key: budget.{category}.ceiling
 state key: budget.{category}.period_started_at
 ```
 
-Ledger append (existing `state.*` ledger event shape):
+Ledger append — schema is defined here (self-contained, not a
+forward reference to a not-yet-shipped G7 canonical):
 
 ```json
 {
-  "event": "budget_charge",
+  "event": "budget_charge" | "budget_reset",
   "identity": "telos",
   "category": "llm_tokens",
-  "amount": 12,
-  "consumed_after": 8743,
+  "amount": 12,             // omitted on reset
+  "consumed_after": 8743,   // post-charge consumed; 0 after reset
   "ceiling": 10000,
   "ts": "2026-05-18T05:12:03Z"
 }
 ```
 
-When G2 (Mneme RFC-001 §5 vault) lands and G7 (ledger.* canonical
-surface) lands, the storage migrates from local `state.*` to the
-identity's Mneme vault entry. The effect surface above does not
-change — only the backing.
+Required keys: `event`, `identity`, `category`, `consumed_after`,
+`ceiling`, `ts`. `amount` is present for `budget_charge`, omitted
+for `budget_reset`.
+
+When G7 (`ledger.*` canonical surface) lands, this schema is
+absorbed unchanged — G7's job is to standardize the *envelope* and
+storage, not the per-effect payload. When G2 (Mneme RFC-001 §5
+vault) lands, the storage migrates from local `state.*` to the
+identity's Mneme vault entry. The effect surface and the payload
+schema above stay stable across both migrations.
 
 ## 4. Capability binding
 
@@ -129,18 +137,26 @@ with context budget_aware extends default {
 Out-of-band, before the agent runs:
 
 ```
-$AIL_BUDGET_CONFIG/<identity>.json
-  {
-    "llm_tokens":      { "ceiling": 10000, "period": "daily" },
-    "compute_minutes": { "ceiling": 60,    "period": "daily" },
-    "stoa_push":       { "ceiling": 200,   "period": "daily" }
-  }
+$AIL_BUDGET_CONFIG/<identity>.yaml
+  llm_tokens:      { ceiling: 10000, period: daily }
+  compute_minutes: { ceiling: 60,    period: daily }
+  stoa_push:       { ceiling: 200,   period: daily }
 ```
+
+YAML to match the convention set by `spec/effects.canonical.yaml`
+and `spec/builtins.canonical.yaml`. (JSON variant accepted by the
+loader for third-party tooling that prefers JSON — equivalent
+shape.)
 
 Loaded once at executor boot. Missing file → all categories
 unconfigured → first `charge` for any category returns
 `Result-error("budget_unconfigured")` so the agent surfaces the gap
 rather than silently running uncapped.
+
+Phase 0 land does not support live reload — restart is required to
+pick up config changes. Phase 1+ trigger: SIGHUP-driven reload or
+an explicit `budget.reload` effect, depending on operational
+signal.
 
 `period` is advisory in this RFC — see §6 Q3 for the open decision
 on whether the runtime auto-rolls or whether agents do it
@@ -191,9 +207,19 @@ Inside `agents/<name>/` the identity is the directory name. For an
 ad-hoc program run by `ail run foo.ail`, the identity is the
 `STOA_NAME` env var (already standard since AIL#6 Phase 2). Missing
 `STOA_NAME` and not inside `agents/<name>/` → identity =
-`"anonymous"`; the runtime configures `anonymous` with a tight
-default ceiling (10% of the smallest configured agent's ceiling) so
-exploratory runs cannot hide.
+`"anonymous"`; the runtime configures `anonymous` with fixed safe
+defaults so exploratory runs cannot hide:
+
+```
+anonymous:
+  llm_tokens:      { ceiling: 100, period: daily }
+  compute_minutes: { ceiling: 1,   period: daily }
+  stoa_push:       { ceiling: 5,   period: daily }
+```
+
+Fixed defaults rather than "10% of the smallest configured ceiling"
+because if no agent is configured yet there is no smallest — fixed
+values give a deterministic floor that cannot recurse or vanish.
 
 ### Q3 — Period rollover policy
 
@@ -218,12 +244,16 @@ decision the ledger captures.
 Per Rule 17/D4 substrate gate: `budget.*` releases when
 
 - Tekton Phase A pilot signs up as the first production consumer
-  (`charter.ail` calls `budget.charge("llm_tokens", n)` around every
-  intent call), OR
+  (a followup PR to `agents/tekton/charter.ail` folds
+  `budget.charge("llm_tokens", est_tokens)` immediately before each
+  `intent` invocation — single-line addition, no scaffold change),
+  OR
 - 24h propagation since dev land with no regression.
 
 The first path is preferred — it gives us field data on Option A
-behavior before the next RFC pass.
+behavior before the next RFC pass. Tekton lane delegation letter
+(separate from this RFC) is the trigger after Phase 0 implementation
+lands.
 
 ## 8. Test plan
 
