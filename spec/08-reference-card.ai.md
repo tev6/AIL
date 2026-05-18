@@ -914,6 +914,19 @@ Built-in effects:
     `{ file: Text, line: Number, size_kb: Number, count: Number }`.
     Returns `Result-error("tracemalloc_not_started")` if `start`
     was never called — silent empty rows would hide that gap.
+  - `diag.malloc_stats() -> Result[Record]` — glibc `mallinfo2`
+    fields most useful for fragmentation diagnosis: `arena`,
+    `uordblks` (in-use), `fordblks` (free), `hblks`, `hblkhd`,
+    `ordblks`, `keepcost`. All bytes. Linux only; macOS/Windows
+    return `Result-error("malloc_stats_unsupported")`. glibc < 2.33
+    returns `Result-error` because the older `mallinfo()` int
+    fields overflow silently on multi-GB processes.
+  - `diag.smaps_summary() -> Result[Record]` — sum of `Rss:` from
+    `/proc/self/smaps`, bucketed into
+    `{ rss_anon_kb, rss_file_kb, heap_kb, stack_kb }`. Linux only;
+    other platforms return `Result-error("smaps_unsupported")`.
+    Use it to ask "is the RSS gap from anonymous mmaps, file
+    mappings, the heap, or the stack?" without spawning a debugger.
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a

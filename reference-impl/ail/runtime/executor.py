@@ -86,6 +86,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "diag.gc_count", "diag.object_count", "diag.thread_count",
     "diag.tracemalloc_start", "diag.tracemalloc_stop",
     "diag.tracemalloc_snapshot",
+    "diag.malloc_stats", "diag.smaps_summary",
 })
 import threading as _threading
 
@@ -194,6 +195,8 @@ class Executor(EffectsMixin):
         "diag.tracemalloc_start":    "_diag_tracemalloc_start",
         "diag.tracemalloc_stop":     "_diag_tracemalloc_stop",
         "diag.tracemalloc_snapshot": "_diag_tracemalloc_snapshot",
+        "diag.malloc_stats":         "_diag_malloc_stats",
+        "diag.smaps_summary":        "_diag_smaps_summary",
     }
 
     def __init__(self, program: Program, adapter: ModelAdapter,
@@ -2428,6 +2431,134 @@ class Executor(EffectsMixin):
             return self._result_err(
                 f"diag.tracemalloc_snapshot: {type(e).__name__}: {e}",
                 origin)
+
+    # --- diag native-layer extensions (cycle 13 v1.76.0).
+    # The python-heap diag.* effects close the Python-side leak path;
+    # these two surface the C/glibc layer underneath so the
+    # tracemalloc-top10-vs-VmRSS gap is decomposable. Linux only —
+    # macOS and Windows do not expose mallinfo2 or /proc/self/smaps,
+    # and we surface that explicitly rather than returning empty rows.
+
+    def _diag_malloc_stats(self, args, kwargs, origin):
+        """diag.malloc_stats() -> Result[Record]
+        glibc mallinfo2 via ctypes. Returns the seven fields most useful
+        for diagnosing fragmentation (arena, uordblks, fordblks, hblks,
+        hblkhd, ordblks, keepcost). All values in bytes."""
+        import platform
+        if platform.system() != "Linux":
+            return self._result_err("malloc_stats_unsupported", origin)
+        try:
+            import ctypes
+            import ctypes.util
+        except Exception as e:
+            return self._result_err(
+                f"diag.malloc_stats: ctypes unavailable: "
+                f"{type(e).__name__}: {e}", origin)
+        try:
+            class _Mallinfo2(ctypes.Structure):
+                _fields_ = [
+                    ("arena", ctypes.c_size_t),
+                    ("ordblks", ctypes.c_size_t),
+                    ("smblks", ctypes.c_size_t),
+                    ("hblks", ctypes.c_size_t),
+                    ("hblkhd", ctypes.c_size_t),
+                    ("usmblks", ctypes.c_size_t),
+                    ("fsmblks", ctypes.c_size_t),
+                    ("uordblks", ctypes.c_size_t),
+                    ("fordblks", ctypes.c_size_t),
+                    ("keepcost", ctypes.c_size_t),
+                ]
+            libc_path = ctypes.util.find_library("c")
+            if not libc_path:
+                return self._result_err(
+                    "diag.malloc_stats: libc not found", origin)
+            libc = ctypes.CDLL(libc_path)
+            # mallinfo2 only exists on glibc ≥ 2.33. older glibc has
+            # mallinfo() (int fields, no size_t) — we deliberately do
+            # not fall back to it because the int fields silently
+            # overflow on multi-GB processes and produce wrong numbers.
+            if not hasattr(libc, "mallinfo2"):
+                return self._result_err(
+                    "diag.malloc_stats: glibc lacks mallinfo2 "
+                    "(need glibc >= 2.33)", origin)
+            libc.mallinfo2.restype = _Mallinfo2
+            m = libc.mallinfo2()
+            return self._result_ok({
+                "arena":    int(m.arena),
+                "uordblks": int(m.uordblks),
+                "fordblks": int(m.fordblks),
+                "hblks":    int(m.hblks),
+                "hblkhd":   int(m.hblkhd),
+                "ordblks":  int(m.ordblks),
+                "keepcost": int(m.keepcost),
+            }, origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.malloc_stats: {type(e).__name__}: {e}", origin)
+
+    def _diag_smaps_summary(self, args, kwargs, origin):
+        """diag.smaps_summary() -> Result[Record]
+        Parse /proc/self/smaps and sum Rss-anon / Rss-file / [heap] /
+        [stack] in kB. The four buckets together usually account for
+        VmRSS within rounding; a fast way to ask 'is the RSS gap from
+        anonymous mmaps, file mappings, the heap, or the stack?'
+        without spawning a debugger."""
+        import os
+        if not os.path.exists("/proc/self/smaps"):
+            return self._result_err("smaps_unsupported", origin)
+        rss_anon = 0
+        rss_file = 0
+        heap = 0
+        stack = 0
+        try:
+            with open("/proc/self/smaps", "r") as fh:
+                # smaps comes in repeating blocks. Each block opens
+                # with a header line ending in optional path:
+                #   ADDR PERMS OFFSET DEV INODE PATH
+                # then lines like "Rss:    1234 kB", "Anonymous: ...".
+                # Strategy: scan the header to decide the bucket, then
+                # add the block's Rss to that bucket.
+                bucket = None
+                for line in fh:
+                    if not line:
+                        continue
+                    # New block: a line starts with hex address.
+                    parts = line.split()
+                    if (parts and "-" in parts[0]
+                            and parts[0].replace("-", "").isalnum()):
+                        path = parts[-1] if len(parts) >= 6 else ""
+                        if path == "[heap]":
+                            bucket = "heap"
+                        elif path == "[stack]":
+                            bucket = "stack"
+                        elif (path == "" or path.startswith("[")
+                              or path == "anon"):
+                            bucket = "anon"
+                        else:
+                            bucket = "file"
+                    elif line.startswith("Rss:"):
+                        # "Rss:    1234 kB"
+                        try:
+                            n = int(line.split()[1])
+                        except (IndexError, ValueError):
+                            continue
+                        if bucket == "heap":
+                            heap += n
+                        elif bucket == "stack":
+                            stack += n
+                        elif bucket == "anon":
+                            rss_anon += n
+                        elif bucket == "file":
+                            rss_file += n
+            return self._result_ok({
+                "rss_anon_kb": rss_anon,
+                "rss_file_kb": rss_file,
+                "heap_kb":     heap,
+                "stack_kb":    stack,
+            }, origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.smaps_summary: {type(e).__name__}: {e}", origin)
 
     # --- schedule effect (L2 v2 case study Gap #3 — recurring work).
     # The effect only *registers* the cadence; the actual re-invocation
