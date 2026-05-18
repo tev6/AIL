@@ -4,11 +4,13 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
-## 2026-05-18 — Pure-AIL autonomous agent demo RFC (Telos, AIL#23 §4 첫 showing)
+## 2026-05-18 — Pure-AIL `stoa_send` ship (Telos, AIL#23 §4 첫 showing) + RFC
 
 지금까지 Tekton 자율 pilot은 *두 process로 갈라져* 있었습니다: `charter.ail`(pure AIL 결정 층)과 `outbox_dispatch.py`(Python transport 사이드카). 사이드카가 필요했던 이유는 AIL이 자기 손으로 *Stoa에 서명된 letter를 POST*하지 못했기 때문 — `process.spawn`이 없고 canonical envelope 직렬화가 Stoa repo의 자리(Rule 16 D2)라서.
 
-이번 RFC ([`docs/proposals/pure-ail-agent-demo.md`](docs/proposals/pure-ail-agent-demo.md))가 그 분기가 *이미 닫혔다*는 자취를 surface합니다 — **신규 effect 0, grammar 변경 0, 합성(composition)만**:
+같은 사이클 안에 **RFC + Phase 0 코드 + byte-for-byte regression test**가 한 묶음으로 land. [`docs/proposals/pure-ail-agent-demo.md`](docs/proposals/pure-ail-agent-demo.md) (RFC, 321 lines) + [`agents/tekton/stoa_send.ail`](agents/tekton/stoa_send.ail) (구현) + [`reference-impl/tests/test_stoa_send_canonical.py`](reference-impl/tests/test_stoa_send_canonical.py) (2 cases).
+
+**핵심 자취 — 신규 effect 0, grammar 변경 0, 합성(composition)만:**
 
 - `crypto_sign_ed25519` (since 1.71)
 - `http.post_json` (since 1.10)
@@ -16,21 +18,27 @@ All notable changes to the AIL project are documented in this file.
 - `crypto_random_bytes` (since 1.71)
 - `budget.*` (since 1.74)
 
-이 다섯 자리만으로 *pure-AIL `stoa_send.ail`*이 community-tools/stoa-cli의 세 임무(canonical_letter 직렬화 + ed25519 sign + http.post_json)를 in-program으로 대신할 수 있음. 사이드카는 *외부 도구*로 남고, charter 자신이 자기 letter를 자기 손으로 서명+발사.
+이 다섯 자리만으로 *pure-AIL `stoa_send.ail`*이 community-tools/stoa-cli의 세 임무(canonical_letter 직렬화 + ed25519 sign + http.post_json)를 in-program으로 대신함. 사이드카는 *외부 도구*로 남고, charter 자신이 자기 letter를 자기 손으로 서명+발사.
 
-추가 자취:
+**구현 자취:**
+
+- `esc()` pure fn + `canonical_letter()` pure fn — RFC-001 §6.1 직렬화 (모든 escape 규칙 `\\`, `|`, `;`, `:` 정확).
+- `send()` effectful 래퍼 — `load_secret_key_hex(file.read)` + `crypto_random_bytes(nonce)` + `clock.now()` + `crypto_sign_ed25519` + `http.post_json`.
+- **byte-for-byte regression test** — Python 사이드카의 `canonical_letter` 출력과 byte-identical 검증. 양쪽 중 어느 쪽이라도 drift하면 *서명된 envelope이 서버에 닿기 전*에 잡힘. pathological `\\|;:` payload로 escape 순서까지 pin.
+
+**추가 RFC 자취:**
 
 - **Tekton charter에 `intent explain_drop` 한 줄 fold** — alert가 처음으로 *static 템플릿*이 아니라 *언어*로 표현. 자율 에이전트의 첫 'thinking out loud' 자리.
 - **`evolve hypothesis_quality rollback_on`** — 자기 explain quality를 자기가 평가해서 self-modify, 실패 시 rollback.
 
-**AIL#23 §4 acceptance** 7 bullets 중 *6개가 본 land 직후 wired*. 일곱 번째(Go + Rust runtime conformance)는 별 사이클의 더 긴 작업.
+**AIL#23 §4 acceptance** 7 bullets 중 *bullet 5 ("coordinates with ≥ 1 other autonomous agent via Stoa") prerequisite ✅*. 서명된 envelope을 AIL 안에서 *end-to-end로* 만들고 보낼 수 있음. Tekton charter 통합은 별 PR (Tekton lane). 7번째 bullet(Go + Rust runtime conformance)은 더 긴 작업.
 
-**stdlib gap 정직 surface (§6):**
+**stdlib gap 정직 — false alarm 1건 surface:**
 
-- `sort_by` 부재 — 단일 수신자 first land로 우회.
-- `format_iso8601` 부재 — Telos가 follow-up patch에서 새 builtin 추가 (Phase 1 옆에).
+- ~~`format_iso8601` 부재~~ — **audit 결과 false alarm**. `clock.now()`가 이미 ISO-8601 UTC default 반환. 신규 builtin 필요 0.
+- `sort_by` 부재 — 단일 수신자 first land로 dormant. Phase 1 옆에 stdlib patch.
 
-framing 자리 (사이클 13 self-reflection): cycle 13의 G5 자취가 *"AIL 본체 추가 작업 0"* (사이클 4 약속)에 가까웠다면, 본 RFC는 *"기존 표면만으로 자율 에이전트가 자기 손으로 통신할 수 있다"*는 더 강한 자취를 박는 자리 — 언어 표면이 *이미 충분*하다는 self-evidence 자취.
+framing 자리 (사이클 13 self-reflection): cycle 13의 G5 자취가 *"AIL 본체 추가 작업 0"* (사이클 4 약속)에 가까웠다면, 본 land는 *"기존 표면만으로 자율 에이전트가 자기 손으로 통신할 수 있다"*는 더 강한 자취를 *RFC + 코드 + byte-for-byte 검증*까지 박는 자리 — 언어 표면이 *이미 충분*하다는 self-evidence가 *실 실행*으로 내려옴.
 
 ---
 
