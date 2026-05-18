@@ -98,11 +98,10 @@ fn load_secret_key_hex(identity: Text) -> Result[Text] {
     return ok(trim(unwrap(r)))
 }
 
-fn iso8601_utc() -> Result[Text] {
-    n = perform clock.now()
-    if is_error(n) { return n }
-    // clock.now returns epoch seconds; stdlib helper formats ISO-8601 UTC
-    return ok(format_iso8601(unwrap(n)))
+fn iso8601_utc() -> Text {
+    // clock.now() already returns the canonical "YYYY-MM-DDTHH:MM:SSZ"
+    // string by default (clock.py:_clock_now). No formatting needed.
+    return perform clock.now()
 }
 
 // --- send (signed POST) ---
@@ -263,22 +262,19 @@ stands on bullets 1–6.
   as Text), `trim`, `join`, `length`, `slice`, `to_text`,
   `to_number`, `range`, `sort` (plain comparator). All in the
   reference card.
-- **Two real gaps — both fixable with a one-fn stdlib patch:**
-  - `sort_by(list: [Record], key_fn_name: Text) -> [Record]` does
-    not exist. Plain `sort` of records is undefined. For the demo,
-    `to_list` is single-recipient (Phase 0 of this RFC), so the
-    canonical builds a 1-element list with no sort needed. The
-    gap matters when CAST letters address multiple recipients;
-    that lands as a `stdlib/list` patch alongside Phase 1.
-  - `format_iso8601(epoch_seconds: Number) -> Text` does not
-    exist as a primitive. Two paths: (a) compose from existing
-    Number→Text and integer arithmetic (verbose but works); (b)
-    add a single stdlib fn or builtin. Telos recommendation: (b),
-    new builtin `time_iso8601(n: Number) -> Result[Text]`,
-    one-line addition next to `clock.now` in executor and one
-    entry in `builtins.canonical.yaml`. Cheapest correct path.
-- **Both gaps land before Phase 1 charter integration**, in a
-  small follow-up patch from Telos.
+- **Time format — no gap.** First-pass risk audit assumed
+  `clock.now` returned epoch seconds. It does not — `clock.now()`
+  returns `"YYYY-MM-DDTHH:MM:SSZ"` by default (see
+  `reference-impl/ail/runtime/executor_effects/clock.py`). The
+  `iso8601_utc` helper in §1 collapses to a single `perform
+  clock.now()`. No builtin needed.
+- **One real gap — `sort_by` for multi-recipient.**
+  `sort_by(list: [Record], key_fn_name: Text) -> [Record]` does
+  not exist. Plain `sort` of records is undefined. For Phase 0 of
+  this RFC, `to_list` is single-recipient, so the canonical builds
+  a 1-element list with no sort needed. The gap matters when CAST
+  letters address multiple recipients; lands as a `stdlib/list`
+  patch alongside Phase 1.
 - **PEM vs hex.** stoa-cli uses raw hex for the secret key. This
   RFC keeps that format. If/when AIL identities switch to PEM
   (Mneme vault decision), `load_secret_key_hex` adds a parse step.
