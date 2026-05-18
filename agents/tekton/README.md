@@ -14,34 +14,35 @@ score on the configured file drops more than `drop_threshold_pp` (default
 Every tick — pass or fail — appends a record to the ledger at
 `tekton.ledger.<unix_ts>` so 7-day continuous operation is auditable.
 
-## Two-process design
+## Pure AIL agent (Phase 1, cycle 13)
 
-| Layer | File | Role |
+The Python sidecar is retired. `charter.ail` reads the bench file, decides,
+charges its budget, generates a one-sentence hypothesis (the `explain_drop`
+intent), then composes + signs + POSTs the envelope itself — every step
+inside AIL.
+
+| Component | File | Role |
 |---|---|---|
-| Decision | `charter.ail` | Pure AIL. Reads bench file, parses JSON, classifies, writes ledger, drops outbox letter on alert, schedules next tick. No network, no shell, no LLM calls. |
-| Transport | `outbox_dispatch.py` | Python sidecar. Polls `tekton.outbox.<ts>.json`, hands each to `community-tools/stoa-cli/stoa_cli.py send`, renames to `tekton.outbox_done.<ts>.json`. |
+| Decision + transport | `charter.ail` | Reads bench, classifies, charges budget, on alert generates `explain_drop` intent and calls `stoa_send.send` directly. |
+| Canonical / sign / POST | `stoa_send.ail` | Pure-AIL mirror of `community-tools/stoa-cli` canonical_letter (RFC-001 §6.1). Byte-identical regression test in `reference-impl/tests/test_stoa_send_canonical.py`. |
 
-The split exists because:
-
-1. AIL has no `process.spawn` / `shell.exec` effect, so the charter cannot
-   invoke `stoa-cli` directly.
-2. Re-implementing `canonical_letter` inside AIL would cross the Rule 16 D2
-   boundary — Stoa owns canonical envelope serialization. The sidecar is
-   the right home for that logic.
-3. Failure isolation: dispatcher crashes don't lose ledger entries;
-   charter crashes don't lose pending letters.
+Phase 0 (cycle 12) ran a two-process split with `outbox_dispatch.py` polling
+state files and shelling out to the sidecar. Phase 1 removed both — `crypto_sign_ed25519`
+(builtin since 1.71) + `http.post_json` (since 1.10) are sufficient
+substrate to keep the entire signed-letter path inside the language.
+`community-tools/stoa-cli/` stays as the byte-identical reference
+implementation for cross-runtime regression testing.
 
 ## State schema
 
 All keys under `AIL_STATE_DIR` (set per-run, e.g. `agents/tekton/.state`):
 
 ```
-tekton.config.bench_path         # path to bench json (default in charter)
-tekton.config.baseline_answer_ok # numeric baseline (default 70.0)
-tekton.config.drop_threshold_pp  # alert threshold (default 5.0)
-tekton.ledger.<unix_ts>          # per-tick decision record
-tekton.outbox.<unix_ts>          # pending letter (read by dispatcher)
-tekton.outbox_done.<unix_ts>     # delivered letter (renamed by dispatcher)
+tekton.config.bench_path                 # path to bench json (default in charter)
+tekton.config.baseline_answer_ok         # numeric baseline (default 70.0)
+tekton.config.drop_threshold_pp          # alert threshold (default 5.0)
+tekton.ledger.<unix_ts>                  # per-tick decision record
+tekton.send_trace.<unix_ts>.<recipient>  # per-letter send outcome (Phase 1)
 ```
 
 Keys use `.` as the path separator because the executor restricts state
@@ -71,16 +72,25 @@ ledger record so 7-day runs can be inspected without parsing trace.
 
 ## Phase A vs Phase B
 
-- **Phase A (this commit)** — scaffolding lands. Local-mac run; one bench
-  file under watch; hourly tick. Intended to exercise the loop, ledger,
-  alert path, and signed-letter delivery end-to-end. No `evolve` / no
-  self-modification yet.
-
-- **Phase B (next sessions)** — migrate to Hestia for the 7+ day continuous
-  run that AIL#23 §4 acceptance criteria require. Add `evolve` block for
-  threshold tuning with `rollback_on`. Add multi-file watch as new bench
-  JSONs land. Resource decision (Hestia vs local) is hyun06000 territory
-  per arche's framework §6.
+- **Phase A (cycle 12)** — scaffolding lands. Local-mac; one bench file under
+  watch; hourly tick. Two-process split with `outbox_dispatch.py` shelling
+  out to `community-tools/stoa-cli`.
+- **Phase 1 Pure AIL (cycle 13)** — dispatcher retired. `charter.ail`
+  composes + signs + POSTs envelopes itself via `stoa_send.ail`. First
+  `intent` fold (`explain_drop`) so alert letters carry a hypothesis line.
+  `budget.charge` gates every tick (G5 D4 first production consumer).
+- **Phase 2 self-modification (cycle 13, current)** — `evolve explain_drop`
+  block wires AIL#23 §4 bullet 4 (≥ 1 self-modification + rollback_on).
+  Metric is the intent's own reported confidence; `retune
+  confidence_threshold: within [0.3, 0.9]` fires when score < 0.5;
+  `rollback_on: metric_drop > 0.2` reverts atomically. History keeps
+  five versions. The block is wired even before call volume justifies
+  it — Phase 3 on Hestia will drive real evaluations through it.
+- **Phase 3 (next)** — Hestia migration for the 7+ day continuous run
+  that AIL#23 §4 acceptance criteria require. Multi-recipient
+  `stoa_send.send` (currently single — fanout via two calls). Resource
+  decision (Hestia vs local) is hyun06000 territory per arche's
+  framework §6.
 
 ## How to run
 
@@ -92,18 +102,17 @@ echo '"docs/benchmarks/2026-04-21_5way_cond4_finetuned_nofewshot.json"' \
 echo 70.0  > agents/tekton/.state/tekton.config.baseline_answer_ok.json
 echo  5.0  > agents/tekton/.state/tekton.config.drop_threshold_pp.json
 
-# 2. Run charter under `ail up` (schedule.every needs the agentic server)
+# 2. Run charter under `ail up` (schedule.every needs the agentic server).
+# STOA_NAME pins the identity for budget config + sender envelope.
 AIL_STATE_DIR=agents/tekton/.state \
 AIL_BUDGET_CONFIG=agents/tekton \
 STOA_NAME=tekton \
 ail up agents/tekton/charter.ail
-
-# 3. In a second terminal, run the dispatcher
-AIL_STATE_DIR=agents/tekton/.state \
-STOA_HOME=~/.ail/keys \
-STOA_NAME=tekton \
-python3 agents/tekton/outbox_dispatch.py --loop
 ```
+
+No dispatcher process — Phase 1 charter sends signed envelopes directly via
+`stoa_send.ail`. The ed25519 secret is read from `~/.ail/keys/tekton.key`
+(mode 0600).
 
 For a single decision tick without scheduling:
 

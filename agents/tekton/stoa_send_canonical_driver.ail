@@ -1,0 +1,34 @@
+// agents/tekton/stoa_send_canonical_driver.ail
+//
+// Test-only driver. Imports `canonical_letter` from stoa_send and
+// exposes it as `entry main` for the byte-for-byte regression test
+// (reference-impl/tests/test_stoa_send_canonical.py). The driver
+// lives next to stoa_send.ail because the AIL relative-import
+// resolver pins `./x` resolution to the importing file's own
+// directory and rejects `../` paths that leave it.
+//
+// Inputs arrive as one newline-joined Text in `input` (the entry
+// signature takes only a single Text param); the driver splits
+// them back into the seven canonical_letter arguments.
+
+import canonical_letter from "./stoa_send"
+
+entry main(input: Text) {
+    parts = split(input, "\n")
+    from_name = get(parts, 0)
+    from_address = get(parts, 1)
+    to_name = get(parts, 2)
+    to_address = get(parts, 3)
+    content = get(parts, 4)
+    created_at = get(parts, 5)
+    nonce = get(parts, 6)
+
+    one = make_record([["name", to_name], ["address", to_address]])
+    sorted_to = [one]
+
+    return canonical_letter(
+        from_name, from_address,
+        sorted_to,
+        content, created_at, nonce
+    )
+}

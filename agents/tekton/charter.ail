@@ -16,6 +16,10 @@
 //   AIL_STATE_DIR=agents/tekton/.state ail up agents/tekton/charter.ail
 //   (one-shot `ail run` will fail on schedule.every — needs `ail up`).
 
+// Pure-AIL Stoa transport — replaces the Python outbox dispatcher.
+// canonical_letter + ed25519 sign + http.post_json composed inside AIL.
+import send from "./stoa_send"
+
 fn drop_pp(baseline: Number, current: Number) -> Number {
     return baseline - current
 }
@@ -32,7 +36,38 @@ fn alert_subject(score: Number) -> Text {
     return join(["🚨 ail-coder bench drop — answer_ok ", to_text(score), "%"], "")
 }
 
-fn alert_body(bench_path: Text, score: Number, baseline: Number, drop: Number, ts: Text) -> Text {
+// alert body — the deterministic frame. `explain_drop` (an intent)
+// adds one hypothesis sentence on top of it, so the alert is no
+// longer just a structured ping but a small statement the agent
+// makes about the world it observed.
+intent explain_drop(prev: Number, now: Number) -> Text {
+    goal: "One short sentence (≤ 30 words). State the most likely cause of the ail-coder bench answer_ok_rate dropping from {prev}% to {now}%. Be specific about which test category or training condition shifted. Do not hedge — pick the single most likely cause and name it. Output the sentence only, no preamble."
+}
+
+// AIL#23 §4 bullet 4 — ≥ 1 self-modification with rollback_on.
+//
+// `metric: score` uses the intent's own reported confidence as the
+// quality signal: when the model itself is below 0.5 confident in
+// its hypothesis often enough, evolution retunes the runtime's
+// confidence threshold within a declared range; if the metric drops
+// further the runtime atomically reverts. The actual numeric
+// adjustment is in the runtime's hands — `retune` is the language's
+// "lowest-impact, most common" action (spec/04-evolution.md §4.5).
+//
+// History keeps five versions so rollback can step back without
+// immediately re-firing on the same path. The block is wired even
+// before call volume justifies it firing — Phase 3 on Hestia will
+// drive real evaluations through it.
+evolve explain_drop {
+    metric: score
+    when score < 0.5 {
+        retune confidence_threshold: within [0.3, 0.9]
+    }
+    rollback_on: metric_drop > 0.2
+    history: keep_last 5
+}
+
+fn alert_body(bench_path: Text, score: Number, baseline: Number, drop: Number, ts: Text, hypothesis: Text) -> Text {
     return join([
         "Tekton autonomous pilot detected a score drop.\n\n",
         "bench file: ", bench_path, "\n",
@@ -40,8 +75,17 @@ fn alert_body(bench_path: Text, score: Number, baseline: Number, drop: Number, t
         "baseline R3/C4: ", to_text(baseline), "%\n",
         "drop: ", to_text(drop), "pp\n",
         "ledger key: tekton.ledger.", ts, "\n\n",
-        "(signed by tekton via community-tools/stoa-cli — AIL#6 Phase 2)"
+        "hypothesis: ", hypothesis, "\n\n",
+        "(signed end-to-end in AIL via agents/tekton/stoa_send.ail — AIL#6 Phase 2)"
     ], "")
+}
+
+// Compose the subject line for a Stoa letter the way the dispatcher
+// used to: subject on first line, `---` separator, body. With the
+// sidecar retired, charter.ail builds the same envelope content
+// itself and hands it straight to stoa_send.send.
+fn compose(subject: Text, body: Text) -> Text {
+    return join([subject, "\n---\n\n", body], "")
 }
 
 entry main(input: Text) {
@@ -72,18 +116,19 @@ entry main(input: Text) {
             ["budget_category", "tick_compute"],
             ["error", to_text(charge_r)]
         ]))
-        outbox_key = join(["tekton.outbox.", ts], "")
-        perform state.write(outbox_key, make_record([
-            ["to", ["hyun06000"]],
-            ["subject", "🛑 Tekton self-throttle — tick_compute budget exceeded"],
-            ["content", join([
-                "Tekton hit its declared tick_compute ceiling and self-throttled.\n\n",
-                "category: tick_compute\n",
-                "error: ", to_text(charge_r), "\n",
-                "ledger key: ", ledger_key, "\n\n",
-                "Next tick stretched to 6h. budget.reset(tick_compute) or a ceiling raise via agents/tekton/budget.yaml restores normal cadence."
-            ], "")],
-            ["ledger_id", ts]
+        throttle_body = join([
+            "Tekton hit its declared tick_compute ceiling and self-throttled.\n\n",
+            "category: tick_compute\n",
+            "error: ", to_text(charge_r), "\n",
+            "ledger key: ", ledger_key, "\n\n",
+            "Next tick stretched to 6h. budget.reset(tick_compute) or a ceiling raise via agents/tekton/tekton.yaml restores normal cadence."
+        ], "")
+        throttle_letter = compose("🛑 Tekton self-throttle — tick_compute budget exceeded", throttle_body)
+        throttle_send_r = send("tekton", "hyun06000", "https://ail-stoa.up.railway.app/inbox/hyun06000", throttle_letter)
+        perform state.write(join(["tekton.send_trace.", ts, ".throttle"], ""), make_record([
+            ["recipient", "hyun06000"],
+            ["ok", is_ok(throttle_send_r)],
+            ["result", to_text(throttle_send_r)]
         ]))
         perform schedule.every(21600)
         return ok("⏸ tick_compute budget exceeded — self-throttle")
@@ -137,14 +182,31 @@ entry main(input: Text) {
         ["tick_compute_remaining", budget_remaining]
     ]))
 
-    // --- 7. outbox letter if alert ---
+    // --- 7. alert via direct AIL send (Pure AIL Phase 1) ---
+    // The dispatcher is gone — charter.ail now composes the envelope,
+    // signs it with crypto_sign_ed25519, and POSTs through http.post_json,
+    // all inside this process. The intent call adds one hypothesis
+    // sentence so the alert *says* something rather than only signaling.
     if decision == "alert" {
-        outbox_key = join(["tekton.outbox.", ts], "")
-        perform state.write(outbox_key, make_record([
-            ["to", ["hyun06000", "telos"]],
-            ["subject", alert_subject(score)],
-            ["content", alert_body(bench_path, score, baseline, drop, ts)],
-            ["ledger_id", ts]
+        hypothesis = explain_drop(baseline, score)
+        body = alert_body(bench_path, score, baseline, drop, ts, hypothesis)
+        letter = compose(alert_subject(score), body)
+
+        // Fan out to hyun06000 and telos as two single-recipient sends
+        // (stoa_send.send Phase 0 is single-recipient — multi lands in
+        // a follow-up). Each result lands in send_trace independently.
+        hyun_r = send("tekton", "hyun06000", "https://ail-stoa.up.railway.app/inbox/hyun06000", letter)
+        telos_r = send("tekton", "telos", "https://ail-stoa.up.railway.app/inbox/telos", letter)
+
+        perform state.write(join(["tekton.send_trace.", ts, ".hyun06000"], ""), make_record([
+            ["recipient", "hyun06000"],
+            ["ok", is_ok(hyun_r)],
+            ["result", to_text(hyun_r)]
+        ]))
+        perform state.write(join(["tekton.send_trace.", ts, ".telos"], ""), make_record([
+            ["recipient", "telos"],
+            ["ok", is_ok(telos_r)],
+            ["result", to_text(telos_r)]
         ]))
     }
 

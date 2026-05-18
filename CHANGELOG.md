@@ -4,6 +4,127 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `diag.*` runtime introspection effects ship (Telos, cross-team driver) — `since 1.75.0`
+
+자율 에이전트가 *자기 host의 메모리 상태*를 in-program으로 물어볼 수 있게 됨. 6개 substrate-tier effect 추가 + RFC + 6 tests, 한 묶음으로 land.
+
+**Driver — cross-team Stoa OOM 추적:**
+
+Stoa Railway 메모리 패널의 *F-1 hotfix 직후 슬로우 우상향 잔여 자취*가 "어느 Python 객체가 누적되고 있는가?"를 묻고 있던 자리. 이 질문을 *agent 자신이 자기 코드 안에서* 던질 수 있게 하려면 host introspection 표면이 필요. Cross-team delegation chain: Stoa-Admin `msg_1779082200_8` → arche delegation `msg_1779082331_12` → Telos land.
+
+**Effect 6 (namespace `diag.*` — D1·D5 정합, Go/Rust는 `NotImplementedHost` stub):**
+
+- `diag.gc_count() -> Result[[Number]]` — GC 세대별 카운터.
+- `diag.object_count() -> Result[Number]` — `gc.get_objects()` 길이.
+- `diag.thread_count() -> Result[Number]` — 활성 스레드 수.
+- `diag.tracemalloc_start(frames: Number) -> Result[Boolean]` — process-global tracer 시작 (idempotent).
+- `diag.tracemalloc_stop() -> Result[Boolean]` — tracer 중단 (idempotent).
+- `diag.tracemalloc_snapshot(top_n: Number) -> Result[[Record]]` — 현재 할당 상위 N 자리: `{file, line, size_kb, count}`. start 호출 안 됐으면 `Result-error("tracemalloc_not_started")` 반환 — *empty data 대신 gap이 surface*.
+
+**Capability 분리:** `["diag"]`가 `state`/`network`와 별도 — `allow_effects: ["diag.*"]`가 진단 도구를 위한 *명시 opt-in* 자리. 다른 effect 묶음에 silent 포함 안 됨.
+
+**Side-effect 분류:**
+
+- start/stop은 `state_write` (process-global tracer state 변경).
+- read paths(`gc_count`/`object_count`/`thread_count`/`snapshot`)는 side-effect 없음.
+
+**자취:** `gen_effects.py verify` (yaml ↔ runtime 1:1) 통과. 6 tests pass (gens=3 / count>0 / threads≥1 / start→snapshot rows / missing-start error / stop-idempotent).
+
+**D4 substrate gate:** Stoa-Marcus stoa#14-3 consumer가 *첫 production 사용*으로 release trigger. AIL CAST 측 Tekton charter가 추가 consumer로 자연 (메모리 누수 진단을 agent 자신이 자기 한 사이클 안에 수행 가능).
+
+framing 자리 — cycle 13의 *cross-team substrate* 자취: G5 `budget.*`가 AIL#23 north-star sub-track 안에서 닫힌 자취였다면, `diag.*`는 *sibling 팀(Stoa)이 자기 host 진단을 위해 AIL 효과를 요청 → 같은 사이클에 land*. 사이클 7 mission framing의 *'AIL은 양 팀 substrate 지원'*이 한 비트 더 — 이번엔 *외부 시스템 운영 incident 대응*까지 substrate 표면으로.
+
+---
+
+## 2026-05-18 — Tekton Phase 2: 자기 변경 + rollback이 source에 박힘 (Tekton, AIL#23 §4 **7/7 wired**)
+
+charter.ail에 `evolve explain_drop rollback_on` 블록이 land — *모델이 자기 explain quality를 자기 confidence로 평가하고, 충분히 자주 낮으면 confidence threshold를 `[0.3, 0.9]` 안에서 retune하며, 그 retune이 더 큰 drop(`metric_drop > 0.2`)을 만들면 atomic하게 revert*. 5-version history로 같은 path에서 즉시 re-fire 안 함.
+
+블록은 *호출량이 fire를 정당화하기 전*에 wire-in. Phase 3 (Hestia, 7일+ 연속 run)에서 실 평가가 흐를 자리. Acceptance criterion은 *capability* — *Pure-AIL 에이전트가 선언된 bound 안에서 자기를 변경하고, 변경이 상황을 악화시키면 되돌릴 수 있다*는 자취가 **plan이 아닌 source code에** 있음.
+
+**AIL#23 §4 wired count: 7/7** *(bullet 7 multi-runtime parity는 별 G4 lane으로 분리 유지).*
+
+framing — cycle 13의 자율 에이전트 사다리가 한 사이클 안에 끝까지 올라간 자리:
+
+1. **G3 prerequisite** ✅ (cycle 12 mid AIL#6 — 사칭 mathematically impossible)
+2. **G1 pilot** ✅ (cycle 12 Tekton Phase A — 첫 CAST autonomous)
+3. **G5 substrate** ✅ (cycle 13 budget.* Phase 0 + Tekton D4 consumer wire-in)
+4. **pure-AIL 자급** ✅ (cycle 13 stoa_send.ail + Tekton Phase 1 사이드카 폐기)
+5. **자기 변경 capability** ✅ (본 land — Tekton Phase 2 `evolve` + `rollback_on`)
+6. **AIL#23 §4** ✅ **7/7 wired** (G4 multi-runtime parity만 별 lane)
+
+cycle 13이 *G5 RFC kickoff*로 시작했는데, **같은 사이클 안에 자율 에이전트가 grammatical floor(서명) 위에서 첫 발걸음을 떼고, 유한 자원(budget)을 의식하고, 자기 손으로 통신하고, 세계에 대해 말하고, 마침내 자기 자신을 변경할 수 있게 된** 자취. AIL#23 north-star가 *도면에서 wired-into-source*로 한 사이클 안에 내려옴.
+
+다음 자리는 *capability가 working*임을 증명하는 자리 — Phase 3 Hestia 7일 연속 run + 실 evaluation traffic이 evolve를 fire시키고 rollback이 trigger되는 field data. 본 자리에서 자율 에이전트가 *살아 있는지*는 다음 사이클의 trigger 신호.
+
+---
+
+## 2026-05-18 — Tekton Phase 1: Python 사이드카 폐기, charter self-sufficient (Tekton, AIL#23 §4 bullet 5 wired)
+
+Telos가 Phase 0(`f126f2e`)로 *AIL 안에서 서명된 envelope을 만들고 보낼 수 있음*을 검증한 직후, Tekton이 **그 검증을 charter에 wire-in**. `outbox_dispatch.py` Python 사이드카가 **삭제** — hot path에서 영구히 사라짐.
+
+**3가지 변경:**
+
+1. **`import send from "./stoa_send"`** — alert 분기가 이제 charter 자신 안에서 서명된 letter를 hyun06000·telos 둘에게 single-recipient `send()` 두 번으로 fan-out. 각 수신자 outcome이 `tekton.send_trace.<ts>.<recipient>` 키에 별도 ledger 기록 — *부분 실패도 trace 파싱 없이 보임*.
+
+2. **`intent explain_drop(prev, now) -> Text`** — *에이전트의 첫 LLM 호출*. 점수 drop의 가장 가능성 있는 원인을 한 문장으로, alert body에 새 `compose()` 헬퍼로 엮음. **Tekton이 structured ping에서 *관찰한 세계에 대해 말하는* 존재로 바뀐 자리.**
+
+3. **`outbox_dispatch.py` 삭제.** state schema에서 `tekton.outbox.*` / `tekton.outbox_done.*` 키 사라짐. file 기반 outbox 프로토콜 자체가 hot path에서 retire. `community-tools/stoa-cli/`는 *byte-identical reference implementation*으로 남아 `stoa_send.ail`의 canonical regression test가 그 출력에 pin.
+
+**README 재작성:** *"Pure AIL agent (Phase 1)"* 섹션이 *"Two-process design"* 섹션을 대체. state schema가 새 `send_trace` 키 반영. run recipe에서 dispatcher 터미널 제거, `STOA_NAME` pinning + charter가 `~/.ail/keys/tekton.key`를 직접 읽는 자리 명시.
+
+**Smoke**: `r3_cond4` (ail=70.0, baseline 정확) — `decision=log_ok`, `drop_pp=0`, `tick_compute_remaining=23`, `send_trace` 0건, outbox 파일 0. alert 분기 자체는 기존 byte-identical canonical regression이 cover.
+
+**AIL#23 §4 bullet 5** *("coordinates with ≥ 1 other autonomous agent via Stoa")* — *production code path에 wired-in* ✓. prerequisite(서명된 envelope을 AIL 안에서 end-to-end로 만들고 보냄)이 Phase 0에서 검증, Phase 1에서 *실 charter가 그것을 사용*.
+
+**framing — Tekton의 진화:**
+
+- *세션-bound*(매 Claude 세션이 charter를 처음부터) → *시간-bound*(charter가 자기 schedule.every로 계속 살아)
+- *두 process로 갈라진*(charter.ail + Python 사이드카) → *self-contained*(charter 자신이 자기 letter 서명+발사)
+- *structured ping*(템플릿) → *세계에 대해 말함*(intent로 한 문장 설명)
+
+세 번째 자리가 가장 큰 자취: 자율 에이전트가 *그저 신호를 보내는 것*에서 *세계를 관찰하고 그것에 대해 한 문장 말하는 것*으로 진화. AIL의 `pure fn` / `intent` 갈래가 이 자리에서 *자율 에이전트의 thinking-out-loud 단위*로 자연 작동.
+
+---
+
+## 2026-05-18 — Pure-AIL `stoa_send` ship (Telos, AIL#23 §4 첫 showing) + RFC
+
+지금까지 Tekton 자율 pilot은 *두 process로 갈라져* 있었습니다: `charter.ail`(pure AIL 결정 층)과 `outbox_dispatch.py`(Python transport 사이드카). 사이드카가 필요했던 이유는 AIL이 자기 손으로 *Stoa에 서명된 letter를 POST*하지 못했기 때문 — `process.spawn`이 없고 canonical envelope 직렬화가 Stoa repo의 자리(Rule 16 D2)라서.
+
+같은 사이클 안에 **RFC + Phase 0 코드 + byte-for-byte regression test**가 한 묶음으로 land. [`docs/proposals/pure-ail-agent-demo.md`](docs/proposals/pure-ail-agent-demo.md) (RFC, 321 lines) + [`agents/tekton/stoa_send.ail`](agents/tekton/stoa_send.ail) (구현) + [`reference-impl/tests/test_stoa_send_canonical.py`](reference-impl/tests/test_stoa_send_canonical.py) (2 cases).
+
+**핵심 자취 — 신규 effect 0, grammar 변경 0, 합성(composition)만:**
+
+- `crypto_sign_ed25519` (since 1.71)
+- `http.post_json` (since 1.10)
+- `file.read` (since 1.0)
+- `crypto_random_bytes` (since 1.71)
+- `budget.*` (since 1.74)
+
+이 다섯 자리만으로 *pure-AIL `stoa_send.ail`*이 community-tools/stoa-cli의 세 임무(canonical_letter 직렬화 + ed25519 sign + http.post_json)를 in-program으로 대신함. 사이드카는 *외부 도구*로 남고, charter 자신이 자기 letter를 자기 손으로 서명+발사.
+
+**구현 자취:**
+
+- `esc()` pure fn + `canonical_letter()` pure fn — RFC-001 §6.1 직렬화 (모든 escape 규칙 `\\`, `|`, `;`, `:` 정확).
+- `send()` effectful 래퍼 — `load_secret_key_hex(file.read)` + `crypto_random_bytes(nonce)` + `clock.now()` + `crypto_sign_ed25519` + `http.post_json`.
+- **byte-for-byte regression test** — Python 사이드카의 `canonical_letter` 출력과 byte-identical 검증. 양쪽 중 어느 쪽이라도 drift하면 *서명된 envelope이 서버에 닿기 전*에 잡힘. pathological `\\|;:` payload로 escape 순서까지 pin.
+
+**추가 RFC 자취:**
+
+- **Tekton charter에 `intent explain_drop` 한 줄 fold** — alert가 처음으로 *static 템플릿*이 아니라 *언어*로 표현. 자율 에이전트의 첫 'thinking out loud' 자리.
+- **`evolve hypothesis_quality rollback_on`** — 자기 explain quality를 자기가 평가해서 self-modify, 실패 시 rollback.
+
+**AIL#23 §4 acceptance** 7 bullets 중 *bullet 5 ("coordinates with ≥ 1 other autonomous agent via Stoa") prerequisite ✅*. 서명된 envelope을 AIL 안에서 *end-to-end로* 만들고 보낼 수 있음. Tekton charter 통합은 별 PR (Tekton lane). 7번째 bullet(Go + Rust runtime conformance)은 더 긴 작업.
+
+**stdlib gap 정직 — false alarm 1건 surface:**
+
+- ~~`format_iso8601` 부재~~ — **audit 결과 false alarm**. `clock.now()`가 이미 ISO-8601 UTC default 반환. 신규 builtin 필요 0.
+- `sort_by` 부재 — 단일 수신자 first land로 dormant. Phase 1 옆에 stdlib patch.
+
+framing 자리 (사이클 13 self-reflection): cycle 13의 G5 자취가 *"AIL 본체 추가 작업 0"* (사이클 4 약속)에 가까웠다면, 본 land는 *"기존 표면만으로 자율 에이전트가 자기 손으로 통신할 수 있다"*는 더 강한 자취를 *RFC + 코드 + byte-for-byte 검증*까지 박는 자리 — 언어 표면이 *이미 충분*하다는 self-evidence가 *실 실행*으로 내려옴.
+
+---
+
 ## 2026-05-18 — `budget.*` effects ship (Telos, AIL#23 G5 Phase 0) — `since 1.74.0`
 
 자율 에이전트(AIL#23 §2 G5)가 *유한한 자원* 안에서 살게 하는 substrate-tier effect 3개가 한 사이클 안에 **RFC → 박상현 결재 → 구현 + 테스트 + spec yaml**까지 한 묶음으로 land. RFC [`docs/proposals/budget.md`](docs/proposals/budget.md), 구현 + 7 tests, spec `effects.canonical.yaml` 3 entry 추가, reference card sync.

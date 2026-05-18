@@ -897,6 +897,23 @@ Built-in effects:
     return `ok(ceiling)`. The ceiling is unchanged. Wall-clock
     auto-rollover is intentionally absent — period boundaries are
     explicit agent decisions so they appear in the ledger.
+  - `diag.gc_count() -> Result[[Number]]` — CPython GC generation
+    counts `[gen0, gen1, gen2]`. Read-only.
+  - `diag.object_count() -> Result[Number]` — `len(gc.get_objects())`,
+    total tracked objects. Read-only.
+  - `diag.thread_count() -> Result[Number]` —
+    `threading.active_count()`. Read-only.
+  - `diag.tracemalloc_start(frames: Number) -> Result[Boolean]` —
+    start the Python tracemalloc tracer with `frames` traceback
+    depth. Idempotent: a second call while already tracing is a
+    no-op success.
+  - `diag.tracemalloc_stop() -> Result[Boolean]` — stop the tracer.
+    Idempotent: calling when not tracing is a no-op success.
+  - `diag.tracemalloc_snapshot(top_n: Number) -> Result[[Record]]` —
+    top-N statistics grouped by `lineno`. Each row:
+    `{ file: Text, line: Number, size_kb: Number, count: Number }`.
+    Returns `Result-error("tracemalloc_not_started")` if `start`
+    was never called — silent empty rows would hide that gap.
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a
