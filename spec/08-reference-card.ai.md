@@ -880,6 +880,23 @@ Built-in effects:
   - `secrets.revoke(key: Text) -> Result[Text]` — overwrite a secret's
     value with `""` without removing the key. The key name remains as
     an audit record. Use instead of deletion ("deletion is movement").
+  - `budget.charge(category: Text, amount: Number) -> Result[Number]` —
+    atomic per-identity consume against a configured ceiling. Returns
+    `ok(remaining)` on success. If the charge would exceed the
+    ceiling, returns `Result-error("budget_exceeded:<cat> c+a>ceil")`
+    AND does NOT update `consumed` — the agent can pattern-match and
+    slow down, ask, or stop. Unknown identity/category returns
+    `Result-error("budget_unconfigured:<id>/<cat>")` so a missing
+    config surfaces instead of running uncapped. Identity = `STOA_NAME`
+    or `agents/<name>/` dir; missing both → "anonymous" with fixed
+    defaults (llm_tokens=100, compute_minutes=1, stoa_push=5).
+  - `budget.remaining(category: Text) -> Result[Number]` — read-only
+    `ok(ceiling - consumed)`. Same `budget_unconfigured` failure as
+    charge.
+  - `budget.reset(category: Text) -> Result[Number]` — zero `consumed`,
+    return `ok(ceiling)`. The ceiling is unchanged. Wall-clock
+    auto-rollover is intentionally absent — period boundaries are
+    explicit agent decisions so they appear in the ledger.
   - `image.embed(src: Text, alt?: Text) -> Text` — return a markdown
     image string (`![alt](url)`) the chat / run UI renders inline.
     For local file paths the bytes are base64-encoded into a

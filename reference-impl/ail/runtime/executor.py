@@ -82,6 +82,7 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "gh.pr_list", "gh.pr_view", "gh.pr_create", "gh.issue_list",
     "mneme.save", "mneme.load", "mneme.log",
     "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
+    "budget.charge", "budget.remaining", "budget.reset",
 })
 import threading as _threading
 
@@ -181,6 +182,9 @@ class Executor(EffectsMixin):
         "mneme.save":        "_mneme_save",
         "mneme.load":        "_mneme_load",
         "mneme.log":         "_mneme_log",
+        "budget.charge":     "_budget_charge",
+        "budget.remaining":  "_budget_remaining",
+        "budget.reset":      "_budget_reset",
     }
 
     def __init__(self, program: Program, adapter: ModelAdapter,
@@ -2087,6 +2091,236 @@ class Executor(EffectsMixin):
                 _, _, rest = first_line.partition(":")
                 return ("approved", rest.strip())
         return None
+
+    # --- budget effect (AIL#23 G5 resource autonomy, Phase 0 per-identity).
+    # Per docs/proposals/budget.md: charge is atomic (rejected charges
+    # do not move `consumed`), remaining is read-only, reset zeros
+    # consumed without changing the ceiling. Config comes from a YAML
+    # or JSON file at $AIL_BUDGET_CONFIG/<identity>.yaml; missing
+    # identity → anonymous fixed defaults (llm_tokens=100, etc.).
+    # Storage is the executor's per-program state.* dir for Phase 0;
+    # G2/G7 migrate the backing without changing the surface.
+
+    # Fixed defaults for the "anonymous" identity — chosen small enough
+    # that an exploratory run cannot hide a runaway spend, but large
+    # enough to write a hello-world without immediately tripping.
+    _BUDGET_ANONYMOUS_DEFAULTS = {
+        "llm_tokens":      {"ceiling": 100, "period": "daily"},
+        "compute_minutes": {"ceiling": 1,   "period": "daily"},
+        "stoa_push":       {"ceiling": 5,   "period": "daily"},
+    }
+
+    def _budget_identity(self) -> str:
+        """Identity name used to scope budget state. Same resolution
+        order as the wake-monitor doctrine: STOA_NAME env → git
+        worktree-local ail.identity → "anonymous"."""
+        import os
+        name = os.environ.get("STOA_NAME") or os.environ.get("AIL_IDENTITY")
+        if name:
+            return name
+        # Try the agents/<name>/ convention by inspecting the project root.
+        try:
+            root = self.project_root
+        except AttributeError:
+            root = None
+        if root is not None:
+            parts = root.parts
+            if "agents" in parts:
+                idx = parts.index("agents")
+                if idx + 1 < len(parts):
+                    return parts[idx + 1]
+        return "anonymous"
+
+    def _budget_load_config(self, identity: str) -> Optional[dict]:
+        """Load {category: {ceiling, period}} for `identity`. Returns
+        None when no config is present (so the caller knows to fall
+        back to anonymous defaults or to refuse). Accepts YAML
+        primarily; falls back to JSON for tooling that prefers it."""
+        import os
+        cfg_dir = os.environ.get("AIL_BUDGET_CONFIG")
+        if not cfg_dir:
+            return None
+        from pathlib import Path as _Path
+        base = _Path(cfg_dir)
+        for ext in (".yaml", ".yml", ".json"):
+            p = base / f"{identity}{ext}"
+            if p.is_file():
+                try:
+                    text = p.read_text(encoding="utf-8")
+                except OSError:
+                    return None
+                if ext == ".json":
+                    import json as _json
+                    try:
+                        return _json.loads(text)
+                    except Exception:
+                        return None
+                try:
+                    import yaml as _yaml
+                except ImportError:
+                    return None
+                try:
+                    return _yaml.safe_load(text)
+                except Exception:
+                    return None
+        return None
+
+    def _budget_resolve_ceiling(self, identity: str, category: str
+                                ) -> Optional[int]:
+        """Look up the configured ceiling for (identity, category).
+        Returns None when the category is unconfigured (so the caller
+        surfaces budget_unconfigured rather than running uncapped)."""
+        cfg = self._budget_load_config(identity)
+        if cfg is None and identity == "anonymous":
+            cfg = self._BUDGET_ANONYMOUS_DEFAULTS
+        if not isinstance(cfg, dict):
+            return None
+        entry = cfg.get(category)
+        if not isinstance(entry, dict):
+            return None
+        ceiling = entry.get("ceiling")
+        if isinstance(ceiling, (int, float)) and ceiling >= 0:
+            return int(ceiling)
+        return None
+
+    def _budget_consumed_key(self, category: str) -> str:
+        return f"budget.consumed.{category}"
+
+    def _budget_read_consumed(self, category: str) -> int:
+        """Returns the current consumed count for the category, 0 when
+        no state row exists yet. Errors fall through as 0 — a missing
+        or unreadable consumed counter is treated as fresh."""
+        import json as _json
+        path = self._state_key_path(self._budget_consumed_key(category))
+        if path is None or not path.is_file():
+            return 0
+        try:
+            v = _json.loads(path.read_text(encoding="utf-8"))
+            return int(v) if isinstance(v, (int, float)) else 0
+        except Exception:
+            return 0
+
+    def _budget_write_consumed(self, category: str, value: int
+                               ) -> Optional[str]:
+        """Atomically write the new consumed count. Returns an error
+        string on failure, None on success."""
+        import json as _json
+        import os as _os
+        path = self._state_key_path(self._budget_consumed_key(category))
+        if path is None:
+            return "state directory not configured"
+        try:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(_json.dumps(int(value)), encoding="utf-8")
+            _os.replace(tmp, path)
+        except OSError as e:
+            return f"could not write budget state: {type(e).__name__}: {e}"
+        return None
+
+    def _budget_ledger_append(self, event: str, identity: str,
+                              category: str, consumed_after: int,
+                              ceiling: int, amount: Optional[int]) -> None:
+        """Append a budget_charge / budget_reset row to the trace
+        (G7-ready schema, defined in docs/proposals/budget.md §3)."""
+        from datetime import datetime, timezone
+        row = {
+            "event": event,
+            "identity": identity,
+            "category": category,
+            "consumed_after": consumed_after,
+            "ceiling": ceiling,
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if amount is not None:
+            row["amount"] = amount
+        # Surface to trace; full ledger.* canonical surface is G7.
+        self.trace.record("budget", **row)
+
+    def _budget_charge(self, args, kwargs, origin):
+        """budget.charge(category, amount) -> Result[Number]
+        Atomic: if the charge would exceed the ceiling, `consumed`
+        is NOT updated and the call returns Result-error. Otherwise
+        returns ok(remaining) and records a budget_charge ledger row.
+        """
+        if len(args) < 2:
+            return self._result_err(
+                "budget.charge needs (category, amount)", origin)
+        category = args[0].value
+        amount_raw = args[1].value
+        if not isinstance(category, str) or not category:
+            return self._result_err(
+                "budget.charge: category must be a non-empty Text", origin)
+        if not isinstance(amount_raw, (int, float)):
+            return self._result_err(
+                f"budget.charge: amount must be a Number "
+                f"(got {type(amount_raw).__name__})", origin)
+        amount = int(amount_raw)
+        if amount <= 0:
+            return self._result_err(
+                "budget.charge: amount must be > 0", origin)
+        identity = self._budget_identity()
+        ceiling = self._budget_resolve_ceiling(identity, category)
+        if ceiling is None:
+            return self._result_err(
+                f"budget_unconfigured: {identity}/{category}", origin)
+        consumed = self._budget_read_consumed(category)
+        new_consumed = consumed + amount
+        if new_consumed > ceiling:
+            return self._result_err(
+                f"budget_exceeded: {category} "
+                f"{consumed}+{amount}>{ceiling}", origin)
+        write_err = self._budget_write_consumed(category, new_consumed)
+        if write_err is not None:
+            return self._result_err(write_err, origin)
+        self._budget_ledger_append(
+            "budget_charge", identity, category,
+            consumed_after=new_consumed, ceiling=ceiling, amount=amount)
+        return self._result_ok(ceiling - new_consumed, origin)
+
+    def _budget_remaining(self, args, kwargs, origin):
+        """budget.remaining(category) -> Result[Number]
+        Read-only. Returns ok(ceiling - consumed). Errors if the
+        category is not configured for this identity."""
+        if not args:
+            return self._result_err(
+                "budget.remaining needs (category)", origin)
+        category = args[0].value
+        if not isinstance(category, str) or not category:
+            return self._result_err(
+                "budget.remaining: category must be a non-empty Text",
+                origin)
+        identity = self._budget_identity()
+        ceiling = self._budget_resolve_ceiling(identity, category)
+        if ceiling is None:
+            return self._result_err(
+                f"budget_unconfigured: {identity}/{category}", origin)
+        consumed = self._budget_read_consumed(category)
+        return self._result_ok(ceiling - consumed, origin)
+
+    def _budget_reset(self, args, kwargs, origin):
+        """budget.reset(category) -> Result[Number]
+        Zeroes `consumed` for the category and returns ok(ceiling).
+        The ceiling itself is not changed — reset is roll-over only.
+        Records a budget_reset ledger row."""
+        if not args:
+            return self._result_err(
+                "budget.reset needs (category)", origin)
+        category = args[0].value
+        if not isinstance(category, str) or not category:
+            return self._result_err(
+                "budget.reset: category must be a non-empty Text", origin)
+        identity = self._budget_identity()
+        ceiling = self._budget_resolve_ceiling(identity, category)
+        if ceiling is None:
+            return self._result_err(
+                f"budget_unconfigured: {identity}/{category}", origin)
+        write_err = self._budget_write_consumed(category, 0)
+        if write_err is not None:
+            return self._result_err(write_err, origin)
+        self._budget_ledger_append(
+            "budget_reset", identity, category,
+            consumed_after=0, ceiling=ceiling, amount=None)
+        return self._result_ok(ceiling, origin)
 
     # --- schedule effect (L2 v2 case study Gap #3 — recurring work).
     # The effect only *registers* the cadence; the actual re-invocation
