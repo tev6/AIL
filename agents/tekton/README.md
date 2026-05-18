@@ -47,6 +47,28 @@ tekton.outbox_done.<unix_ts>     # delivered letter (renamed by dispatcher)
 Keys use `.` as the path separator because the executor restricts state
 keys to `[A-Za-z0-9_\-.]+` — no colons.
 
+## Budget gate (G5 substrate effect)
+
+The charter charges `budget.charge("tick_compute", 1)` atomically before
+any other work. If the daily ceiling is hit, the tick:
+
+1. records `decision: "budget_exceeded"` in the ledger,
+2. drops a throttle letter into the outbox for hyun06000,
+3. stretches the next `schedule.every` from 1h → 6h.
+
+This is the first production consumer of the G5 `budget.*` effects
+(AIL#23 acceptance criterion §4: "stays inside its declared budget").
+Ceilings live in `agents/tekton/tekton.yaml`; the executor reads it via
+`AIL_BUDGET_CONFIG`. Default ceilings:
+
+```
+tick_compute: 24/day   (one tick per hour)
+stoa_push:    10/day   (alert flood guard)
+```
+
+Every successful tick also writes `tick_compute_remaining` into the
+ledger record so 7-day runs can be inspected without parsing trace.
+
 ## Phase A vs Phase B
 
 - **Phase A (this commit)** — scaffolding lands. Local-mac run; one bench
@@ -71,7 +93,10 @@ echo 70.0  > agents/tekton/.state/tekton.config.baseline_answer_ok.json
 echo  5.0  > agents/tekton/.state/tekton.config.drop_threshold_pp.json
 
 # 2. Run charter under `ail up` (schedule.every needs the agentic server)
-AIL_STATE_DIR=agents/tekton/.state ail up agents/tekton/charter.ail
+AIL_STATE_DIR=agents/tekton/.state \
+AIL_BUDGET_CONFIG=agents/tekton \
+STOA_NAME=tekton \
+ail up agents/tekton/charter.ail
 
 # 3. In a second terminal, run the dispatcher
 AIL_STATE_DIR=agents/tekton/.state \
