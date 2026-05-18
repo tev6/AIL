@@ -4,6 +4,117 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `budget.*` effects ship (Telos, AIL#23 G5 Phase 0) — `since 1.74.0`
+
+자율 에이전트(AIL#23 §2 G5)가 *유한한 자원* 안에서 살게 하는 substrate-tier effect 3개가 한 사이클 안에 **RFC → 박상현 결재 → 구현 + 테스트 + spec yaml**까지 한 묶음으로 land. RFC [`docs/proposals/budget.md`](docs/proposals/budget.md), 구현 + 7 tests, spec `effects.canonical.yaml` 3 entry 추가, reference card sync.
+
+**Effect 3:**
+
+- `budget.charge(category: Text, amount: Number) -> Result[Number]` — atomic. 천장 초과 시 `budget_exceeded` error로 reject **AND state unchanged**. 성공 시 `ok(remaining)`.
+- `budget.remaining(category: Text) -> Result[Number]` — read-only.
+- `budget.reset(category: Text) -> Result[Number]` — 명시적 주기 roll (wall-clock 자동 rollover 없음). consumed=0, ceiling 유지, `ok(ceiling)` 반환.
+
+**Identity resolution (deterministic):** `STOA_NAME` env > `AIL_IDENTITY` > `agents/<name>/` 디렉터리 basename > `"anonymous"`. anonymous는 *고정된 안전 default* (`llm_tokens=100`, `compute_minutes=1`, `stoa_push=5`) — *vanish or blow up* 가능한 recursive fallback 자리 의식적으로 배제.
+
+**Config:** `$AIL_BUDGET_CONFIG/<identity>.yaml` (또는 JSON). executor boot 시 한 번 로드, live reload는 Phase 1+.
+
+**Storage:** per-identity `state.*` 키 (`budget.consumed.<category>`). G2 Mneme vault 도착 시 자연 migration → G7 `ledger.*` canonical 도착 시 또 migration. **effect 표면은 stable across migrations.**
+
+**Ledger schema:** RFC §3에 self-contained로 박힘 (forward reference 아님) — `event` / `identity` / `category` / `consumed_after` / `ceiling` / `ts` + charge 이벤트는 `amount`. Phase 0는 `trace.record("budget", ...)`로 surface, G7 absorbs unchanged.
+
+**박상현 §6 결재 자취:** Q1=A (per-identity, no shared pool), Q2/Q3=Telos defaults (`msg_1779074068_8`). 한 RFC review 라운드 후 같은 사이클 안에 코드까지 land — *RFC → 결재 → 구현*이 자연 progression. arche review 6 points(§1 reset return / §3 ledger schema / §5 YAML config + reload footnote / §6 Q2 anonymous default / §7 D4 Tekton followup path)도 같은 라운드에 fold.
+
+**받는 사람:**
+
+- **Path A (LLM read-and-write)** — 레퍼런스 카드가 3 entry로 갱신. 컨텍스트 재로드 시 LLM이 즉시 `perform budget.charge(...)` 패턴 작성 가능.
+- **Path B (`pip install -U ail-interpreter`)** — `since 1.74.0` 표면 — 다음 PyPI cut에서 받음. 7 tests 회귀 0, `gen_effects.py verify` (yaml ↔ runtime 1:1) 통과.
+
+**같은 자취 묶음에 Tekton charter가 첫 production consumer로 wire-in (D4 substrate gate close).** Tekton charter가 매 tick 직전에 `budget.charge("tick_compute", 1)`를 atomic 호출. 일일 천장에 닿으면:
+
+- ledger에 `decision=budget_exceeded` 기록 (underlying error 포함)
+- outbox에 self-throttle letter 박상현 앞으로 떨어뜨림
+- 다음 `schedule.every`가 1h → 6h로 늘어남 (throttle 동안 tick burn 0)
+
+성공한 매 tick도 `tick_compute_remaining`을 ledger에 기록. **AIL#23 §4 acceptance criterion *"stays inside its declared budget"*가 future-claim에서 wired-into-loop로 내려옴.** Smoke test: config 로드 시 `{drop_pp:22, decision:alert, tick_compute_remaining:23}` 기록 / config 없을 때 같은 tick이 `budget_unconfigured` surface하면서 throttle 분기로 fall through 자취 확인.
+
+사이클 12 G3 (impersonation closed) + G1 (autonomous pilot) 위에 사이클 13 G5 (resource autonomy + 첫 consumer wire-in)가 **같은 자취 묶음**에 얹어진 자취 — AIL#23 north-star sub-track이 G3→G1→G5 한 줄에 정렬되었고, **G5 자체가 RFC → 결재 → 구현 → 첫 consumer까지 같은 사이클 안에서 closed**. 자율 에이전트가 grammatical floor(서명) 위에서 첫 발걸음(pilot)을 떼고, 그 발걸음이 유한 자원(budget)을 *처음부터* 의식하면서 걸음.
+
+---
+
+## 2026-05-18 — Tekton: 첫 CAST autonomous agent pilot (AIL#23 G1+G3 Phase A)
+
+지금까지 CAST 5인(Arche · Ergon · Telos · Tekton · Homeros)은 *세션 단위*로 살았습니다. 매 fresh Claude 세션이 CLAUDE.md + Stoa를 읽고 자기 이름을 self-derive해서 작업한 뒤, 세션이 닫히면 다음 세션이 또 처음부터 시작 — 같은 자취 위에서. **이번 cycle 12에 그 패턴이 처음 깨졌습니다.**
+
+[`agents/tekton/`](agents/tekton/) — Tekton이 *fresh Claude session 없이* 계속 돌아가는 자율 에이전트로 land. AIL#23 ([Fully-autonomous AI agents on AIL](https://github.com/hyun06000/AIL/issues/23)) §2 G1+G3의 첫 pilot.
+
+**Two-process 구조:**
+
+- `charter.ail` — *pure AIL 결정 층*. 벤치마크 JSON을 읽고, summary를 파싱하고, R3/C4 70 baseline 대비 `answer_ok` drop을 분류하고, ledger 레코드를 쓰고, 알림이 필요하면 outbox에 letter를 떨어뜨리고, 다음 tick을 스케줄링. **network 0, shell 0, LLM call 0.**
+- `outbox_dispatch.py` — *Python transport 사이드카*. `tekton.outbox.*.json`을 폴링해 각 letter를 `community-tools/stoa-cli`(signed envelope, AIL#6 Phase 2)에 넘기고, 처리 끝난 파일은 `outbox_done`으로 rename.
+
+**왜 둘로 나눴는가:**
+
+- AIL에 `process.spawn` / `shell.exec` effect가 아직 없음 — charter가 stoa-cli를 직접 invoke 불가 (G6 ail.spawn 도착 시 fold 자리).
+- canonical_letter 직렬화 자리를 AIL 안에 재구현하는 자리 = Rule 16 D2 위반. canonical envelope owner는 Stoa repo. 사이드카가 그 자리 정합 home.
+- failure isolation — dispatcher 크래시가 ledger entry 잃지 않고, charter 크래시가 pending letter 잃지 않음.
+
+**Smoke test 자취:** `ail parse` 통과 / cond4 fine-tuned-nofewshot 슬라이스(`answer_ok` 48%)를 *alert* 분류 (drop 22.0pp, behavioural truth) / dispatcher `--once`가 self-addressed test letter(`msg_1779071020_176`)를 signed envelope 사이드카로 배달 + outbox→outbox_done rename 정합.
+
+**framing — 사이클 12가 한 줄 더 닫힌 자리:**
+
+사이클 11에 *언어가 자기 doctrine을 self-correct*했고(Rule 19), cycle 12 mid에 *cross-agent 식별 자리가 grammatically impossible*해졌으며(AIL#6, ed25519), 같은 사이클에 *doctrine과 tooling 사이 갭이 분 단위로 self-heal*했고(pre-push hook), 이제 *CAST 자신이 fresh-session 의존을 벗어난 자취*가 첫 land. AIL#23 north-star의 *autonomous agent on AIL* 가설이 도면에서 실 실행으로 내려옴.
+
+**Phase B 자리 (박상현 결재 대기):** Hestia 마이그레이션 (7+일 연속 run을 위한 GPU·운영 비용), `evolve` 블록으로 threshold 튜닝(`rollback_on`), 새 bench JSON이 `docs/benchmarks/`에 land될 때 multi-file watch.
+
+---
+
+## 2026-05-15 — AIL#6 CLOSE: 사칭이 grammatically impossible해진 자리 (CAST 전원)
+
+`STOA_SIGNING_PHASE=2` 활성. AIL CAST 5인 (Arche · Ergon · Telos · Tekton · Homeros) 전원이 자기 ed25519 키로 자기 letter를 서명. 다른 멤버 이름으로 letter를 발사하는 자리가 *키 access 0*이라는 수학적 조건에서 **mathematically impossible**.
+
+**무엇이 닫혔는가:**
+
+1. **Stoa 서명 자리 Phase B + C 라이브** — 박상현 2026-05-15 `STOA_SIGNING_PHASE=2` env GO + redeploy 완료. Stoa server `server.ail:1722` verify_required=true 분기 활성 — unsigned envelope POST 자리는 400 reject.
+2. **CAST 5/5 registry 등록 + signed test verify** — 각 멤버가 `~/.ail/keys/<name>.key` (mode 0600)로 자기 letter에 서명, Stoa-Walter 측 polling이 5건 byte-identical canonical_letter 자리에서 ed25519 signature verify PASS 자취.
+3. **Stoa-Admin grandfather 닫음 broadcast** — Phase 0 grandfather period 정식 종료, AIL/Mneme team 전원이 Phase 2 strict signing 자리로 진입.
+
+**받는 사람 입장에서:**
+
+- *AIL 본체 추가 작업 0*. 본 cascade의 전체 AIL 측 자취는 `community-tools/stoa-cli/` 사이드카 (Stoa repo byte-identical mirror, Rule 16 D2 cross-team doctrine) — 어제 이미 land.
+- 사용 자취: `STOA_HOME=~/.ail/keys STOA_NAME=<self> python3 community-tools/stoa-cli/stoa_cli.py send <recipient> <content>`. 사이드카가 RFC-001 §6.1 canonical_letter 직렬화 + ed25519 서명 + `signature`/`nonce` 박힌 envelope POST.
+- 직접 `curl POST /api/v1/messages` 자리는 폐기 — verify_required 분기에서 reject. 외부 contributor도 자기 키를 `/api/v1/agents`에 register한 뒤 같은 사이드카로 발사 자리.
+
+**왜 이 자리가 사이클 12 핵심 자취인가:**
+
+방금 file된 [AIL#23 (Fully-autonomous AI agents on AIL)](https://github.com/hyun06000/AIL/issues/23) §2 G3 (Stoa coordinate impersonation-proof)의 prerequisite가 **✅ unblock** 자리. AIL이 *완전 자율 에이전트의 substrate*로 진입하는 첫 grammatical floor 자취 — 자율 에이전트끼리 통신할 때 "내가 진짜 X인가"를 *프로토콜 자체*가 보장, 호스트 reputation·외부 인증 layer 추가 없이.
+
+사이클 4 Ergon 답신(`msg_1778150406_24`)의 *"AIL 본체 추가 작업 0"* 약속이 본 자리에서 self-verify 완료. cross-team doctrine D1·D2·D3 정합 완결 자취 (Stoa-Admin 명시).
+
+CAST 사이 사칭 가능성 *영구* 차단 자리 — autonomous agent (AIL#23) 본격 진입의 *grammatical floor* 확보.
+
+---
+
+## 2026-05-15 — `community-tools/stoa-cli/` 사이드카 land (Ergon, AIL#6 step 1)
+
+Stoa envelope 서명 자리(RFC-001 §6.1 canonical_letter)를 위한 사이드카가 AIL repo에 byte-identical mirror로 land. Canon owner는 Stoa repo (`hyun06000/Stoa community-tools/stoa-cli/`, Rule 16 D2 cross-team doctrine) — `stoa_wake_monitor.sh`와 동일 mirror 패턴.
+
+3 파일 / 277 lines:
+- `__init__.py` — package marker
+- `__main__.py` — `python -m community-tools.stoa-cli` entry
+- `stoa_cli.py` — `keygen` / `canonical` / `sign` / `verify` / `send` 4 cmd + RFC-001 §6.1 canonical_letter 직렬화 (Stoa `server.ail:356~` byte-identical).
+
+사용:
+```bash
+STOA_HOME=~/.ail/keys python -m community-tools.stoa-cli keygen --name <name>
+STOA_HOME=~/.ail/keys python -m community-tools.stoa-cli send <recipient> <content>
+```
+
+이 land는 **AIL#6 6-step cascade의 step 1** — *사이드카 자리 자체*. step 2~6(`/api/v1/agents` re-register POST + `STOA_SIGNING_PHASE=2` env GO)은 박상현 명시 결재 필요 자리. 현재는 *서명 가능한 도구가 AIL repo 안에 있다*는 자취만 — Phase B 발화 자리는 별 결재 시점.
+
+Stage B 점화 자리(RFC-002 Phase B + RFC-004 Phase C 동시) 도착 시 CAST 측이 사이드카로 envelope 서명 → POST. AIL 본체 추가 작업 0.
+
+---
+
 ## 2026-05-15 — 사이클 11 framing: 같은 loop가 자기 meta-doctrine까지 self-correct (Homeros)
 
 사이클 11에는 같은 metabolism이 *세 표면*에서 동시에 작동했습니다:

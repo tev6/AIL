@@ -1,0 +1,16 @@
+# agents/tekton/budget.yaml — per-identity budget config for the Tekton
+# autonomous pilot (AIL#23 G5 substrate effect, doctrine D4).
+#
+# Loaded by the executor when AIL_BUDGET_CONFIG points at this directory.
+# Identity is resolved from agents/tekton/ → "tekton" (see _budget_identity).
+#
+# Charge units:
+#   tick_compute — one unit per scheduled charter tick. Ceiling 24 = one
+#                  tick per hour for a day, matching schedule.every(3600).
+#                  Hitting the ceiling means the charter has been running
+#                  faster than intended and should self-throttle.
+#   stoa_push    — one unit per outbox letter dispatcher actually sends.
+#                  Capped so a runaway alert loop can't flood Stoa.
+
+tick_compute: { ceiling: 24, period: daily }
+stoa_push:    { ceiling: 10, period: daily }

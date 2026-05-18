@@ -289,6 +289,33 @@
   capabilities: ["queue"]
   since: "1.40.0"
 
+# AIL#23 G5 — per-identity resource autonomy. Phase 0 (Option A,
+# 박상현 결재 2026-05-18). Storage on state.* for Phase 0; migrates
+# to Mneme vault on G2 land and to ledger.* canonical on G7.
+- name: budget.charge
+  tier: substrate
+  signature: "(category: Text, amount: Number) -> Result[Number]"
+  determinism: ledger
+  side_effect: state_write
+  capabilities: ["budget", "state"]
+  since: "1.74.0"
+
+- name: budget.remaining
+  tier: substrate
+  signature: "(category: Text) -> Result[Number]"
+  determinism: ledger
+  side_effect: none
+  capabilities: ["budget", "state"]
+  since: "1.74.0"
+
+- name: budget.reset
+  tier: substrate
+  signature: "(category: Text) -> Result[Number]"
+  determinism: ledger
+  side_effect: state_write
+  capabilities: ["budget", "state"]
+  since: "1.74.0"
+
 - name: mneme.save
   tier: substrate
   signature: "(owner: Text, kind: Text, value: Any) -> Result[Boolean]"
