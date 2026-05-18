@@ -29,7 +29,15 @@ All notable changes to the AIL project are documented in this file.
 - **Path A (LLM read-and-write)** — 레퍼런스 카드가 3 entry로 갱신. 컨텍스트 재로드 시 LLM이 즉시 `perform budget.charge(...)` 패턴 작성 가능.
 - **Path B (`pip install -U ail-interpreter`)** — `since 1.74.0` 표면 — 다음 PyPI cut에서 받음. 7 tests 회귀 0, `gen_effects.py verify` (yaml ↔ runtime 1:1) 통과.
 
-**Tekton Phase A가 D4 substrate gate의 첫 production consumer 자리** — 자율 에이전트 pilot가 budget.* 위에서 *유한 자원* 안에 살게 됨. 사이클 12 G3 (impersonation closed) + G1 (autonomous pilot) 위에 사이클 13 G5 (resource autonomy)가 얹어진 자취 — AIL#23 north-star sub-track의 *cycle-by-cycle 자연 progression*이 G3→G1→G5 세 비트로 한 줄에 정렬.
+**같은 자취 묶음에 Tekton charter가 첫 production consumer로 wire-in (D4 substrate gate close).** Tekton charter가 매 tick 직전에 `budget.charge("tick_compute", 1)`를 atomic 호출. 일일 천장에 닿으면:
+
+- ledger에 `decision=budget_exceeded` 기록 (underlying error 포함)
+- outbox에 self-throttle letter 박상현 앞으로 떨어뜨림
+- 다음 `schedule.every`가 1h → 6h로 늘어남 (throttle 동안 tick burn 0)
+
+성공한 매 tick도 `tick_compute_remaining`을 ledger에 기록. **AIL#23 §4 acceptance criterion *"stays inside its declared budget"*가 future-claim에서 wired-into-loop로 내려옴.** Smoke test: config 로드 시 `{drop_pp:22, decision:alert, tick_compute_remaining:23}` 기록 / config 없을 때 같은 tick이 `budget_unconfigured` surface하면서 throttle 분기로 fall through 자취 확인.
+
+사이클 12 G3 (impersonation closed) + G1 (autonomous pilot) 위에 사이클 13 G5 (resource autonomy + 첫 consumer wire-in)가 **같은 자취 묶음**에 얹어진 자취 — AIL#23 north-star sub-track이 G3→G1→G5 한 줄에 정렬되었고, **G5 자체가 RFC → 결재 → 구현 → 첫 consumer까지 같은 사이클 안에서 closed**. 자율 에이전트가 grammatical floor(서명) 위에서 첫 발걸음(pilot)을 떼고, 그 발걸음이 유한 자원(budget)을 *처음부터* 의식하면서 걸음.
 
 ---
 
