@@ -1,0 +1,127 @@
+// agents/tekton/charter.ail
+// Tekton autonomous pilot — AIL#23 G1+G3 first pilot.
+//
+// Mission: watch ail-coder bench scores. R3/C4 baseline = 70% answer_ok.
+// On drop ≥ 5pp, append a letter to outbox (Python dispatcher signs+sends).
+// All decisions land in `tekton.ledger.<unix_ts>` for provenance.
+//
+// Design:
+//   - charter (this file)        = pure decision layer, no shell, no network
+//   - outbox_dispatch.py         = transport layer, signs envelopes via
+//                                   community-tools/stoa-cli, POSTs to Stoa
+// Split keeps Rule 16 D2 boundary intact (canonical_letter owner = Stoa
+// sidecar). See agents/tekton/README.md.
+//
+// Run:
+//   AIL_STATE_DIR=agents/tekton/.state ail up agents/tekton/charter.ail
+//   (one-shot `ail run` will fail on schedule.every — needs `ail up`).
+
+fn drop_pp(baseline: Number, current: Number) -> Number {
+    return baseline - current
+}
+
+fn classify(baseline: Number, current: Number, threshold: Number) -> Text {
+    drop = drop_pp(baseline, current)
+    if drop >= threshold {
+        return "alert"
+    }
+    return "log_ok"
+}
+
+fn alert_subject(score: Number) -> Text {
+    return join(["🚨 ail-coder bench drop — answer_ok ", to_text(score), "%"], "")
+}
+
+fn alert_body(bench_path: Text, score: Number, baseline: Number, drop: Number, ts: Text) -> Text {
+    return join([
+        "Tekton autonomous pilot detected a score drop.\n\n",
+        "bench file: ", bench_path, "\n",
+        "answer_ok (ail): ", to_text(score), "%\n",
+        "baseline R3/C4: ", to_text(baseline), "%\n",
+        "drop: ", to_text(drop), "pp\n",
+        "ledger key: tekton.ledger.", ts, "\n\n",
+        "(signed by tekton via community-tools/stoa-cli — AIL#6 Phase 2)"
+    ], "")
+}
+
+entry main(input: Text) {
+    // --- 1. read config (with sensible defaults so a fresh state works) ---
+    bp_r = perform state.read("tekton.config.bench_path")
+    bench_path = unwrap_or(bp_r, "docs/benchmarks/2026-04-21_5way_cond4_finetuned_nofewshot.json")
+
+    bl_r = perform state.read("tekton.config.baseline_answer_ok")
+    baseline = unwrap_or(bl_r, 70.0)
+
+    thr_r = perform state.read("tekton.config.drop_threshold_pp")
+    threshold = unwrap_or(thr_r, 5.0)
+
+    // --- 2. timestamp for ledger / outbox keys ---
+    ts_r = perform clock.now("unix")
+    ts = unwrap_or(ts_r, "0")
+    ledger_key = join(["tekton.ledger.", ts], "")
+
+    // --- 3. read bench file ---
+    body_r = perform file.read(bench_path)
+    if is_error(body_r) {
+        perform state.write(ledger_key, make_record([
+            ["ts", ts],
+            ["bench_path", bench_path],
+            ["decision", "read_fail"],
+            ["error", to_text(body_r)]
+        ]))
+        perform schedule.every(3600)
+        return ok(join(["⚠ bench read failed: ", bench_path], ""))
+    }
+    body = unwrap(body_r)
+
+    // --- 4. parse + extract answer_ok_rate.ail ---
+    parsed_r = parse_json(body)
+    if is_error(parsed_r) {
+        perform state.write(ledger_key, make_record([
+            ["ts", ts],
+            ["bench_path", bench_path],
+            ["decision", "parse_fail"],
+            ["error", "JSON parse failed"]
+        ]))
+        perform schedule.every(3600)
+        return ok(join(["⚠ bench JSON parse failed: ", bench_path], ""))
+    }
+    parsed = unwrap(parsed_r)
+    summary = get(parsed, "summary")
+    a_gen = get(summary, "A_generation_quality")
+    aok = get(a_gen, "answer_ok_rate")
+    score = get(aok, "ail")
+
+    // --- 5. classify ---
+    decision = classify(baseline, score, threshold)
+    drop = drop_pp(baseline, score)
+
+    // --- 6. ledger ---
+    perform state.write(ledger_key, make_record([
+        ["ts", ts],
+        ["bench_path", bench_path],
+        ["score_ail", score],
+        ["baseline", baseline],
+        ["drop_pp", drop],
+        ["decision", decision]
+    ]))
+
+    // --- 7. outbox letter if alert ---
+    if decision == "alert" {
+        outbox_key = join(["tekton.outbox.", ts], "")
+        perform state.write(outbox_key, make_record([
+            ["to", ["hyun06000", "telos"]],
+            ["subject", alert_subject(score)],
+            ["content", alert_body(bench_path, score, baseline, drop, ts)],
+            ["ledger_id", ts]
+        ]))
+    }
+
+    // --- 8. schedule next tick ---
+    perform schedule.every(3600)
+
+    return ok(join([
+        "🔨 Tekton tick — score ", to_text(score), "% / baseline ", to_text(baseline), "% → ", decision,
+        " (ledger ", ledger_key, ")"
+    ], ""))
+}
