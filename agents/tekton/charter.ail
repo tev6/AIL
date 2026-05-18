@@ -44,6 +44,29 @@ intent explain_drop(prev: Number, now: Number) -> Text {
     goal: "One short sentence (≤ 30 words). State the most likely cause of the ail-coder bench answer_ok_rate dropping from {prev}% to {now}%. Be specific about which test category or training condition shifted. Do not hedge — pick the single most likely cause and name it. Output the sentence only, no preamble."
 }
 
+// AIL#23 §4 bullet 4 — ≥ 1 self-modification with rollback_on.
+//
+// `metric: score` uses the intent's own reported confidence as the
+// quality signal: when the model itself is below 0.5 confident in
+// its hypothesis often enough, evolution retunes the runtime's
+// confidence threshold within a declared range; if the metric drops
+// further the runtime atomically reverts. The actual numeric
+// adjustment is in the runtime's hands — `retune` is the language's
+// "lowest-impact, most common" action (spec/04-evolution.md §4.5).
+//
+// History keeps five versions so rollback can step back without
+// immediately re-firing on the same path. The block is wired even
+// before call volume justifies it firing — Phase 3 on Hestia will
+// drive real evaluations through it.
+evolve explain_drop {
+    metric: score
+    when score < 0.5 {
+        retune confidence_threshold: within [0.3, 0.9]
+    }
+    rollback_on: metric_drop > 0.2
+    history: keep_last 5
+}
+
 fn alert_body(bench_path: Text, score: Number, baseline: Number, drop: Number, ts: Text, hypothesis: Text) -> Text {
     return join([
         "Tekton autonomous pilot detected a score drop.\n\n",
