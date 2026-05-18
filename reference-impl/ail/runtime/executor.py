@@ -83,6 +83,9 @@ ALLOWED_EFFECTS: frozenset[str] = frozenset({
     "mneme.save", "mneme.load", "mneme.log",
     "secrets.get", "secrets.set", "secrets.list", "secrets.revoke",
     "budget.charge", "budget.remaining", "budget.reset",
+    "diag.gc_count", "diag.object_count", "diag.thread_count",
+    "diag.tracemalloc_start", "diag.tracemalloc_stop",
+    "diag.tracemalloc_snapshot",
 })
 import threading as _threading
 
@@ -185,6 +188,12 @@ class Executor(EffectsMixin):
         "budget.charge":     "_budget_charge",
         "budget.remaining":  "_budget_remaining",
         "budget.reset":      "_budget_reset",
+        "diag.gc_count":             "_diag_gc_count",
+        "diag.object_count":         "_diag_object_count",
+        "diag.thread_count":         "_diag_thread_count",
+        "diag.tracemalloc_start":    "_diag_tracemalloc_start",
+        "diag.tracemalloc_stop":     "_diag_tracemalloc_stop",
+        "diag.tracemalloc_snapshot": "_diag_tracemalloc_snapshot",
     }
 
     def __init__(self, program: Program, adapter: ModelAdapter,
@@ -2321,6 +2330,104 @@ class Executor(EffectsMixin):
             "budget_reset", identity, category,
             consumed_after=0, ceiling=ceiling, amount=None)
         return self._result_ok(ceiling, origin)
+
+    # --- diag.* effects (cycle 13, cross-team Stoa OOM driver).
+    # Pure host introspection — gc/tracemalloc/threading. Read paths
+    # are side_effect:none; tracemalloc start/stop touch the
+    # process-global tracer so they are side_effect:state_write.
+    # Namespace is `diag.*` (not `python.*`) so D1+D5 hold and the
+    # surface stays portable; Go/Rust expose NotImplementedHost.
+
+    def _diag_gc_count(self, args, kwargs, origin):
+        """diag.gc_count() -> Result[[Number]]"""
+        import gc
+        try:
+            counts = list(gc.get_count())
+            # gc.get_count is guaranteed 3 generations on CPython.
+            return self._result_ok([int(n) for n in counts], origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.gc_count: {type(e).__name__}: {e}", origin)
+
+    def _diag_object_count(self, args, kwargs, origin):
+        """diag.object_count() -> Result[Number]"""
+        import gc
+        try:
+            return self._result_ok(len(gc.get_objects()), origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.object_count: {type(e).__name__}: {e}", origin)
+
+    def _diag_thread_count(self, args, kwargs, origin):
+        """diag.thread_count() -> Result[Number]"""
+        import threading
+        try:
+            return self._result_ok(threading.active_count(), origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.thread_count: {type(e).__name__}: {e}", origin)
+
+    def _diag_tracemalloc_start(self, args, kwargs, origin):
+        """diag.tracemalloc_start(frames: Number) -> Result[Boolean]
+        Idempotent: calling when already running is a no-op success."""
+        import tracemalloc
+        frames = 1
+        if args:
+            v = args[0].value
+            if isinstance(v, (int, float)) and int(v) > 0:
+                frames = int(v)
+        try:
+            if not tracemalloc.is_tracing():
+                tracemalloc.start(frames)
+            return self._result_ok(True, origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.tracemalloc_start: {type(e).__name__}: {e}",
+                origin)
+
+    def _diag_tracemalloc_stop(self, args, kwargs, origin):
+        """diag.tracemalloc_stop() -> Result[Boolean]
+        Idempotent: calling when not running is a no-op success."""
+        import tracemalloc
+        try:
+            if tracemalloc.is_tracing():
+                tracemalloc.stop()
+            return self._result_ok(True, origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.tracemalloc_stop: {type(e).__name__}: {e}",
+                origin)
+
+    def _diag_tracemalloc_snapshot(self, args, kwargs, origin):
+        """diag.tracemalloc_snapshot(top_n: Number) -> Result[[Record]]
+        Each row: {file, line, size_kb, count}. Returns
+        Result-error("tracemalloc_not_started") if start was never
+        called — silent empty rows would hide that gap."""
+        import tracemalloc
+        if not tracemalloc.is_tracing():
+            return self._result_err("tracemalloc_not_started", origin)
+        top_n = 10
+        if args:
+            v = args[0].value
+            if isinstance(v, (int, float)) and int(v) > 0:
+                top_n = int(v)
+        try:
+            snap = tracemalloc.take_snapshot()
+            stats = snap.statistics("lineno")[:top_n]
+            rows = []
+            for s in stats:
+                frame = s.traceback[0] if s.traceback else None
+                rows.append({
+                    "file": frame.filename if frame else "",
+                    "line": int(frame.lineno) if frame else 0,
+                    "size_kb": round(s.size / 1024, 2),
+                    "count": int(s.count),
+                })
+            return self._result_ok(rows, origin)
+        except Exception as e:
+            return self._result_err(
+                f"diag.tracemalloc_snapshot: {type(e).__name__}: {e}",
+                origin)
 
     # --- schedule effect (L2 v2 case study Gap #3 — recurring work).
     # The effect only *registers* the cadence; the actual re-invocation
