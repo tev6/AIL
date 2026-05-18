@@ -316,6 +316,56 @@
   capabilities: ["budget", "state"]
   since: "1.74.0"
 
+# cycle 13 — diag.* runtime introspection (cross-team Stoa OOM
+# driver). Python is the reference; Go/Rust expose NotImplementedHost.
+- name: diag.gc_count
+  tier: substrate
+  signature: "() -> Result[[Number]]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.75.0"
+
+- name: diag.object_count
+  tier: substrate
+  signature: "() -> Result[Number]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.75.0"
+
+- name: diag.thread_count
+  tier: substrate
+  signature: "() -> Result[Number]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.75.0"
+
+- name: diag.tracemalloc_start
+  tier: substrate
+  signature: "(frames: Number) -> Result[Boolean]"
+  determinism: external
+  side_effect: state_write
+  capabilities: ["diag"]
+  since: "1.75.0"
+
+- name: diag.tracemalloc_stop
+  tier: substrate
+  signature: "() -> Result[Boolean]"
+  determinism: external
+  side_effect: state_write
+  capabilities: ["diag"]
+  since: "1.75.0"
+
+- name: diag.tracemalloc_snapshot
+  tier: substrate
+  signature: "(top_n: Number) -> Result[[Record]]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.75.0"
+
 - name: mneme.save
   tier: substrate
   signature: "(owner: Text, kind: Text, value: Any) -> Result[Boolean]"
