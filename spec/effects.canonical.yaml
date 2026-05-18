@@ -366,6 +366,25 @@
   capabilities: ["diag"]
   since: "1.75.0"
 
+# cycle 13 v1.76.0 — native-layer diag extensions. Linux-only;
+# macOS/Windows return Result-error so the platform gap surfaces
+# instead of producing empty rows.
+- name: diag.malloc_stats
+  tier: substrate
+  signature: "() -> Result[Record]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.76.0"
+
+- name: diag.smaps_summary
+  tier: substrate
+  signature: "() -> Result[Record]"
+  determinism: external
+  side_effect: none
+  capabilities: ["diag"]
+  since: "1.76.0"
+
 - name: mneme.save
   tier: substrate
   signature: "(owner: Text, kind: Text, value: Any) -> Result[Boolean]"
