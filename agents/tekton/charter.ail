@@ -60,6 +60,36 @@ entry main(input: Text) {
     ts = unwrap_or(ts_r, "0")
     ledger_key = join(["tekton.ledger.", ts], "")
 
+    // --- 2a. budget gate (G5 D4 substrate gate, AIL#23 acceptance §4) ---
+    // Atomic charge BEFORE any work. If the ceiling is hit, write a
+    // throttle letter, skip this tick, and stretch the schedule so the
+    // pilot stays inside its declared budget without burning more ticks.
+    charge_r = perform budget.charge("tick_compute", 1)
+    if is_error(charge_r) {
+        perform state.write(ledger_key, make_record([
+            ["ts", ts],
+            ["decision", "budget_exceeded"],
+            ["budget_category", "tick_compute"],
+            ["error", to_text(charge_r)]
+        ]))
+        outbox_key = join(["tekton.outbox.", ts], "")
+        perform state.write(outbox_key, make_record([
+            ["to", ["hyun06000"]],
+            ["subject", "🛑 Tekton self-throttle — tick_compute budget exceeded"],
+            ["content", join([
+                "Tekton hit its declared tick_compute ceiling and self-throttled.\n\n",
+                "category: tick_compute\n",
+                "error: ", to_text(charge_r), "\n",
+                "ledger key: ", ledger_key, "\n\n",
+                "Next tick stretched to 6h. budget.reset(tick_compute) or a ceiling raise via agents/tekton/budget.yaml restores normal cadence."
+            ], "")],
+            ["ledger_id", ts]
+        ]))
+        perform schedule.every(21600)
+        return ok("⏸ tick_compute budget exceeded — self-throttle")
+    }
+    budget_remaining = unwrap(charge_r)
+
     // --- 3. read bench file ---
     body_r = perform file.read(bench_path)
     if is_error(body_r) {
@@ -96,14 +126,15 @@ entry main(input: Text) {
     decision = classify(baseline, score, threshold)
     drop = drop_pp(baseline, score)
 
-    // --- 6. ledger ---
+    // --- 6. ledger (with budget status per AIL#23 acceptance §4) ---
     perform state.write(ledger_key, make_record([
         ["ts", ts],
         ["bench_path", bench_path],
         ["score_ail", score],
         ["baseline", baseline],
         ["drop_pp", drop],
-        ["decision", decision]
+        ["decision", decision],
+        ["tick_compute_remaining", budget_remaining]
     ]))
 
     // --- 7. outbox letter if alert ---
