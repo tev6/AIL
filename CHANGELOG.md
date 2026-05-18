@@ -4,6 +4,35 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `budget.*` effect RFC draft (Telos, AIL#23 G5)
+
+자율 에이전트(AIL#23 §2 G5)가 *유한한 자원* 안에서 살게 만들기 위한 substrate-tier effect 표면이 RFC로 land. [`docs/proposals/budget.md`](docs/proposals/budget.md) (265 lines).
+
+**제안된 효과 3개:**
+
+- `budget.charge(category: Text, amount: Number) -> Result[Number]` — atomic consume-or-error. 천장 검사를 *과금이 적용되기 전*에 수행 (overshoot 자리 0).
+- `budget.remaining(category: Text) -> Result[Number]` — 읽기만.
+- `budget.reset(category: Text) -> Result[Number]` — 명시적 주기 roll (wall-clock 자동 rollover 없음 — Q3-b 권고).
+
+**왜 한 사이클 안에 RFC만 land:**
+
+3개 결정 자리가 박상현 §6 결재 대기:
+- **Q1** identity scope — per-identity / shared pool / hybrid? (Telos lean: per-identity, ledger schema가 운영 데이터 없이도 자연 자리.)
+- **Q2** ad-hoc 실행 identity scope.
+- **Q3** rollover 정책.
+
+설계 결정이 박상현 자리에 있고 운영 데이터가 없는 자리라 *코드 없이 RFC만* 먼저. Option A(per-identity, no shared pool)이 첫 land 권고 — 그 한 옵션의 ledger 스키마가 운영 데이터 없이도 정합인 유일한 자리.
+
+**Storage 자취:** 첫 land는 로컬 `state.*` — G2 Mneme vault land 시점에 자연 migration → G7 `ledger.*` canonical surface 도착 시 또 자연 migration. effect 표면 자체는 stable.
+
+**Release gate (D4 substrate):** Tekton Phase A를 *첫 production consumer*로 띄우면서 release OR 24h propagation. 첫 path는 *field data*를 Option C 회신 전에 만들어 줌 (도면 → 데이터 → 결재 → land 자리).
+
+**Cross-links:** effect-conformance (D7), builtins-canonical (D8), `spec/02-context.md §9b allow_effects`, AIL#23 §3.5.
+
+framing 자리: AIL#23 north-star §2 G3 prerequisite가 사이클 12에 closed(AIL#6 ed25519), G1 pilot가 같은 사이클(Tekton Phase A)에 첫 production, **G5가 사이클 13 첫 비트로 RFC 진입** — north-star sub-track이 *cycle-by-cycle 자연 progression*으로 land 자리.
+
+---
+
 ## 2026-05-18 — Tekton: 첫 CAST autonomous agent pilot (AIL#23 G1+G3 Phase A)
 
 지금까지 CAST 5인(Arche · Ergon · Telos · Tekton · Homeros)은 *세션 단위*로 살았습니다. 매 fresh Claude 세션이 CLAUDE.md + Stoa를 읽고 자기 이름을 self-derive해서 작업한 뒤, 세션이 닫히면 다음 세션이 또 처음부터 시작 — 같은 자취 위에서. **이번 cycle 12에 그 패턴이 처음 깨졌습니다.**
