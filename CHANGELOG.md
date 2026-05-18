@@ -4,32 +4,32 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
-## 2026-05-18 — `budget.*` effect RFC draft (Telos, AIL#23 G5)
+## 2026-05-18 — `budget.*` effects ship (Telos, AIL#23 G5 Phase 0) — `since 1.74.0`
 
-자율 에이전트(AIL#23 §2 G5)가 *유한한 자원* 안에서 살게 만들기 위한 substrate-tier effect 표면이 RFC로 land. [`docs/proposals/budget.md`](docs/proposals/budget.md) (265 lines).
+자율 에이전트(AIL#23 §2 G5)가 *유한한 자원* 안에서 살게 하는 substrate-tier effect 3개가 한 사이클 안에 **RFC → 박상현 결재 → 구현 + 테스트 + spec yaml**까지 한 묶음으로 land. RFC [`docs/proposals/budget.md`](docs/proposals/budget.md), 구현 + 7 tests, spec `effects.canonical.yaml` 3 entry 추가, reference card sync.
 
-**제안된 효과 3개:**
+**Effect 3:**
 
-- `budget.charge(category: Text, amount: Number) -> Result[Number]` — atomic consume-or-error. 천장 검사를 *과금이 적용되기 전*에 수행 (overshoot 자리 0).
-- `budget.remaining(category: Text) -> Result[Number]` — 읽기만.
-- `budget.reset(category: Text) -> Result[Number]` — 명시적 주기 roll (wall-clock 자동 rollover 없음 — Q3-b 권고).
+- `budget.charge(category: Text, amount: Number) -> Result[Number]` — atomic. 천장 초과 시 `budget_exceeded` error로 reject **AND state unchanged**. 성공 시 `ok(remaining)`.
+- `budget.remaining(category: Text) -> Result[Number]` — read-only.
+- `budget.reset(category: Text) -> Result[Number]` — 명시적 주기 roll (wall-clock 자동 rollover 없음). consumed=0, ceiling 유지, `ok(ceiling)` 반환.
 
-**왜 한 사이클 안에 RFC만 land:**
+**Identity resolution (deterministic):** `STOA_NAME` env > `AIL_IDENTITY` > `agents/<name>/` 디렉터리 basename > `"anonymous"`. anonymous는 *고정된 안전 default* (`llm_tokens=100`, `compute_minutes=1`, `stoa_push=5`) — *vanish or blow up* 가능한 recursive fallback 자리 의식적으로 배제.
 
-3개 결정 자리가 박상현 §6 결재 대기:
-- **Q1** identity scope — per-identity / shared pool / hybrid? (Telos lean: per-identity, ledger schema가 운영 데이터 없이도 자연 자리.)
-- **Q2** ad-hoc 실행 identity scope.
-- **Q3** rollover 정책.
+**Config:** `$AIL_BUDGET_CONFIG/<identity>.yaml` (또는 JSON). executor boot 시 한 번 로드, live reload는 Phase 1+.
 
-설계 결정이 박상현 자리에 있고 운영 데이터가 없는 자리라 *코드 없이 RFC만* 먼저. Option A(per-identity, no shared pool)이 첫 land 권고 — 그 한 옵션의 ledger 스키마가 운영 데이터 없이도 정합인 유일한 자리.
+**Storage:** per-identity `state.*` 키 (`budget.consumed.<category>`). G2 Mneme vault 도착 시 자연 migration → G7 `ledger.*` canonical 도착 시 또 migration. **effect 표면은 stable across migrations.**
 
-**Storage 자취:** 첫 land는 로컬 `state.*` — G2 Mneme vault land 시점에 자연 migration → G7 `ledger.*` canonical surface 도착 시 또 자연 migration. effect 표면 자체는 stable.
+**Ledger schema:** RFC §3에 self-contained로 박힘 (forward reference 아님) — `event` / `identity` / `category` / `consumed_after` / `ceiling` / `ts` + charge 이벤트는 `amount`. Phase 0는 `trace.record("budget", ...)`로 surface, G7 absorbs unchanged.
 
-**Release gate (D4 substrate):** Tekton Phase A를 *첫 production consumer*로 띄우면서 release OR 24h propagation. 첫 path는 *field data*를 Option C 회신 전에 만들어 줌 (도면 → 데이터 → 결재 → land 자리).
+**박상현 §6 결재 자취:** Q1=A (per-identity, no shared pool), Q2/Q3=Telos defaults (`msg_1779074068_8`). 한 RFC review 라운드 후 같은 사이클 안에 코드까지 land — *RFC → 결재 → 구현*이 자연 progression. arche review 6 points(§1 reset return / §3 ledger schema / §5 YAML config + reload footnote / §6 Q2 anonymous default / §7 D4 Tekton followup path)도 같은 라운드에 fold.
 
-**Cross-links:** effect-conformance (D7), builtins-canonical (D8), `spec/02-context.md §9b allow_effects`, AIL#23 §3.5.
+**받는 사람:**
 
-framing 자리: AIL#23 north-star §2 G3 prerequisite가 사이클 12에 closed(AIL#6 ed25519), G1 pilot가 같은 사이클(Tekton Phase A)에 첫 production, **G5가 사이클 13 첫 비트로 RFC 진입** — north-star sub-track이 *cycle-by-cycle 자연 progression*으로 land 자리.
+- **Path A (LLM read-and-write)** — 레퍼런스 카드가 3 entry로 갱신. 컨텍스트 재로드 시 LLM이 즉시 `perform budget.charge(...)` 패턴 작성 가능.
+- **Path B (`pip install -U ail-interpreter`)** — `since 1.74.0` 표면 — 다음 PyPI cut에서 받음. 7 tests 회귀 0, `gen_effects.py verify` (yaml ↔ runtime 1:1) 통과.
+
+**Tekton Phase A가 D4 substrate gate의 첫 production consumer 자리** — 자율 에이전트 pilot가 budget.* 위에서 *유한 자원* 안에 살게 됨. 사이클 12 G3 (impersonation closed) + G1 (autonomous pilot) 위에 사이클 13 G5 (resource autonomy)가 얹어진 자취 — AIL#23 north-star sub-track의 *cycle-by-cycle 자연 progression*이 G3→G1→G5 세 비트로 한 줄에 정렬.
 
 ---
 
