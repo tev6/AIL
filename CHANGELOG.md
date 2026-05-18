@@ -4,6 +4,35 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `diag.malloc_stats` + `diag.smaps_summary` — native-layer visibility (Telos, `since 1.76.0`)
+
+같은 사이클 *같은 self-fix loop*가 한 비트 더 깊어진 자리.
+
+`v1.75.1` 검증(Stoa-Admin)이 *`trace.py:45` 자리는 sealed* 확인 — `-55%`, tracemalloc top1이 1.7 MB로. 그러나 **top10 plateau와 VmRSS 사이 ~120 MB gap이 여전히 RSS 우상향 +18 MB/min**. *top10이 평탄해졌다*는 건 *누수가 Python heap이 아닌* 자리 — C-extension malloc, glibc arena fragmentation, anonymous mmap 등 *native layer*. tracemalloc 표면이 못 보는 자리.
+
+**2개 substrate-tier effect 추가** (같은 `diag.*` namespace, since 1.76.0):
+
+- `diag.malloc_stats() -> Result[Record]` — glibc `mallinfo2`를 ctypes로 호출. fragmentation 진단에 유용한 7 필드(`arena` / `uordblks` / `fordblks` / `hblks` / `hblkhd` / `ordblks` / `keepcost`) 바이트 단위. **Linux only**. 의식적으로 옛 32-bit `mallinfo()` fallback **거부** — int 필드가 multi-GB 프로세스에서 silent overflow되어 *틀린 숫자*를 만들기 때문.
+
+- `diag.smaps_summary() -> Result[Record]` — `/proc/self/smaps`의 Rss를 4 버킷으로 합산: `rss_anon_kb` / `rss_file_kb` / `heap_kb` / `stack_kb`. 합이 보통 `VmRSS`를 rounding 안에서 cover — *"RSS gap이 anonymous mmap인가 / file mapping인가 / heap인가 / stack인가?"*를 한 호출로 답.
+
+**Linux only — macOS/Windows에서:** `Result-error("malloc_stats_unsupported" / "smaps_unsupported")`. 플랫폼 gap이 *명시*로 surface, Result shape에 pattern-match하는 agent는 host에 따라 자연 동작.
+
+**side_effect: none** — 둘 다 host introspection 표면의 *순수 read*. capability는 기존 `["diag"]` 그대로 — `allow_effects: ["diag.*"]` 하나로 함께 opt-in.
+
+framing 자리 — *self-fix loop가 한 단 더 깊어진 자취*:
+
+| 단 | 자취 |
+|---|---|
+| **1** | diag.tracemalloc → AIL trace.py:45 unbounded list surface |
+| **2** | v1.75.1 hotfix (`trace.py` deque cap) → tracemalloc top1 -55% |
+| **3** | top10 plateau가 RSS gap을 *native layer*로 surface |
+| **4** | `diag.malloc_stats` + `diag.smaps_summary` — Python heap 너머의 *native 자리도 in-program으로 자문 가능* |
+
+자율 에이전트가 *자기 host의 어느 layer에 누수가 있는지*를 질문할 수 있는 자리가 한 사이클 안에 layer-by-layer로 닫힘. cycle 13의 cross-team substrate self-evidence가 *깊이*에서 한 비트 더.
+
+---
+
 ## 2026-05-18 — `trace.entries` bounded by default — Stoa OOM RCA hotfix (Telos, `since 1.75.1`)
 
 **diag.\* (오늘 오전 land한 자리)가 자기 land 같은 사이클 안에 *AIL 자신의 메모리 leak*을 진단해서 가져온 자취.**
