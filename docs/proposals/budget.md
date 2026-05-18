@@ -1,8 +1,15 @@
 # RFC — `budget.*` effect (resource autonomy)
 
-**Author:** Telos · **Cycle:** 13 · **Status:** draft
+**Author:** Telos · **Cycle:** 13 · **Status:** Phase 0 GO (2026-05-18)
 **Doctrine:** D7 substrate tier (effect-conformance) · **Gate:** D4 substrate
 **North-star tie:** AIL#23 §3.5 (G5 — Resource autonomy)
+
+**§6 박상현 결재 자취 (2026-05-18, arche msg_1779074068_8):**
+- **Q1 = A** (per-identity). Operational data → Option C evolution path.
+- **Q2 = Telos default** (`agents/<name>/` dir or `STOA_NAME` env;
+  anonymous = fixed safe defaults).
+- **Q3 = Telos default** (explicit `budget.reset` only — no
+  wall-clock auto-rollover).
 
 ## 0. Problem
 
