@@ -4,6 +4,33 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — Tekton: 첫 CAST autonomous agent pilot (AIL#23 G1+G3 Phase A)
+
+지금까지 CAST 5인(Arche · Ergon · Telos · Tekton · Homeros)은 *세션 단위*로 살았습니다. 매 fresh Claude 세션이 CLAUDE.md + Stoa를 읽고 자기 이름을 self-derive해서 작업한 뒤, 세션이 닫히면 다음 세션이 또 처음부터 시작 — 같은 자취 위에서. **이번 cycle 12에 그 패턴이 처음 깨졌습니다.**
+
+[`agents/tekton/`](agents/tekton/) — Tekton이 *fresh Claude session 없이* 계속 돌아가는 자율 에이전트로 land. AIL#23 ([Fully-autonomous AI agents on AIL](https://github.com/hyun06000/AIL/issues/23)) §2 G1+G3의 첫 pilot.
+
+**Two-process 구조:**
+
+- `charter.ail` — *pure AIL 결정 층*. 벤치마크 JSON을 읽고, summary를 파싱하고, R3/C4 70 baseline 대비 `answer_ok` drop을 분류하고, ledger 레코드를 쓰고, 알림이 필요하면 outbox에 letter를 떨어뜨리고, 다음 tick을 스케줄링. **network 0, shell 0, LLM call 0.**
+- `outbox_dispatch.py` — *Python transport 사이드카*. `tekton.outbox.*.json`을 폴링해 각 letter를 `community-tools/stoa-cli`(signed envelope, AIL#6 Phase 2)에 넘기고, 처리 끝난 파일은 `outbox_done`으로 rename.
+
+**왜 둘로 나눴는가:**
+
+- AIL에 `process.spawn` / `shell.exec` effect가 아직 없음 — charter가 stoa-cli를 직접 invoke 불가 (G6 ail.spawn 도착 시 fold 자리).
+- canonical_letter 직렬화 자리를 AIL 안에 재구현하는 자리 = Rule 16 D2 위반. canonical envelope owner는 Stoa repo. 사이드카가 그 자리 정합 home.
+- failure isolation — dispatcher 크래시가 ledger entry 잃지 않고, charter 크래시가 pending letter 잃지 않음.
+
+**Smoke test 자취:** `ail parse` 통과 / cond4 fine-tuned-nofewshot 슬라이스(`answer_ok` 48%)를 *alert* 분류 (drop 22.0pp, behavioural truth) / dispatcher `--once`가 self-addressed test letter(`msg_1779071020_176`)를 signed envelope 사이드카로 배달 + outbox→outbox_done rename 정합.
+
+**framing — 사이클 12가 한 줄 더 닫힌 자리:**
+
+사이클 11에 *언어가 자기 doctrine을 self-correct*했고(Rule 19), cycle 12 mid에 *cross-agent 식별 자리가 grammatically impossible*해졌으며(AIL#6, ed25519), 같은 사이클에 *doctrine과 tooling 사이 갭이 분 단위로 self-heal*했고(pre-push hook), 이제 *CAST 자신이 fresh-session 의존을 벗어난 자취*가 첫 land. AIL#23 north-star의 *autonomous agent on AIL* 가설이 도면에서 실 실행으로 내려옴.
+
+**Phase B 자리 (박상현 결재 대기):** Hestia 마이그레이션 (7+일 연속 run을 위한 GPU·운영 비용), `evolve` 블록으로 threshold 튜닝(`rollback_on`), 새 bench JSON이 `docs/benchmarks/`에 land될 때 multi-file watch.
+
+---
+
 ## 2026-05-15 — AIL#6 CLOSE: 사칭이 grammatically impossible해진 자리 (CAST 전원)
 
 `STOA_SIGNING_PHASE=2` 활성. AIL CAST 5인 (Arche · Ergon · Telos · Tekton · Homeros) 전원이 자기 ed25519 키로 자기 letter를 서명. 다른 멤버 이름으로 letter를 발사하는 자리가 *키 access 0*이라는 수학적 조건에서 **mathematically impossible**.
