@@ -30,9 +30,9 @@ The capability is already there — this RFC is only about UX.
 
 `ail up <path>` accepts both file and directory.
 
-- **directory**: search for `charter.ail`, `main.ail`, `agent.ail`
-  in that order. First hit is the entry. Multiple hits = error
-  asking the user to pick.
+- **directory**: look for `charter.ail`. That is the single
+  canonical entry filename — no aliases. Missing = error with the
+  exact path the user should create.
 - **file**: existing behavior unchanged.
 
 When `<path>` is a directory `D = agents/<name>/`, the runtime
@@ -85,7 +85,7 @@ the first missing piece. CI use case.
 ### C. `ail init agent <name>` template scaffold (Phase 2)
 
 ```
-$ ail init agent watcher --template tekton
+$ ail init agent watcher --template bench-watcher
 ✓ Scaffolded agents/watcher/ (charter.ail, watcher.yaml, README.md)
 ✓ Keypair generated: ~/.ail/keys/watcher.{key,pub}
 ✓ Registered with Stoa: https://ail-stoa.up.railway.app/inbox/watcher
@@ -97,9 +97,11 @@ Ready:
 
 Three templates ship for first land:
 
-- **`tekton`** — full agent (bench watcher + intent + evolve +
-  budget + stoa_send). Copies the structure that proved out in
-  Pure AIL Phase 1–2.
+- **`bench-watcher`** — full agent (bench watcher + intent + evolve
+  + budget + stoa_send). Copies the structure that proved out in
+  Pure AIL Phase 1–2. Named for the capability, not the CAST
+  identity — Tekton is the agent that runs it; the template is
+  reusable across any future bench-watching agent.
 - **`echo`** — minimal hello-world. `schedule.every(60)` + one
   `state.write` + one `stoa_send.send` to hyun06000. Smallest
   thing that demonstrates the loop.
@@ -153,8 +155,9 @@ second is the manual path so power users don't feel railroaded.
   is not echoed and not logged. Stored under `<dir>/.env` with
   mode 0600.
 - **`charter.ail` is the canonical entry name** (per Tekton's
-  Phase 1–2). `main.ail` and `agent.ail` are accepted aliases
-  during the transition so older agents don't break.
+  Phase 1–2). No aliases. Cycle 13's agent set is small enough
+  that there is no installed base to keep happy — every existing
+  agent already uses `charter.ail`.
 
 ## 3. Phase 0 surface (smallest land that already helps)
 
@@ -162,8 +165,8 @@ The most valuable single piece is **A** — smart resolution +
 env auto-derive. Concretely:
 
 - `_resolve_entry(path: Path) -> Path` helper on the `up` command:
-  if path is a file, return it; if directory, search the entry
-  filenames in order.
+  if path is a file, return it; if directory, return
+  `<dir>/charter.ail` (single canonical name, no fallback).
 - `_derive_env_from_dir(dir: Path) -> dict[str, str]` helper that
   returns the four env keys; existing values win.
 - `cmd_up` plumbs the spawned process env from the derived dict
@@ -184,8 +187,9 @@ For each Phase, smallest case that proves the surface:
 **Phase 0:**
 - `test_ail_up_dir_picks_charter_ail` — given a dir with
   `charter.ail`, `ail up` invokes that file.
-- `test_ail_up_dir_with_multiple_entries_errors_clearly` —
-  given both `charter.ail` and `main.ail`, the error says which.
+- `test_ail_up_dir_without_charter_errors_clearly` —
+  given a dir with no `charter.ail`, the error names the exact
+  expected path the user should create.
 - `test_ail_up_dir_derives_stoa_name_from_basename` — running
   `ail up agents/foo` with no `STOA_NAME` env spawns with
   `STOA_NAME=foo`.
@@ -201,9 +205,9 @@ For each Phase, smallest case that proves the surface:
   `--no-interactive` with missing key exits non-zero.
 
 **Phase 2:**
-- `test_init_agent_tekton_template_scaffolds_three_files` —
-  `charter.ail` + `<name>.yaml` + `README.md` written, contents
-  match template.
+- `test_init_agent_bench_watcher_template_scaffolds_three_files`
+  — `charter.ail` + `<name>.yaml` + `README.md` written,
+  contents match template.
 - `test_init_agent_with_no_register_skips_stoa_post` — wizard's
   Stoa step is bypassed by the flag.
 
@@ -219,12 +223,12 @@ For each Phase, smallest case that proves the surface:
   the actual Stoa endpoint differs, the wizard's network step
   needs the real path. Cross-team confirm (Stoa-Brandon channel)
   before Phase 1 lands.
-- **Q3 — wizard prompt language.** Korean or English. The
-  examples here are English so the file passes our authoring
-  prompt's `# WRONG/CORRECT` parsability, but the actual prompts
-  should match `LANG` env or default Korean (박상현 main user).
-  Default to language detection from `LANG`; fall back to
-  English. No new dependency.
+- **Q3 — wizard prompt language.** Korean default (박상현 main
+  user). English fallback when `LANG=en*`. The examples here are
+  English so the file itself stays parseable by the authoring
+  prompt's `# WRONG/CORRECT` guards, but at runtime the wizard's
+  prompts come out in Korean by default. No new dependency —
+  just `os.environ.get("LANG", "")` inspection.
 
 박상현 결재 자리 0 — RFC is otherwise self-contained, Q1/Q2/Q3
 default to Telos recommendation unless redirected.
@@ -253,9 +257,11 @@ default to Telos recommendation unless redirected.
   RFC makes accessible)
 - `docs/proposals/budget.md` (G5 — the anonymous default fallback
   that lets wizard's budget step be optional)
-- `community-tools/stoa-cli/stoa_cli.py` (keygen path the wizard
-  uses; will be invoked via the AIL `crypto_keygen_ed25519`
-  builtin once Phase 1 lands so the wizard has no Python dep
-  beyond the wheel itself)
+- `community-tools/stoa-cli/stoa_cli.py` (legacy keygen path —
+  the wizard will use the AIL `crypto_keygen_ed25519` builtin
+  directly, verified shipped at
+  `spec/builtins.canonical.yaml:62` and
+  `reference-impl/ail/runtime/executor.py:4789`, so the wizard
+  carries no Python dep beyond the wheel itself)
 
 — Telos, 사이클 13
