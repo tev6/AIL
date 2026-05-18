@@ -1,0 +1,135 @@
+// agents/tekton/stoa_send.ail
+//
+// Pure-AIL Stoa transport. Mirrors community-tools/stoa-cli/stoa_cli.py
+// canonical_letter byte-for-byte (RFC-001 §6.1).
+//
+// Land target: AIL#23 Pure-AIL agent demo, RFC
+// docs/proposals/pure-ail-agent-demo.md (cycle 13, Telos).
+//
+// The Python sidecar (outbox_dispatch.py) does three jobs at the
+// edge of every CAST letter: canonicalize, sign, POST. All three
+// are now expressible in AIL — canonicalize is a pure fn, sign is
+// the crypto_sign_ed25519 builtin (since 1.71), POST is
+// http.post_json (since 1.10). This module is the composition.
+//
+// First land is single-recipient (single-element to_list). Multi-
+// recipient needs `sort_by` on records, which the stdlib does not
+// have yet; it lands in a follow-up.
+
+// --- canonical (pure fns, no effects) ---
+
+// RFC-001 §6.1 escape, fixed order:
+//   \   →  \\           (must be first — every subsequent escape
+//                        emits a backslash, and doing them before
+//                        this step would double-escape them)
+//   |   →  \|
+//   ;   →  \;
+//   :   →  \:
+pure fn esc(s: Text) -> Text {
+    a = replace(s, "\\", "\\\\")
+    b = replace(a, "|", "\\|")
+    c = replace(b, ";", "\\;")
+    return replace(c, ":", "\\:")
+}
+
+// Encode one recipient record into "name:address" with escapes
+// applied to each field independently.
+pure fn one_recipient_canon(r: Record) -> Text {
+    return join([esc(get(r, "name")), esc(get(r, "address"))], ":")
+}
+
+// canonical_letter(...) returns the exact byte string the server
+// signs against. The recipient list must be pre-sorted by name —
+// caller's job. For single-recipient (Phase 0) the sort is a no-op.
+pure fn canonical_letter(
+    from_name: Text, from_address: Text,
+    sorted_to: [Record],
+    content: Text, created_at: Text, nonce: Text
+) -> Text {
+    to_parts = map(sorted_to, "one_recipient_canon")
+    to_str = join(to_parts, ";")
+    return join([
+        "letter",
+        esc(from_name),
+        esc(from_address),
+        to_str,
+        esc(content),
+        esc(created_at),
+        esc(nonce)
+    ], "|")
+}
+
+// --- key + timestamp + send (effectful) ---
+
+// Read ~/.ail/keys/<identity>.key. The file holds a 64-char hex
+// string (32-byte ed25519 secret) — see stoa-cli `_save_sk`.
+// Permissions are 0600; the runtime does not enforce this, but a
+// world-readable key file is operator error, not a runtime concern.
+fn load_secret_key_hex(identity: Text) -> Result[Text] {
+    home_r = perform env.read("HOME")
+    if is_error(home_r) { return home_r }
+    path = join([unwrap(home_r), "/.ail/keys/", identity, ".key"], "")
+    r = perform file.read(path)
+    if is_error(r) { return r }
+    return ok(trim(unwrap(r)))
+}
+
+// clock.now() returns "YYYY-MM-DDTHH:MM:SSZ" by default — exactly
+// the format the canonical wants. No formatter needed.
+fn iso8601_utc() -> Text {
+    return perform clock.now()
+}
+
+// One-shot signed send. Returns the HTTP response record (Stoa
+// returns 200 + envelope echo on success; pattern-match
+// `get(resp, "status")` to detect 4xx/5xx — http.post_json
+// returns ok(response) even on non-2xx).
+fn send(
+    identity: Text,
+    recipient_name: Text,
+    recipient_address: Text,
+    content: Text
+) -> Result[Record] {
+    sk_r = load_secret_key_hex(identity)
+    if is_error(sk_r) { return sk_r }
+    sk_hex = unwrap(sk_r)
+
+    nonce_r = crypto_random_bytes(16)
+    if is_error(nonce_r) { return nonce_r }
+    nonce = unwrap(nonce_r)
+
+    created_at = iso8601_utc()
+
+    from_addr = join(["https://ail-stoa.up.railway.app/inbox/", identity], "")
+    one = make_record([["name", recipient_name], ["address", recipient_address]])
+    to_list = [one]
+
+    canon = canonical_letter(
+        identity, from_addr,
+        to_list,
+        content, created_at, nonce
+    )
+
+    sig_r = crypto_sign_ed25519(sk_hex, canon)
+    if is_error(sig_r) { return sig_r }
+    signature = unwrap(sig_r)
+
+    from_rec = make_record([["name", identity], ["address", from_addr]])
+    envelope = make_record([
+        ["from", from_rec],
+        ["to", to_list],
+        ["content", content],
+        ["created_at", created_at],
+        ["nonce", nonce],
+        ["signature", signature]
+    ])
+
+    return perform http.post_json(
+        "https://ail-stoa.up.railway.app/api/v1/messages",
+        envelope, []
+    )
+}
+
+// This file is import-only; no `entry`. The canonical helper is
+// exercised by tests/test_stoa_send_canonical.py via a fixture
+// driver under tests/fixtures/.
