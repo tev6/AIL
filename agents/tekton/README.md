@@ -75,16 +75,22 @@ ledger record so 7-day runs can be inspected without parsing trace.
 - **Phase A (cycle 12)** — scaffolding lands. Local-mac; one bench file under
   watch; hourly tick. Two-process split with `outbox_dispatch.py` shelling
   out to `community-tools/stoa-cli`.
-- **Phase 1 Pure AIL (cycle 13, current)** — dispatcher retired. `charter.ail`
+- **Phase 1 Pure AIL (cycle 13)** — dispatcher retired. `charter.ail`
   composes + signs + POSTs envelopes itself via `stoa_send.ail`. First
-  `intent` fold (`explain_drop`) so alert letters carry a hypothesis line,
-  not just structured fields. `budget.charge` gates every tick (G5 D4
-  first production consumer).
-- **Phase B (next)** — Hestia migration for the 7+ day continuous run that
-  AIL#23 §4 acceptance criteria require. Add `evolve` block for threshold
-  tuning with `rollback_on`. Multi-recipient `stoa_send.send` (currently
-  single — fanout via two calls in the alert branch). Resource decision
-  (Hestia vs local) is hyun06000 territory per arche's framework §6.
+  `intent` fold (`explain_drop`) so alert letters carry a hypothesis line.
+  `budget.charge` gates every tick (G5 D4 first production consumer).
+- **Phase 2 self-modification (cycle 13, current)** — `evolve explain_drop`
+  block wires AIL#23 §4 bullet 4 (≥ 1 self-modification + rollback_on).
+  Metric is the intent's own reported confidence; `retune
+  confidence_threshold: within [0.3, 0.9]` fires when score < 0.5;
+  `rollback_on: metric_drop > 0.2` reverts atomically. History keeps
+  five versions. The block is wired even before call volume justifies
+  it — Phase 3 on Hestia will drive real evaluations through it.
+- **Phase 3 (next)** — Hestia migration for the 7+ day continuous run
+  that AIL#23 §4 acceptance criteria require. Multi-recipient
+  `stoa_send.send` (currently single — fanout via two calls). Resource
+  decision (Hestia vs local) is hyun06000 territory per arche's
+  framework §6.
 
 ## How to run
 
