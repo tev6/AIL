@@ -4,6 +4,34 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `trace.entries` bounded by default — Stoa OOM RCA hotfix (Telos, `since 1.75.1`)
+
+**diag.\* (오늘 오전 land한 자리)가 자기 land 같은 사이클 안에 *AIL 자신의 메모리 leak*을 진단해서 가져온 자취.**
+
+Stoa Phase B 서버에서 *diag.tracemalloc_snapshot*을 돌렸더니 top consumer가 **AIL `trace.py:45`** — 1분 cold-start 안에 *3.9 MB / 35,492 호출*, 모든 'top 10' caller가 같은 sink(`self.entries.append`)로 routing. 리스트가 *unbounded* — long-running `evolve` 서버 (Stoa·Mneme·미래 자율 CAST agents)에서 traffic에 *선형으로* 메모리 누수.
+
+**Hotfix:** `self.entries: list` → `collections.deque(maxlen=10_000)`. 오래된 entry는 새 entry 들어올 때 evict. `to_list()` / `to_json()` / `pretty()`는 deque가 list와 같은 방식으로 iterate해서 *동작 변경 0*.
+
+**Knobs:**
+- `AIL_TRACE_MAX_ENTRIES=<positive int>` — default cap 재정의.
+- `AIL_TRACE_UNBOUNDED=1` — 옛 unbounded 동작 복원 (test/debug).
+- 잘못된 `AIL_TRACE_MAX_ENTRIES` (non-int / ≤0) → silent fallback 10,000 — *boot은 bad env var에서 crash 안 함*.
+
+**Tests:** 5 cases (`test_trace_bounded.py`) — 10,001 entries → deque holds 10,000 oldest evicted / `MAX_ENTRIES=50` 정합 / `UNBOUNDED=1` no cap / `to_list` works / malformed env fallback. 회귀 sweep (trace consumers `test_executor` + `test_calibration` + `test_integration` + `test_parallel` + `test_ail_run`) **57/57 pass**.
+
+**Land 경로:** dev → main → tag `v1.75.1` → PyPI → Stoa가 `ail-interpreter >=1.75.1` bump + redeploy → tracemalloc top-N에서 `trace.py` 사라짐 → **OOM lane CLOSE**.
+
+framing — 자기-진단 closed loop가 한 사이클 안에 닫힌 자리:
+
+1. **cycle 7+** "AIL은 양 팀 substrate 지원" — 슬로건.
+2. **오늘 morning** Stoa-Admin OOM trajectory letter → arche → Telos가 `diag.*` 6 effect land — *agent가 자기 host 메모리 상태를 물을 수 있게* 됨.
+3. **오늘 afternoon** Stoa-Marcus가 `diag.tracemalloc_snapshot`을 *자기 production*에 돌림 → root cause가 **AIL 자신의 코드**에 있음을 *정확히* surface.
+4. **본 land** AIL이 자기 결함을 자기 사용자(Stoa)의 진단 결과로 자기 한 사이클 안에 fix.
+
+*양 팀 substrate 지원이 슬로건에서 commit graph로*(cycle 8) → *외부 contributor burst까지 흡수*(cycle 9) → *그 substrate가 외부 시스템 incident 진단까지 enable*(오늘 morning) → ***그 진단이 AIL 자신의 결함을 surface하고 같은 사이클에 close 시킴***(본 land). 사이클 13의 cross-team substrate 자취의 *self-evidence 닫힘 자리*.
+
+---
+
 ## 2026-05-18 — `ail up` zero-config UX RFC (Telos, AIL#23 §0 외부 진입 자리)
 
 자율 에이전트 capability가 source에 박힌(`§4 7/7 wired`) 직후, **UX 쪽 진입 장벽**이 다음 자리로 surface. 박상현 framing(`msg_1779090522_52`): *"어떤 사용자라도 아주 쉽게 자율 에이전트 띄우는 자리."* RFC [`docs/proposals/ail-up-ux.md`](docs/proposals/ail-up-ux.md) (261 lines).
