@@ -4,6 +4,38 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `diag.*` runtime introspection effects ship (Telos, cross-team driver) — `since 1.75.0`
+
+자율 에이전트가 *자기 host의 메모리 상태*를 in-program으로 물어볼 수 있게 됨. 6개 substrate-tier effect 추가 + RFC + 6 tests, 한 묶음으로 land.
+
+**Driver — cross-team Stoa OOM 추적:**
+
+Stoa Railway 메모리 패널의 *F-1 hotfix 직후 슬로우 우상향 잔여 자취*가 "어느 Python 객체가 누적되고 있는가?"를 묻고 있던 자리. 이 질문을 *agent 자신이 자기 코드 안에서* 던질 수 있게 하려면 host introspection 표면이 필요. Cross-team delegation chain: Stoa-Admin `msg_1779082200_8` → arche delegation `msg_1779082331_12` → Telos land.
+
+**Effect 6 (namespace `diag.*` — D1·D5 정합, Go/Rust는 `NotImplementedHost` stub):**
+
+- `diag.gc_count() -> Result[[Number]]` — GC 세대별 카운터.
+- `diag.object_count() -> Result[Number]` — `gc.get_objects()` 길이.
+- `diag.thread_count() -> Result[Number]` — 활성 스레드 수.
+- `diag.tracemalloc_start(frames: Number) -> Result[Boolean]` — process-global tracer 시작 (idempotent).
+- `diag.tracemalloc_stop() -> Result[Boolean]` — tracer 중단 (idempotent).
+- `diag.tracemalloc_snapshot(top_n: Number) -> Result[[Record]]` — 현재 할당 상위 N 자리: `{file, line, size_kb, count}`. start 호출 안 됐으면 `Result-error("tracemalloc_not_started")` 반환 — *empty data 대신 gap이 surface*.
+
+**Capability 분리:** `["diag"]`가 `state`/`network`와 별도 — `allow_effects: ["diag.*"]`가 진단 도구를 위한 *명시 opt-in* 자리. 다른 effect 묶음에 silent 포함 안 됨.
+
+**Side-effect 분류:**
+
+- start/stop은 `state_write` (process-global tracer state 변경).
+- read paths(`gc_count`/`object_count`/`thread_count`/`snapshot`)는 side-effect 없음.
+
+**자취:** `gen_effects.py verify` (yaml ↔ runtime 1:1) 통과. 6 tests pass (gens=3 / count>0 / threads≥1 / start→snapshot rows / missing-start error / stop-idempotent).
+
+**D4 substrate gate:** Stoa-Marcus stoa#14-3 consumer가 *첫 production 사용*으로 release trigger. AIL CAST 측 Tekton charter가 추가 consumer로 자연 (메모리 누수 진단을 agent 자신이 자기 한 사이클 안에 수행 가능).
+
+framing 자리 — cycle 13의 *cross-team substrate* 자취: G5 `budget.*`가 AIL#23 north-star sub-track 안에서 닫힌 자취였다면, `diag.*`는 *sibling 팀(Stoa)이 자기 host 진단을 위해 AIL 효과를 요청 → 같은 사이클에 land*. 사이클 7 mission framing의 *'AIL은 양 팀 substrate 지원'*이 한 비트 더 — 이번엔 *외부 시스템 운영 incident 대응*까지 substrate 표면으로.
+
+---
+
 ## 2026-05-18 — Tekton Phase 2: 자기 변경 + rollback이 source에 박힘 (Tekton, AIL#23 §4 **7/7 wired**)
 
 charter.ail에 `evolve explain_drop rollback_on` 블록이 land — *모델이 자기 explain quality를 자기 confidence로 평가하고, 충분히 자주 낮으면 confidence threshold를 `[0.3, 0.9]` 안에서 retune하며, 그 retune이 더 큰 drop(`metric_drop > 0.2`)을 만들면 atomic하게 revert*. 5-version history로 같은 path에서 즉시 re-fire 안 함.
