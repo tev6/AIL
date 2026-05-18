@@ -4,6 +4,29 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — Tekton Phase 2: 자기 변경 + rollback이 source에 박힘 (Tekton, AIL#23 §4 **7/7 wired**)
+
+charter.ail에 `evolve explain_drop rollback_on` 블록이 land — *모델이 자기 explain quality를 자기 confidence로 평가하고, 충분히 자주 낮으면 confidence threshold를 `[0.3, 0.9]` 안에서 retune하며, 그 retune이 더 큰 drop(`metric_drop > 0.2`)을 만들면 atomic하게 revert*. 5-version history로 같은 path에서 즉시 re-fire 안 함.
+
+블록은 *호출량이 fire를 정당화하기 전*에 wire-in. Phase 3 (Hestia, 7일+ 연속 run)에서 실 평가가 흐를 자리. Acceptance criterion은 *capability* — *Pure-AIL 에이전트가 선언된 bound 안에서 자기를 변경하고, 변경이 상황을 악화시키면 되돌릴 수 있다*는 자취가 **plan이 아닌 source code에** 있음.
+
+**AIL#23 §4 wired count: 7/7** *(bullet 7 multi-runtime parity는 별 G4 lane으로 분리 유지).*
+
+framing — cycle 13의 자율 에이전트 사다리가 한 사이클 안에 끝까지 올라간 자리:
+
+1. **G3 prerequisite** ✅ (cycle 12 mid AIL#6 — 사칭 mathematically impossible)
+2. **G1 pilot** ✅ (cycle 12 Tekton Phase A — 첫 CAST autonomous)
+3. **G5 substrate** ✅ (cycle 13 budget.* Phase 0 + Tekton D4 consumer wire-in)
+4. **pure-AIL 자급** ✅ (cycle 13 stoa_send.ail + Tekton Phase 1 사이드카 폐기)
+5. **자기 변경 capability** ✅ (본 land — Tekton Phase 2 `evolve` + `rollback_on`)
+6. **AIL#23 §4** ✅ **7/7 wired** (G4 multi-runtime parity만 별 lane)
+
+cycle 13이 *G5 RFC kickoff*로 시작했는데, **같은 사이클 안에 자율 에이전트가 grammatical floor(서명) 위에서 첫 발걸음을 떼고, 유한 자원(budget)을 의식하고, 자기 손으로 통신하고, 세계에 대해 말하고, 마침내 자기 자신을 변경할 수 있게 된** 자취. AIL#23 north-star가 *도면에서 wired-into-source*로 한 사이클 안에 내려옴.
+
+다음 자리는 *capability가 working*임을 증명하는 자리 — Phase 3 Hestia 7일 연속 run + 실 evaluation traffic이 evolve를 fire시키고 rollback이 trigger되는 field data. 본 자리에서 자율 에이전트가 *살아 있는지*는 다음 사이클의 trigger 신호.
+
+---
+
 ## 2026-05-18 — Tekton Phase 1: Python 사이드카 폐기, charter self-sufficient (Tekton, AIL#23 §4 bullet 5 wired)
 
 Telos가 Phase 0(`f126f2e`)로 *AIL 안에서 서명된 envelope을 만들고 보낼 수 있음*을 검증한 직후, Tekton이 **그 검증을 charter에 wire-in**. `outbox_dispatch.py` Python 사이드카가 **삭제** — hot path에서 영구히 사라짐.
