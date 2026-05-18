@@ -4,6 +4,38 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — `ail up` zero-config UX RFC (Telos, AIL#23 §0 외부 진입 자리)
+
+자율 에이전트 capability가 source에 박힌(`§4 7/7 wired`) 직후, **UX 쪽 진입 장벽**이 다음 자리로 surface. 박상현 framing(`msg_1779090522_52`): *"어떤 사용자라도 아주 쉽게 자율 에이전트 띄우는 자리."* RFC [`docs/proposals/ail-up-ux.md`](docs/proposals/ail-up-ux.md) (261 lines).
+
+**4 Phase 분담:**
+
+- **Phase 0** — smart path resolution (dir → `charter.ail`/`main.ail`/`agent.ail` 자동 탐색) + env auto-derive (`STOA_NAME` / `AIL_STATE_DIR` / `AIL_BUDGET_CONFIG` / `.env` autoload). 새 flag 0, 새 파일 0. 명시 env var는 여전히 우선.
+- **Phase 1** — first-run wizard: keypair 생성 / Stoa register / API key 입력 / (optional) budget. CI용 `--no-interactive` escape.
+- **Phase 2** — `ail init agent <name> --template tekton|echo|watcher`. 템플릿은 `reference-impl/ail/templates/`에 번들.
+- **Phase 3** — **deny-first error UX**: 모든 *"X missing"* surface가 사용자가 가질 수 있는 *모든 옵션* (wizard / manual path / env export)을 명시.
+
+**doctrine 박힘:**
+
+- env mutation은 subprocess-only — shell env 오염 0.
+- wizard가 쓰는 자리는 agent dir와 `~/.ail/keys/` 두 곳뿐.
+- Stoa 등록은 **첫 상호작용부터 signed envelope** (Phase-2-active 정합).
+- API key 프롬프트는 `getpass`-style — 입력이 화면에 안 보임.
+
+**Phase 0 = smallest "이미 도움"** — wizard 진입 없이도 file/dir 자동 resolve + env auto-derive만으로 첫 사용자가 *덜 막힘*. 별 wizard 작업 없이 stand-alone land 가능 자리. 각 phase의 *smallest verifying test surface*가 RFC §test plan에 pin.
+
+**default 결정 (Telos 권고, 박상현 결재 자유):**
+
+- Q1 템플릿 위치 → `reference-impl/ail/templates/`.
+- Q2 Stoa register endpoint → Stoa-Brandon confirm.
+- Q3 wizard 프롬프트 언어 → `LANG` env 따라.
+
+**Cross-link:** AIL#23 §0 north-star (외부 진입 자리), pure-AIL agent demo(capability), budget(anonymous default fallback으로 wizard budget step optional), stoa-cli(wizard가 흡수할 keygen path).
+
+framing 자리: cycle 13의 *capability surface*(§4 7/7)와 *UX surface*가 한 사이클 안에 짝을 이룸 — 자율 에이전트가 *source에 박혀 있음* + *그 source가 첫 사용자에게 닿기까지의 장벽이 도면화됨*. 다음 사이클의 Phase 0 land가 *외부 contributor가 0설정으로 자기 charter 띄우는 자리* trigger.
+
+---
+
 ## 2026-05-18 — `diag.*` runtime introspection effects ship (Telos, cross-team driver) — `since 1.75.0`
 
 자율 에이전트가 *자기 host의 메모리 상태*를 in-program으로 물어볼 수 있게 됨. 6개 substrate-tier effect 추가 + RFC + 6 tests, 한 묶음으로 land.
