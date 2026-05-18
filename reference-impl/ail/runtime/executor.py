@@ -4496,6 +4496,60 @@ class Executor(EffectsMixin):
                                   origin=call_origin)
         return ConfidentValue(None, 1.0, origin=call_origin)
 
+    def _map_filter_reduce_call(self, fn_name, items, conf, mode, acc=None):
+        """Call fn_name on each item for map/filter/reduce.
+
+        Resolves fn_name against user-declared fns first, then builtins.
+        Returns ConfidentValue on success, None if fn_name is unresolvable
+        (caller falls through so the caller can surface the right error).
+        """
+        if not isinstance(fn_name, str):
+            return None
+        # Resolve the callable
+        if fn_name in self.fns:
+            def call_fn(closure_args):
+                return self._invoke_fn(self.fns[fn_name], closure_args, {})
+        else:
+            # Try builtin — check with a probe call.
+            # Reduce always needs 2 args for the probe.
+            if mode == "reduce":
+                first = items[0] if items else acc
+                probe_args = [ConfidentValue(acc, conf), ConfidentValue(first, conf)]
+            else:
+                probe_args = [ConfidentValue(items[0] if items else 0, conf)]
+            probe_r = self._try_builtin_fn(fn_name, probe_args)
+            if probe_r is None:
+                return None  # fn_name not resolvable — caller falls through
+            # Builtin found — wrap so map/filter/reduce can use it
+            def call_fn(closure_args):
+                return self._try_builtin_fn(fn_name, closure_args)
+
+        # Execute the appropriate higher-order function
+        if mode == "map":
+            results = []
+            for item in items:
+                r = call_fn([ConfidentValue(item, conf)])
+                if r is None:
+                    return None
+                results.append(r.value)
+            return ConfidentValue(results, conf)
+        elif mode == "filter":
+            results = []
+            for item in items:
+                r = call_fn([ConfidentValue(item, conf)])
+                if r is None:
+                    return None
+                if _truthy(r):
+                    results.append(item)
+            return ConfidentValue(results, conf)
+        else:  # reduce
+            for item in items:
+                r = call_fn([ConfidentValue(acc, conf), ConfidentValue(item, conf)])
+                if r is None:
+                    return None
+                acc = r.value
+            return ConfidentValue(acc, conf)
+
     def _try_builtin_fn(self, name: str,
                         args: list[ConfidentValue]) -> ConfidentValue | None:
         """Built-in functions from spec/07 §5. Returns None if not a builtin."""
@@ -4592,34 +4646,35 @@ class Executor(EffectsMixin):
             if len(raw) >= 2:
                 return ConfidentValue(list(range(int(raw[0]), int(raw[1]))), conf)
         if name == "map" and len(raw) >= 2 and isinstance(raw[0], list):
-            # map(list, fn_name) — fn_name must be a ConfidentValue wrapping a string
             fn_name = args[1].value
-            if isinstance(fn_name, str) and fn_name in self.fns:
-                results = []
-                for item in raw[0]:
-                    r = self._invoke_fn(self.fns[fn_name], [ConfidentValue(item, conf)], {})
-                    results.append(r.value)
-                return ConfidentValue(results, conf)
+            results = self._map_filter_reduce_call(fn_name, raw[0], conf, "map")
+            if results is not None:
+                return results
+            # fn_name unresolvable — error with the right name so the
+            # author knows which name is missing, not "map"
+            return ConfidentValue(
+                {"_result": True, "ok": False,
+                 "error": f"map: fn {fn_name!r} not found (not a user fn or builtin)"},
+                conf)
         if name == "filter" and len(raw) >= 2 and isinstance(raw[0], list):
             fn_name = args[1].value
-            if isinstance(fn_name, str) and fn_name in self.fns:
-                results = []
-                for item in raw[0]:
-                    r = self._invoke_fn(self.fns[fn_name], [ConfidentValue(item, conf)], {})
-                    if _truthy(r):
-                        results.append(item)
-                return ConfidentValue(results, conf)
+            results = self._map_filter_reduce_call(fn_name, raw[0], conf, "filter")
+            if results is not None:
+                return results
+            return ConfidentValue(
+                {"_result": True, "ok": False,
+                 "error": f"filter: fn {fn_name!r} not found (not a user fn or builtin)"},
+                conf)
         if name == "reduce" and len(raw) >= 3 and isinstance(raw[0], list):
             fn_name = args[1].value
-            if isinstance(fn_name, str) and fn_name in self.fns:
-                acc = raw[2]
-                for item in raw[0]:
-                    r = self._invoke_fn(
-                        self.fns[fn_name],
-                        [ConfidentValue(acc, conf), ConfidentValue(item, conf)], {},
-                    )
-                    acc = r.value
-                return ConfidentValue(acc, conf)
+            acc = raw[2]
+            results = self._map_filter_reduce_call(fn_name, raw[0], conf, "reduce", acc)
+            if results is not None:
+                return results
+            return ConfidentValue(
+                {"_result": True, "ok": False,
+                 "error": f"reduce: fn {fn_name!r} not found (not a user fn or builtin)"},
+                conf)
 
         # --- Conversion ---
         if name == "to_number":
