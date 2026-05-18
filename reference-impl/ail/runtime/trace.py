@@ -9,9 +9,18 @@ lock so that parallel execution (Phase 4) doesn't corrupt the entry list
 or produce interleaved `_depth` counters that end up negative. Trace
 order across parallel branches is not guaranteed to reflect wall-clock
 start order — it reflects the order in which record() was called.
+
+Bounded by default (cycle 13 v1.75.1 hotfix — Stoa OOM RCA traced
+trace.py:45 as the leak). `entries` is a `collections.deque` with a
+default cap of 10,000; old entries are evicted as new ones arrive. Set
+`AIL_TRACE_MAX_ENTRIES` (positive int) to change the cap, or
+`AIL_TRACE_UNBOUNDED=1` to disable it entirely (the old behavior — keep
+for short-lived test runs that introspect the full trace).
 """
 from __future__ import annotations
+import collections
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -28,9 +37,23 @@ class TraceEntry:
 
 class Trace:
     def __init__(self):
-        self.entries: list[TraceEntry] = []
-        self._depth = 0
         self._lock = threading.Lock()
+        self._depth = 0
+        unbounded = os.environ.get("AIL_TRACE_UNBOUNDED") == "1"
+        if unbounded:
+            # Old behavior. An evolve server in this mode grows trace
+            # memory linearly forever — only use it for short test runs
+            # that need every entry available for inspection.
+            self.entries: collections.deque[TraceEntry] = collections.deque()
+        else:
+            try:
+                max_entries = int(os.environ.get(
+                    "AIL_TRACE_MAX_ENTRIES", "10000"))
+            except ValueError:
+                max_entries = 10000
+            if max_entries < 1:
+                max_entries = 10000
+            self.entries = collections.deque(maxlen=max_entries)
 
     def enter(self) -> None:
         with self._lock:
