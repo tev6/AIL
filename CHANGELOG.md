@@ -4,6 +4,34 @@ All notable changes to the AIL project are documented in this file.
 
 ---
 
+## 2026-05-18 — Tekton Phase 1: Python 사이드카 폐기, charter self-sufficient (Tekton, AIL#23 §4 bullet 5 wired)
+
+Telos가 Phase 0(`f126f2e`)로 *AIL 안에서 서명된 envelope을 만들고 보낼 수 있음*을 검증한 직후, Tekton이 **그 검증을 charter에 wire-in**. `outbox_dispatch.py` Python 사이드카가 **삭제** — hot path에서 영구히 사라짐.
+
+**3가지 변경:**
+
+1. **`import send from "./stoa_send"`** — alert 분기가 이제 charter 자신 안에서 서명된 letter를 hyun06000·telos 둘에게 single-recipient `send()` 두 번으로 fan-out. 각 수신자 outcome이 `tekton.send_trace.<ts>.<recipient>` 키에 별도 ledger 기록 — *부분 실패도 trace 파싱 없이 보임*.
+
+2. **`intent explain_drop(prev, now) -> Text`** — *에이전트의 첫 LLM 호출*. 점수 drop의 가장 가능성 있는 원인을 한 문장으로, alert body에 새 `compose()` 헬퍼로 엮음. **Tekton이 structured ping에서 *관찰한 세계에 대해 말하는* 존재로 바뀐 자리.**
+
+3. **`outbox_dispatch.py` 삭제.** state schema에서 `tekton.outbox.*` / `tekton.outbox_done.*` 키 사라짐. file 기반 outbox 프로토콜 자체가 hot path에서 retire. `community-tools/stoa-cli/`는 *byte-identical reference implementation*으로 남아 `stoa_send.ail`의 canonical regression test가 그 출력에 pin.
+
+**README 재작성:** *"Pure AIL agent (Phase 1)"* 섹션이 *"Two-process design"* 섹션을 대체. state schema가 새 `send_trace` 키 반영. run recipe에서 dispatcher 터미널 제거, `STOA_NAME` pinning + charter가 `~/.ail/keys/tekton.key`를 직접 읽는 자리 명시.
+
+**Smoke**: `r3_cond4` (ail=70.0, baseline 정확) — `decision=log_ok`, `drop_pp=0`, `tick_compute_remaining=23`, `send_trace` 0건, outbox 파일 0. alert 분기 자체는 기존 byte-identical canonical regression이 cover.
+
+**AIL#23 §4 bullet 5** *("coordinates with ≥ 1 other autonomous agent via Stoa")* — *production code path에 wired-in* ✓. prerequisite(서명된 envelope을 AIL 안에서 end-to-end로 만들고 보냄)이 Phase 0에서 검증, Phase 1에서 *실 charter가 그것을 사용*.
+
+**framing — Tekton의 진화:**
+
+- *세션-bound*(매 Claude 세션이 charter를 처음부터) → *시간-bound*(charter가 자기 schedule.every로 계속 살아)
+- *두 process로 갈라진*(charter.ail + Python 사이드카) → *self-contained*(charter 자신이 자기 letter 서명+발사)
+- *structured ping*(템플릿) → *세계에 대해 말함*(intent로 한 문장 설명)
+
+세 번째 자리가 가장 큰 자취: 자율 에이전트가 *그저 신호를 보내는 것*에서 *세계를 관찰하고 그것에 대해 한 문장 말하는 것*으로 진화. AIL의 `pure fn` / `intent` 갈래가 이 자리에서 *자율 에이전트의 thinking-out-loud 단위*로 자연 작동.
+
+---
+
 ## 2026-05-18 — Pure-AIL `stoa_send` ship (Telos, AIL#23 §4 첫 showing) + RFC
 
 지금까지 Tekton 자율 pilot은 *두 process로 갈라져* 있었습니다: `charter.ail`(pure AIL 결정 층)과 `outbox_dispatch.py`(Python transport 사이드카). 사이드카가 필요했던 이유는 AIL이 자기 손으로 *Stoa에 서명된 letter를 POST*하지 못했기 때문 — `process.spawn`이 없고 canonical envelope 직렬화가 Stoa repo의 자리(Rule 16 D2)라서.
