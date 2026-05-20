@@ -3109,109 +3109,110 @@ class Executor(EffectsMixin):
                 "args": dict(flask_request.args),
                 "headers": dict(flask_request.headers),
             }
-            with executor_ref._server_lock:
-                executor_ref._server_response_store.value = (500, "text/plain", "no response")
-                scope = {arm.req_var: ConfidentValue(req_dict, 1.0)}
-                # --- Lifecycle: before_tick(state) → on_tick(state) ---
-                tick_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
-                executor_ref._invoke_lifecycle_hook("before_tick", [tick_state_cv])
-                executor_ref._invoke_lifecycle_hook("on_tick", [tick_state_cv])
+            executor_ref._server_response_store.value = (500, "text/plain", "no response")
+            scope = {arm.req_var: ConfidentValue(req_dict, 1.0)}
+            # --- Lifecycle: before_tick(state) → on_tick(state) ---
+            tick_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
+            executor_ref._invoke_lifecycle_hook("before_tick", [tick_state_cv])
+            executor_ref._invoke_lifecycle_hook("on_tick", [tick_state_cv])
 
-                # --- Stoa push: POST /inbox with a letter envelope auto-
-                # dispatches on_letter and short-circuits the user's `when`
-                # block. Detection: POST /inbox + JSON body with `from`
-                # AND `id`. If on_letter isn't defined, fall through to
-                # the user's handler so existing /inbox patterns still work.
-                handled_as_letter = False
-                if (req_dict["method"] == "POST"
-                        and req_dict["path"] == "/inbox"
-                        and "on_letter" in executor_ref.fns):
-                    try:
-                        import json as _json
-                        body_obj = _json.loads(req_dict["body"] or "")
-                        if (isinstance(body_obj, dict)
-                                and "from" in body_obj
-                                and "id" in body_obj):
-                            executor_ref._invoke_lifecycle_hook(
-                                "on_letter",
-                                [ConfidentValue(body_obj, 1.0)])
-                            executor_ref._server_response_store.value = (
-                                200, "application/json",
-                                _json.dumps({"received": True,
-                                             "id": body_obj["id"]}))
-                            handled_as_letter = True
-                    except Exception as e:
-                        # Not parseable as a letter — fall through to
-                        # the user's `when` handler. Log so a
-                        # corrupted POST /inbox payload still leaves
-                        # a trail in case the letter was real but
-                        # malformed.
-                        import logging
-                        logging.getLogger(__name__).warning(
-                            "on_letter dispatch: payload not parseable "
-                            "as letter, falling through: %r", e)
-                        handled_as_letter = False
-
-                if handled_as_letter:
-                    # Runtime built the 200 response above. Skip the user's
-                    # `when` block entirely so /inbox traffic is invisible
-                    # to the rest of the program. Per-request counters
-                    # still tick (the letter delivery IS a tick).
-                    status, ct, body = executor_ref._server_response_store.value
-                    executor_ref._server_request_count += 1
-                    # Letter delivery is by construction a 200 here, so it
-                    # counts as a successful request — reset the
-                    # consecutive-failure counter (Telos 2026-04-29).
-                    executor_ref._server_consecutive_failures = 0
+            # --- Stoa push: POST /inbox with a letter envelope auto-
+            # dispatches on_letter and short-circuits the user's `when`
+            # block. Detection: POST /inbox + JSON body with `from`
+            # AND `id`. If on_letter isn't defined, fall through to
+            # the user's handler so existing /inbox patterns still work.
+            handled_as_letter = False
+            if (req_dict["method"] == "POST"
+                    and req_dict["path"] == "/inbox"
+                    and "on_letter" in executor_ref.fns):
                 try:
-                    if handled_as_letter:
-                        pass
-                    else:
-                        executor_ref._exec_block(arm.body, scope)
-                        status, ct, body = executor_ref._server_response_store.value
+                    import json as _json
+                    body_obj = _json.loads(req_dict["body"] or "")
+                    if (isinstance(body_obj, dict)
+                            and "from" in body_obj
+                            and "id" in body_obj):
+                        executor_ref._invoke_lifecycle_hook(
+                            "on_letter",
+                            [ConfidentValue(body_obj, 1.0)])
+                        executor_ref._server_response_store.value = (
+                            200, "application/json",
+                            _json.dumps({"received": True,
+                                         "id": body_obj["id"]}))
+                        handled_as_letter = True
+                except Exception as e:
+                    # Not parseable as a letter — fall through to
+                    # the user's `when` handler. Log so a
+                    # corrupted POST /inbox payload still leaves
+                    # a trail in case the letter was real but
+                    # malformed.
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "on_letter dispatch: payload not parseable "
+                        "as letter, falling through: %r", e)
+                    handled_as_letter = False
+
+            if handled_as_letter:
+                # Runtime built the 200 response above. Skip the user's
+                # `when` block entirely so /inbox traffic is invisible
+                # to the rest of the program. Per-request counters
+                # still tick (the letter delivery IS a tick).
+                status, ct, body = executor_ref._server_response_store.value
+                with executor_ref._server_lock:
+                    executor_ref._server_request_count += 1
+                    executor_ref._server_consecutive_failures = 0
+            try:
+                if handled_as_letter:
+                    pass
+                else:
+                    executor_ref._exec_block(arm.body, scope)
+                    status, ct, body = executor_ref._server_response_store.value
+                    with executor_ref._server_lock:
                         executor_ref._server_request_count += 1
                         if status >= 500:
                             executor_ref._server_error_count += 1
                             executor_ref._server_consecutive_failures += 1
                         else:
                             executor_ref._server_consecutive_failures = 0
-                except ReturnSignal as rs:
-                    v = rs.value.value
-                    if isinstance(v, list) and len(v) == 3:
-                        # `return [status, content_type, body]` — explicit triple
-                        status, ct, body = int(v[0]), str(v[1]), str(v[2])
-                    elif v is None:
-                        # Bare `return` — user finished the handler with a side
-                        # effect (perform http.respond) and used `return` only
-                        # to exit early. Honor whatever the response_store has.
-                        # qna_bot field test 2026-04-26: every route was sending
-                        # the literal string "None" because this branch fell
-                        # through to str(None).
-                        status, ct, body = executor_ref._server_response_store.value
-                    else:
-                        # `return some_value` — treat as plain text body.
-                        status, ct, body = 200, "text/plain", str(v)
+            except ReturnSignal as rs:
+                v = rs.value.value
+                if isinstance(v, list) and len(v) == 3:
+                    # `return [status, content_type, body]` — explicit triple
+                    status, ct, body = int(v[0]), str(v[1]), str(v[2])
+                elif v is None:
+                    # Bare `return` — user finished the handler with a side
+                    # effect (perform http.respond) and used `return` only
+                    # to exit early. Honor whatever the response_store has.
+                    # qna_bot field test 2026-04-26: every route was sending
+                    # the literal string "None" because this branch fell
+                    # through to str(None).
+                    status, ct, body = executor_ref._server_response_store.value
+                else:
+                    # `return some_value` — treat as plain text body.
+                    status, ct, body = 200, "text/plain", str(v)
+                with executor_ref._server_lock:
                     executor_ref._server_request_count += 1
                     if int(status) >= 500:
                         executor_ref._server_error_count += 1
                         executor_ref._server_consecutive_failures += 1
                     else:
                         executor_ref._server_consecutive_failures = 0
-                except Exception as e:
-                    # Log the full traceback — without it, "name 'origin' is
-                    # not defined" came back as a json error string with no
-                    # way to find the broken line. qna_bot field test
-                    # 2026-04-26 found the buggy `_invoke_intent` adapter
-                    # fallback only after we wired this in.
-                    import traceback as _tb, logging as _lg
-                    _lg.warning("[server] request handler raised:\n%s",
-                                _tb.format_exc())
-                    status, ct, body = 500, "application/json", f'{{"error": "{e}"}}'
+            except Exception as e:
+                # Log the full traceback — without it, "name 'origin' is
+                # not defined" came back as a json error string with no
+                # way to find the broken line. qna_bot field test
+                # 2026-04-26 found the buggy `_invoke_intent` adapter
+                # fallback only after we wired this in.
+                import traceback as _tb, logging as _lg
+                _lg.warning("[server] request handler raised:\n%s",
+                            _tb.format_exc())
+                status, ct, body = 500, "application/json", f'{{"error": "{e}"}}'
+                with executor_ref._server_lock:
                     executor_ref._server_request_count += 1
                     executor_ref._server_error_count += 1
                     executor_ref._server_consecutive_failures += 1
 
-                # Append to history ring buffer
+            # Append to history ring buffer
+            with executor_ref._server_lock:
                 event = {
                     "ts": _time.time(),
                     "method": req_dict["method"],
@@ -3224,124 +3225,125 @@ class Executor(EffectsMixin):
                 if len(executor_ref._server_history) > history_limit:
                     executor_ref._server_history = executor_ref._server_history[-history_limit:]
 
-                # --- Lifecycle: after_tick(state) ---
-                # State reflects post-request counters & history.
-                post_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
-                executor_ref._invoke_lifecycle_hook("after_tick", [post_state_cv])
+            # --- Lifecycle: after_tick(state) ---
+            # State reflects post-request counters & history.
+            post_state_cv = ConfidentValue(executor_ref._build_tick_state(), 1.0)
+            executor_ref._invoke_lifecycle_hook("after_tick", [post_state_cv])
 
-                # Check rollback_on after each request
+            # Check rollback_on after each request
+            with executor_ref._server_lock:
                 n = executor_ref._server_request_count
                 err = executor_ref._server_error_count
                 error_rate = (err / n) if n > 0 else 0.0
                 consec = executor_ref._server_consecutive_failures
-                rb_scope = {
-                    "error_rate": ConfidentValue(error_rate, 1.0),
-                    "request_count": ConfidentValue(n, 1.0),
-                    # Telos 2026-04-29: 1st-class consecutive_failures
-                    # so `rollback_on: consecutive_failures > 5` catches
-                    # fast rot (a service that suddenly can't handle
-                    # any request). error_rate alone takes many
-                    # requests to cross threshold from a long healthy
-                    # history; this catches sudden hard failures fast.
-                    "consecutive_failures": ConfidentValue(consec, 1.0),
-                }
-                try:
-                    rb = executor_ref._eval_expr(evolve_decl.rollback_on, rb_scope)
-                    if _truthy(rb):
-                        import logging
-                        reason = (
-                            f"rollback_on fired: error_rate={error_rate:.2f} "
-                            f"({err}/{n}), consecutive_failures={consec}"
-                        )
-                        logging.warning(f"[physis] {reason}. Gen {generation} dying.")
+            rb_scope = {
+                "error_rate": ConfidentValue(error_rate, 1.0),
+                "request_count": ConfidentValue(n, 1.0),
+                # Telos 2026-04-29: 1st-class consecutive_failures
+                # so `rollback_on: consecutive_failures > 5` catches
+                # fast rot (a service that suddenly can't handle
+                # any request). error_rate alone takes many
+                # requests to cross threshold from a long healthy
+                # history; this catches sudden hard failures fast.
+                "consecutive_failures": ConfidentValue(consec, 1.0),
+            }
+            try:
+                rb = executor_ref._eval_expr(evolve_decl.rollback_on, rb_scope)
+                if _truthy(rb):
+                    import logging
+                    reason = (
+                        f"rollback_on fired: error_rate={error_rate:.2f} "
+                        f"({err}/{n}), consecutive_failures={consec}"
+                    )
+                    logging.warning(f"[physis] {reason}. Gen {generation} dying.")
 
-                        # --- Lifecycle: on_dying(reason, history) before on_death ---
-                        # on_dying is the effects-allowed cleanup hook (mneme.save,
-                        # log flush, …). on_death is `pure fn` (testament composition
-                        # only) so it can't perform effects. Anything that needs a
-                        # side effect at end-of-life goes here.
-                        died_at = _time.time()
-                        lifetime_s = died_at - born_at
-                        executor_ref._invoke_lifecycle_hook(
-                            "on_dying",
-                            [ConfidentValue(reason, 1.0),
-                             ConfidentValue(executor_ref._server_history, 1.0)])
+                    # --- Lifecycle: on_dying(reason, history) before on_death ---
+                    # on_dying is the effects-allowed cleanup hook (mneme.save,
+                    # log flush, …). on_death is `pure fn` (testament composition
+                    # only) so it can't perform effects. Anything that needs a
+                    # side effect at end-of-life goes here.
+                    died_at = _time.time()
+                    lifetime_s = died_at - born_at
+                    executor_ref._invoke_lifecycle_hook(
+                        "on_dying",
+                        [ConfidentValue(reason, 1.0),
+                         ConfidentValue(executor_ref._server_history, 1.0)])
 
-                        # --- Physis §1: call on_death if defined ---
-                        testament = None
-                        if "on_death" in executor_ref.fns:
-                            try:
-                                history_cv = ConfidentValue(
-                                    executor_ref._server_history, 1.0)
-                                result_cv = executor_ref._invoke_fn(
-                                    executor_ref.fns["on_death"],
-                                    [ConfidentValue(reason, 1.0), history_cv],
-                                    {},
-                                )
-                                raw = result_cv.value
-                                if isinstance(raw, dict):
-                                    testament = raw
-                                elif isinstance(raw, list):
-                                    # AIL record [[k,v],...] → dict
-                                    testament = dict(raw)
-                            except Exception as e:
-                                logging.warning(f"[physis] on_death failed: {e}")
+                    # --- Physis §1: call on_death if defined ---
+                    testament = None
+                    if "on_death" in executor_ref.fns:
+                        try:
+                            history_cv = ConfidentValue(
+                                executor_ref._server_history, 1.0)
+                            result_cv = executor_ref._invoke_fn(
+                                executor_ref.fns["on_death"],
+                                [ConfidentValue(reason, 1.0), history_cv],
+                                {},
+                            )
+                            raw = result_cv.value
+                            if isinstance(raw, dict):
+                                testament = raw
+                            elif isinstance(raw, list):
+                                # AIL record [[k,v],...] → dict
+                                testament = dict(raw)
+                        except Exception as e:
+                            logging.warning(f"[physis] on_death failed: {e}")
 
-                        if testament is None:
-                            testament = {}
+                    if testament is None:
+                        testament = {}
 
-                        # Inject required fields the on_death fn may have omitted
-                        testament.setdefault("generation", generation)
-                        testament.setdefault("predecessor_id", str(_os.getpid()))
-                        testament.setdefault("reason", reason)
-                        testament.setdefault("born_at", born_at)
-                        testament["died_at"] = died_at
-                        testament["lifetime_s"] = lifetime_s
+                    # Inject required fields the on_death fn may have omitted
+                    testament.setdefault("generation", generation)
+                    testament.setdefault("predecessor_id", str(_os.getpid()))
+                    testament.setdefault("reason", reason)
+                    testament.setdefault("born_at", born_at)
+                    testament["died_at"] = died_at
+                    testament["lifetime_s"] = lifetime_s
 
-                        # Enforce testament size limits
-                        if "observed_patterns" in testament:
-                            op = testament["observed_patterns"]
-                            if isinstance(op, list):
-                                testament["observed_patterns"] = [
-                                    str(p)[:200] for p in op[:20]
-                                ]
-                        if "advice" in testament and isinstance(testament["advice"], str):
-                            testament["advice"] = testament["advice"][:2000]
+                    # Enforce testament size limits
+                    if "observed_patterns" in testament:
+                        op = testament["observed_patterns"]
+                        if isinstance(op, list):
+                            testament["observed_patterns"] = [
+                                str(p)[:200] for p in op[:20]
+                            ]
+                    if "advice" in testament and isinstance(testament["advice"], str):
+                        testament["advice"] = testament["advice"][:2000]
 
-                        # --- Physis §2: persist testament ---
-                        executor_ref._physis_write_testament(
-                            evolve_decl.intent_name, testament)
+                    # --- Physis §2: persist testament ---
+                    executor_ref._physis_write_testament(
+                        evolve_decl.intent_name, testament)
+                    logging.warning(
+                        f"[physis] testament written: gen {generation}, "
+                        f"lifetime {lifetime_s:.1f}s"
+                    )
+
+                    # --- Physis §3: spawn successor if safe ---
+                    PHYSIS_MIN_LIFETIME_S = 30
+                    MAX_GENERATION = 1000
+                    if generation >= MAX_GENERATION:
                         logging.warning(
-                            f"[physis] testament written: gen {generation}, "
-                            f"lifetime {lifetime_s:.1f}s"
+                            f"[physis] max_generation ({MAX_GENERATION}) reached. "
+                            "Lineage exhausted — operator review required."
                         )
-
-                        # --- Physis §3: spawn successor if safe ---
-                        PHYSIS_MIN_LIFETIME_S = 30
-                        MAX_GENERATION = 1000
-                        if generation >= MAX_GENERATION:
-                            logging.warning(
-                                f"[physis] max_generation ({MAX_GENERATION}) reached. "
-                                "Lineage exhausted — operator review required."
-                            )
-                            import os, signal
-                            os.kill(os.getpid(), signal.SIGTERM)
-                        elif lifetime_s < PHYSIS_MIN_LIFETIME_S:
-                            logging.warning(
-                                f"[physis] rapid death ({lifetime_s:.1f}s < "
-                                f"{PHYSIS_MIN_LIFETIME_S}s). Auto-spawn suspended — "
-                                "operator intervention required."
-                            )
-                            import os, signal
-                            os.kill(os.getpid(), signal.SIGTERM)
-                        else:
-                            # Re-exec this process — next generation reads inherit_testament()
-                            logging.warning(
-                                f"[physis] spawning gen {generation + 1}.")
-                            import sys
-                            _os.execv(sys.executable, [sys.executable] + sys.argv)
-                except Exception:
-                    pass
+                        import os, signal
+                        os.kill(os.getpid(), signal.SIGTERM)
+                    elif lifetime_s < PHYSIS_MIN_LIFETIME_S:
+                        logging.warning(
+                            f"[physis] rapid death ({lifetime_s:.1f}s < "
+                            f"{PHYSIS_MIN_LIFETIME_S}s). Auto-spawn suspended — "
+                            "operator intervention required."
+                        )
+                        import os, signal
+                        os.kill(os.getpid(), signal.SIGTERM)
+                    else:
+                        # Re-exec this process — next generation reads inherit_testament()
+                        logging.warning(
+                            f"[physis] spawning gen {generation + 1}.")
+                        import sys
+                        _os.execv(sys.executable, [sys.executable] + sys.argv)
+            except Exception:
+                pass
 
             return Response(body, status=status, mimetype=ct)
 
