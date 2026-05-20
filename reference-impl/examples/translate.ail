@@ -29,7 +29,8 @@ intent translate_document(source: Text) -> Text {
 }
 
 entry main(document: Text) {
-    with context formal_korean:
+    with context formal_korean: {
         translated = translate_document(document)
+    }
     return translated
 }

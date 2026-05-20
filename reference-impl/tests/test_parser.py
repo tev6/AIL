@@ -59,8 +59,9 @@ def test_parse_entry_with_with_context():
     }
 
     entry main(x: Text) {
-        with context job:
+        with context job: {
             y = go(x)
+        }
         return y
     }
     """
@@ -69,6 +70,28 @@ def test_parse_entry_with_with_context():
     assert entry is not None
     assert entry.name == "main"
     assert len(entry.body) == 2  # with-block + return
+
+
+def test_parse_with_context_requires_braces():
+    """`with context NAME:` without braces is a parse error.
+
+    Before the fix, the parser silently accepted unbraced ``with context``
+    and only captured the first following statement as its body.  Every
+    other block construct (entry, if, for, evolve) already required
+    braces; `with context` was the only exception — a silent footgun that
+    caused multi-statement bodies to partially execute outside the
+    context (see AIL #25).
+    """
+    src = """    context job { register: "formal" }
+    intent go(x: Text) -> Text { goal: Text }
+    entry main(x: Text) {
+        with context job:
+            go(x)
+        return "ok"
+    }
+    """
+    with pytest.raises(Exception):  # ParseError or TokenError
+        compile_source(src)
 
 
 def test_parse_branch_with_otherwise():

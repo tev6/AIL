@@ -56,8 +56,9 @@ def test_context_inheritance_resolves_fields():
     }
     intent do(x: Text) -> Text { goal: Text }
     entry main(x: Text) {
-        with context fancy:
+        with context fancy: {
             y = do(x)
+        }
         return y
     }
     """

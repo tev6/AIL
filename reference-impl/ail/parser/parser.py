@@ -634,14 +634,11 @@ class Parser:
         self.expect_keyword("context")
         name = self.expect(Tok.IDENT).value
         self.expect(Tok.COLON)
-        # MVP: with body is a braced block OR a single statement
+        self.expect(Tok.LBRACE)
         body: list[Statement] = []
-        if self.match(Tok.LBRACE):
-            while not self.check(Tok.RBRACE):
-                body.append(self.parse_statement())
-            self.expect(Tok.RBRACE)
-        else:
+        while not self.check(Tok.RBRACE):
             body.append(self.parse_statement())
+        self.expect(Tok.RBRACE)
         return WithContextStmt(context_name=name, body=body)
 
     def parse_fn(self, *, purity: str = "default"):

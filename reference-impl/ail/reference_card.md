@@ -117,7 +117,7 @@ context NAME extends PARENT {
 }
 ```
 
-Activated with: `with context NAME: { BODY }` or `with context NAME: STATEMENT`
+Activated with: `with context NAME: { BODY }`
 Read inside intent/fn: `context.field_name`
 
 ## entry — PROGRAM ENTRY POINT
@@ -1082,8 +1082,9 @@ intent translate_document(source: Text) -> Text {
 }
 
 entry main(document: Text) {
-    with context formal_korean:
+    with context formal_korean: {
         translated = translate_document(document)
+    }
     return translated
 }
 ```

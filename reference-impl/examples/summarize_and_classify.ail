@@ -19,8 +19,9 @@ context editorial_review extends default {
 }
 
 entry main(article: Text) {
-    with context editorial_review:
+    with context editorial_review: {
         brief = summarize(article, 80)
         mood = classify(brief, "positive_negative_mixed_unclear")
+    }
     return mood
 }
